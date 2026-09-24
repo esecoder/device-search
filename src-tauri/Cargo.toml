@@ -1,0 +1,20 @@
+[package]
+name = "device-search"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# ⚠️ tray-icon is a FEATURE of tauri; global-shortcut is a SEPARATE PLUGIN CRATE.
+# Guessing both as features produced "tauri does not have these features".
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"     # ⚠️ size, not speed — this shell does no computation worth optimising
+lto = true
+strip = true
