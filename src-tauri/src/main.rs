@@ -69,13 +69,38 @@ fn ensure_daemon(app: &tauri::AppHandle) -> Option<Child> {
     if daemon_is_up() {
         return None;
     }
-    let repo = app
-        .path()
-        .resolve(".", tauri::path::BaseDirectory::Resource)
-        .ok()
-        .and_then(|p| p.to_str().map(String::from))
-        .unwrap_or_else(|| ".".to_string());
-    let py = python_for(&repo)?;
+    // ⚠️⚠️ TWO CANDIDATE ROOTS, BECAUSE THE CORRECT ONE DIFFERS BETWEEN DEV AND PACKAGED.
+    //
+    // My first version used ONLY `BaseDirectory::Resource`. That resolves to `target/debug/`
+    // under `cargo run`, NOT to the repo — so the daemon never started and the app looked
+    // broken while the code was correct. Measured: the shell launched, the tray appeared, and
+    // every search failed with "daemon unreachable".
+    //
+    // ⚠️ `CARGO_MANIFEST_DIR` is baked in AT COMPILE TIME and points at `src-tauri/`, so its
+    // parent is the repo. That is the right answer in development and a stale absolute path in
+    // a shipped binary — which is exactly why the resource dir is tried too, first being the
+    // one that matters for whatever mode we are actually running in.
+    let mut roots: Vec<String> = Vec::new();
+    if let Ok(p) = app.path().resolve(".", tauri::path::BaseDirectory::Resource) {
+        if let Some(s) = p.to_str() {
+            roots.push(s.to_string());
+        }
+    }
+    let dev_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or("")
+        .to_string();
+    if !dev_root.is_empty() {
+        roots.push(dev_root);
+    }
+
+    let py = roots.iter().find_map(|r| python_for(r))?;
+    let repo = roots
+        .iter()
+        .find(|r| std::path::Path::new(&format!("{r}/device_search")).is_dir())
+        .cloned()
+        .unwrap_or_else(|| roots.first().cloned().unwrap_or_else(|| ".".into()));
     let child = Command::new(py)
         .args(["-m", "device_search.server", "--port", "8734"])
         .current_dir(&repo)

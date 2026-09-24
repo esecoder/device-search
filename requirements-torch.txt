@@ -1,0 +1,17 @@
+# The PyTorch embedding path. OPTIONAL — the code defaults to ONNX and does not need this.
+#   pip install -r requirements-torch.txt
+#
+# ⚠️ USE THIS ONLY IF YOU WANT GPU ACCELERATION OR ALREADY HAVE TORCH.
+# It is ~2 GB, and on Linux it pulls another 2-3 GB of nvidia-* packages.
+#
+# ⚠️ MEASURED TRADE-ON, from the same corpus (117 docs, 5,726 chunks):
+#     load     15.80s torch  vs  0.16s onnx      100x faster to start
+#     queries   0.26s torch  vs  0.02s onnx       10x faster per query
+#     INDEXING 31.4 ch/s     vs   8.2 ch/s        3.8x FASTER with torch
+#   So torch is worth it for a large one-off INDEXING run, and not for interactive search.
+#
+# ⚠️ AND ON macOS 13.0, PyTorch >= 2.6 SILENTLY DISABLES MPS. The failure mode is "training is
+#    suddenly slow", not an error — which is the worst kind of failure to diagnose.
+-r requirements.txt
+
+sentence-transformers>=2.2
