@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>device-search</title>
+<!--
+  ⚠️ NO FRAMEWORK, NO BUILD STEP. This is a search box, a result list and a settings line.
+  React would add a toolchain, a lockfile and a dependency tree to render about 40 elements.
+  ⚠️ And a build step would mean the packaged app contains code nobody can read directly —
+  which defeats the point of a project meant to be legible.
+-->
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ⚠️ A DRAG REGION. The window is frameless, so without this it cannot be moved at all —
+       and macOS users expect to be able to reposition a floating search box. -->
+  <div id="drag"></div>
+
+  <div id="box">
+    <div id="searchrow">
+      <svg id="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.5" />
+        <line x1="15.2" y1="15.2" x2="21" y2="21" />
+      </svg>
+      <input id="q" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search this device…   (a fragment, a filename, or a question)" />
+      <kbd id="esc">esc</kbd>
+    </div>
+
+    <!-- ⚠️ STATUS IS ALWAYS VISIBLE, EVEN WHEN EMPTY. The whole failure mode this project
+         keeps recording is a tool that looks like it is working while measuring nothing.
+         If the daemon is down or the index is partial, that has to be on screen. -->
+    <div id="status"></div>
+
+    <div id="results"></div>
+
+    <div id="foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>⌘↵</kbd> reveal</span>
+      <span id="indexinfo"></span>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>

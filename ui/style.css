@@ -1,0 +1,109 @@
+/* style.css — the Spotlight-shaped look.
+   ⚠️ Transparent window + rounded panel is what makes it read as a floating search box rather
+   than a small application window. The `body` must stay transparent or the rounded corners
+   show as opaque squares on macOS. */
+
+:root {
+  --bg: rgba(28, 28, 30, 0.86);
+  --fg: #f2f2f7;
+  --dim: #8e8e93;
+  --sep: rgba(255, 255, 255, 0.10);
+  --sel: rgba(10, 132, 255, 0.30);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: transparent;    /* ⚠️ required for the rounded corners to render */
+  overflow: hidden;
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--fg);
+  -webkit-user-select: none;  /* ⚠️ a search box is not a document; selected text looks broken */
+}
+
+/* ⚠️ The frameless window's drag handle. It sits above everything and is invisible. */
+#drag { position: fixed; inset: 0 0 auto 0; height: 14px; -webkit-app-region: drag; z-index: 5; }
+
+#box {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  backdrop-filter: blur(30px) saturate(180%);
+  border-radius: 14px;
+  border: 1px solid var(--sep);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- search row */
+#searchrow {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--sep);
+  -webkit-app-region: drag;      /* the header is draggable, the input is not */
+}
+#icon { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
+#q {
+  flex: 1; border: 0; outline: 0; background: transparent;
+  color: var(--fg); font-size: 20px; font-weight: 400;
+  -webkit-app-region: no-drag;   /* ⚠️ otherwise the drag region swallows every click */
+  -webkit-user-select: text;
+}
+#q::placeholder { color: var(--dim); font-size: 18px; }
+kbd {
+  font: 11px/1 var(--mono); color: var(--dim);
+  background: rgba(255,255,255,0.07); border: 1px solid var(--sep);
+  border-radius: 4px; padding: 3px 5px;
+}
+
+/* ------------------------------------------------------------------- status */
+#status { padding: 0 18px; font-size: 12px; color: var(--dim); }
+#status:not(:empty) { padding: 10px 18px; border-bottom: 1px solid var(--sep); }
+#status .warn { color: #ffd60a; }
+#status .err  { color: #ff453a; }
+
+/* ------------------------------------------------------------------ results */
+#results { flex: 1; overflow-y: auto; padding: 6px 0; }
+#results::-webkit-scrollbar { width: 8px; }
+#results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+.group {
+  padding: 10px 18px 4px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim);
+}
+/* ⚠️ THE TWO TIERS MUST NOT LOOK ALIKE. A semantic hit is not evidence the thing exists —
+   measured, a garbage query scored 0.649 and a real one 0.632, so no threshold separates them.
+   If both lists rendered identically the UI would assert something the backend refuses to. */
+.group.meaning { color: #ff9f0a; }
+.group .note { display: block; text-transform: none; letter-spacing: 0; font-weight: 400;
+               font-size: 11px; color: var(--dim); margin-top: 3px; }
+
+.row {
+  display: grid; grid-template-columns: 24px 1fr auto; gap: 10px;
+  padding: 8px 18px; cursor: default; align-items: start;
+}
+.row.sel { background: var(--sel); }
+.row .type { font-size: 11px; color: var(--dim); padding-top: 2px; }
+.row .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .name .ln { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+.row .snip {
+  font-family: var(--mono); font-size: 12px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;
+}
+.row .via { font-size: 11px; color: var(--dim); text-align: right; white-space: nowrap; }
+/* ⚠️ OCR-derived hits are marked. "found in scan.pdf" and "found in scan.pdf via OCR" are
+   different claims about reliability and the user is entitled to know which one they got. */
+.tag-ocr { color: #ff9f0a; }
+
+.empty { padding: 28px 18px; color: var(--dim); text-align: center; font-size: 13px; }
+
+/* --------------------------------------------------------------------- foot */
+#foot {
+  display: flex; gap: 16px; align-items: center;
+  padding: 8px 18px; border-top: 1px solid var(--sep);
+  font-size: 11px; color: var(--dim);
+}
+#foot kbd { margin-right: 3px; }
+#indexinfo { margin-left: auto; }
