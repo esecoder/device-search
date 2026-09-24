@@ -112,7 +112,7 @@ ds setup --mode everything           # ⚠️ ENTIRE home directory, NO exclusio
 ds setup --roots ~/work ~/notes      # exactly these folders
 
 ds index                             # crawl + build; safe to re-run (incremental)
-ds index --no-semantic               # fast, fully offline, no model download
+ds index --no-semantic               # ⚠️ START HERE on a real corpus — see the timings below
 ds search 'some exact string'
 ds search 'a question about a concept'
 ds search 'retrievers.py' -k 5 --json
@@ -123,6 +123,40 @@ ds secrets-report                    # recognised secrets in the index, redacted
 
 ⚠️ **Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
 miss from a full one are different facts, and only the tool knows which one you just had.
+
+## ⚠️ How long indexing takes, and why
+
+**Two phases with wildly different costs.** The crawl and text extraction are fast; the
+embedding phase is not, and it dominates everything.
+
+| Corpus | Text phase | Embedding phase (ONNX) | Embedding phase (torch) |
+|---|---|---|---|
+| 117 documents | **0.1 s** | 12 min | 3 min |
+| **5,700 documents** (a real Documents+Desktop+Downloads) | ~2 min | ⚠️ **~6.5 hours** | **~1.7 hours** |
+| 100,000 documents | ~30 min | ⚠️ **~115 hours** | ~30 hours |
+
+⚠️ **The measured rate is 8.2 chunks/sec on ONNX and 31.4 on torch**, on CPU, from 5,726 real
+chunks. ⚠️ **Neither runtime makes CPU indexing at this scale pleasant — the difference is a
+factor of four, not an order of magnitude.**
+
+⚠️ **SO RUN THIS FIRST:**
+```bash
+./bin/ds index --no-semantic
+```
+It finishes in seconds and gives you **exact string matching, BM25 and filename search over
+everything** — which covers the query that motivated this project. Semantic search is the thing
+you add afterwards, overnight, or on a machine with a GPU.
+
+⚠️ **AND IF YOU RUN THE FULL INDEX, DON'T SIT AND WATCH IT.** It will look hung after a few
+minutes of no output, because the embedding phase reports every 5,000 documents. Run it under
+`nohup` and check the log:
+```bash
+nohup ./bin/ds index > /tmp/index.log 2>&1 &
+tail -f /tmp/index.log
+```
+⚠️ **It is incremental**, so interrupting it is survivable — but the VECTOR phase is not
+resumable yet: an interrupted embedding run leaves the previous `vectors.npy` in place, and
+nothing warns you that it is stale. Check with `./bin/ds stats`.
 
 ## Run the desktop app
 
