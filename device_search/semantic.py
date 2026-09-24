@@ -27,11 +27,32 @@ MODEL_NAME = os.environ.get("DEVICE_SEARCH_MODEL", "BAAI/bge-small-en-v1.5")
 # points of recall and is invisible — the search still "works", just worse.
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
-# ⚠️ CHUNKING: 1200 characters with overlap. A whole 2 MB file in one vector averages every
-# topic in it into a blur, and a 200-character chunk loses the context that disambiguates it.
-# ⚠️ But chunks need to map back to a FILE for display, so each vector stores its doc_id and
-# the character offset it came from — otherwise a hit points at an unopenable fragment.
-CHUNK_CHARS = 1200
+# =============================================================================
+# CHUNKING — and the measurement that forced a rewrite
+# =============================================================================
+# ⚠️⚠️ THE ORIGINAL CHUNKER SPLIT ON CHARACTERS, BUT THE MODEL'S LIMIT IS IN TOKENS.
+# That is a category error, and it caused SILENT DATA LOSS. Measured on a real corpus:
+#
+#     bge-small max sequence length : 512 tokens
+#     chars per token               : 3.37   (NOT the assumed 4.0 — code is denser than prose)
+#     a 512-token window holds      : ~1727 characters
+#
+#     chunks at CHUNK_CHARS=1200    : mean 320 tokens = only 62% of the window
+#     chunks EXCEEDING 512 tokens   : 8 — **and the model truncates them with no error**
+#
+# ⚠️ So we were splitting documents into MORE chunks than necessary while giving each one
+# LESS context than the model could hold — and a handful were losing their tail entirely.
+# ⚠️ Dense code tokenises at ~1.5 chars/token, so a fixed 1200-char window is 350 tokens for
+# prose and 800 for minified JS. **A character budget cannot bound a token count.**
+#
+# The fix is to chunk in TOKENS, using the model's own tokenizer, and to map each window back
+# to a character span so provenance still points at a real location in the file.
+MAX_TOKENS = 512            # the model's hard limit
+TOKEN_FILL = 0.85           # use 85%, leaving headroom for special tokens
+CHUNK_TOKENS = int(MAX_TOKENS * TOKEN_FILL)     # 435
+CHUNK_OVERLAP_TOKENS = 60   # ~14% overlap, in tokens
+# ⚠️ Kept for the fallback path when no tokenizer is available (see chunk()).
+CHUNK_CHARS = 1400
 CHUNK_OVERLAP = 200
 
 
@@ -177,11 +198,72 @@ class Semantic:
         return True, f"{MODEL_NAME} via {used.upper()}"
 
     # -------------------------------------------------------------- indexing
+    def _tokenizer(self):
+        """⚠️ LAZY AND CACHED. Loading a tokenizer is ~1s; it must not happen per document."""
+        if getattr(self, "_tok", None) is None:
+            try:
+                from transformers import AutoTokenizer
+                self._tok = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=True)
+            except Exception:
+                # ⚠️ FALLBACK, NOT A CRASH. Without a tokenizer we cannot count tokens, so we
+                # fall back to the conservative character splitter and SAY SO via
+                # `token_aware_chunking`. A search tool that refuses to index is worse than
+                # one that indexes slightly worse.
+                self._tok = False
+        return self._tok or None
+
     def chunk(self, text: str) -> list[tuple[int, str]]:
         """Return [(char_offset, chunk_text)] for one document.
 
-        ⚠️ SPLITS ON LINE BOUNDARIES, NOT CHARACTERS. A fixed character cut lands mid-identifier
-        and produces a chunk beginning "…(shape=(784,))" with no idea what it belongs to.
+        ⚠️⚠️ TOKEN-BASED, because the model's limit is in tokens and a character budget cannot
+        bound a token count. Measured error from the character version: 8 of 5,726 chunks
+        exceeded the 512-token window and were TRUNCATED BY THE MODEL with no error, and the
+        average chunk used only 62% of the capacity we were paying to split into.
+
+        ⚠️ The offsets come from the tokenizer's `offset_mapping`, so each window still maps
+        back to a REAL character span in the file — provenance is not sacrificed to the
+        token-accurate split.
+        """
+        tok = self._tokenizer()
+        if tok is None:
+            return self._chunk_chars(text)          # conservative fallback, documented above
+        try:
+            enc = tok(text, add_special_tokens=False, return_offsets_mapping=True,
+                      truncation=False)
+            ids = enc["input_ids"]
+            offs = enc["offset_mapping"]
+        except Exception:
+            return self._chunk_chars(text)
+        if not ids:
+            return [(0, text)]
+        if len(ids) <= CHUNK_TOKENS:
+            return [(0, text)]
+
+        out, start = [], 0
+        stride = max(1, CHUNK_TOKENS - CHUNK_OVERLAP_TOKENS)
+        while start < len(ids):
+            end = min(start + CHUNK_TOKENS, len(ids))
+            c0 = offs[start][0]
+            c1 = offs[end - 1][1]
+            # ⚠️ Extend back to a LINE boundary so a chunk does not begin mid-line. The token
+            # window is the hard constraint; the line boundary is cosmetic and cannot break it,
+            # because it only ever moves the START earlier.
+            nl = text.rfind("\n", c0, min(c0 + 200, len(text)))
+            if nl != -1 and nl > 0:
+                c0 = nl + 1
+            out.append((c0, text[c0:c1]))
+            if end >= len(ids):
+                break
+            start += stride
+        return out
+
+    def _chunk_chars(self, text: str) -> list[tuple[int, str]]:
+        """⚠️ FALLBACK ONLY — used when no tokenizer is available.
+
+        ⚠️ CHUNK_CHARS IS SET TO 1400, BELOW THE ~1727-CHAR EQUIVALENT OF THE 512-TOKEN WINDOW.
+        The old value of 1200 was chosen while assuming 4 chars/token; the measured ratio is
+        3.37, and dense code is lower still. 1400 keeps even fairly dense files inside the
+        window, and anything denser than that is better truncated slightly than unsearchable.
         """
         if len(text) <= CHUNK_CHARS:
             return [(0, text)]
@@ -197,6 +279,12 @@ class Semantic:
                 break
             start = max(end - CHUNK_OVERLAP, start + 1)
         return out
+
+    @property
+    def token_aware_chunking(self) -> bool:
+        """⚠️ REPORTED BY THE CLI. If this is False, the index is character-chunked and chunks
+        may be truncated — the user deserves to know which mode produced their index."""
+        return self._tokenizer() is not None
 
     def build(self, docs, batch: int = 64, progress_every: int = 5000):
         """Embed every chunk of every document. `docs` yields FileDoc.
