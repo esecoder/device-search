@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS documents (
     size     INTEGER,
     lang     TEXT,
     n_lines  INTEGER,
-    text     TEXT NOT NULL
+    text     TEXT NOT NULL,
+    method   TEXT DEFAULT 'utf8'    -- ⚠️ utf8 | pdftext | ocr. Shown in results.
 );
 CREATE INDEX IF NOT EXISTS idx_path ON documents(path);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -59,6 +60,13 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.executescript(SCHEMA)
+        # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
+        # column to a table that already exists, so an index built before `method` existed
+        # would fail every query with "no such column". Silent upgrade breakage is the kind of
+        # bug that only appears on other people's machines.
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(documents)")}
+        if "method" not in cols:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN method TEXT DEFAULT 'utf8'")
         self.conn.commit()
         # ⚠️ Caches, invalidated on write. Rebuilding an inverted index is O(corpus) and would
         # dominate every query if it were not cached.
@@ -80,12 +88,14 @@ class Store:
     def add_many(self, docs) -> int:
         """Bulk insert. ⚠️ `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
         a file that has not changed is simply overwritten with identical content."""
-        rows = [(d.path, d.mtime, d.size, d.lang, d.n_lines, d.text) for d in docs]
+        rows = [(d.path, d.mtime, d.size, d.lang, d.n_lines, d.text,
+                 getattr(d, "method", "utf8")) for d in docs]
         self.conn.executemany(
-            "INSERT INTO documents(path, mtime, size, lang, n_lines, text) "
-            "VALUES (?,?,?,?,?,?) "
+            "INSERT INTO documents(path, mtime, size, lang, n_lines, text, method) "
+            "VALUES (?,?,?,?,?,?,?) "
             "ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, "
-            "lang=excluded.lang, n_lines=excluded.n_lines, text=excluded.text",
+            "lang=excluded.lang, n_lines=excluded.n_lines, text=excluded.text, "
+            "method=excluded.method",
             rows)
         self.conn.commit()
         self._invalidate()

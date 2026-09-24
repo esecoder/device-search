@@ -90,9 +90,17 @@ SKIP_DIR_NAMES = {
     # `--include-deps` turns them back on, because sometimes you DO want to search them.
     "node_modules", ".venv", "venv", "site-packages",
 }
+# ⚠️ MEDIA WE CAN EXTRACT TEXT FROM — moved OUT of SKIP_EXTS and into the index.
+# ⚠️ These were previously skipped as "binary", which was correct when the tool was text-only
+# and is now wrong: a PDF and a screenshot are exactly what people search for. The extension
+# list is deliberately the ones extract.py has a real extractor for.
+MEDIA_EXTS = {
+    ".pdf",
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif",
+}
 SKIP_EXTS = {
-    # Binary media
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".svgz", ".heic",
+    # ⚠️ Images we have no OCR path for, and everything genuinely without text.
+    ".ico", ".svgz", ".heic",
     ".mp3", ".mp4", ".mov", ".avi", ".mkv", ".wav", ".flac", ".m4a", ".aac", ".webm",
     ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".dmg", ".pkg", ".iso",
     # Compiled / binary
@@ -173,6 +181,11 @@ def is_text_file(path: Path, size: int) -> tuple[bool, str]:
     ext = path.suffix.lower()
     if ext in SKIP_EXTS:
         return False, "binary_ext"
+    # ⚠️ CHECKED BEFORE TEXT_EXTS, and it is NOT a text file — `extract.py` dispatches it to
+    # OCR or pdftext. The reason string is distinct so the crawl stats separate "indexed as
+    # text" from "indexed via OCR", which is what tells a user whether media is being covered.
+    if ext in MEDIA_EXTS:
+        return True, "media"
     if ext in TEXT_EXTS:
         return True, "ext"
     if name in TEXT_NAMES or name.startswith(".env"):
