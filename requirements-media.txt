@@ -1,0 +1,11 @@
+# Media text extraction — PDF and OCR. Install ON TOP of requirements.txt.
+#   pip install -r requirements.txt -r requirements-media.txt
+#
+# ⚠️ BOTH ARE TORCH-FREE, which is the whole reason they can be installed without a 2 GB
+# download. Quantified from PyPI metadata:
+#   pdftext               -> pypdfium2 3.5 MB (bundles the PDF engine, no system deps)
+#   rapidocr-onnxruntime  -> onnxruntime + opencv-python, ~110 MB total
+-r requirements.txt
+
+pdftext>=0.7          # PDF -> text, WITH page positions, so hits can say "page 12"
+rapidocr-onnxruntime  # image -> text (OCR), via ONNX Runtime

@@ -1,19 +1,29 @@
-# ⚠️ Deliberately minimal. Three dependencies, and each one earns its place.
-numpy>=1.24            # BM25 scoring and vector maths
-sentence-transformers>=2.2   # the LOCAL embedding model. OPTIONAL: exact+keyword work without it
-requests>=2.28         # only for the optional --llm rerank
+# device-search — dependencies
+#
+# ⚠️ THE BASE INSTALL IS TORCH-FREE ON PURPOSE, AND THE CODE NOW DEFAULTS TO MATCH.
+# `semantic.py` sets DEFAULT_RUNTIME = "onnx", so fastembed is what actually runs. The previous
+# version of this file installed sentence-transformers, which downloads ~2 GB of PyTorch that
+# NOTHING USES unless the user explicitly asks for it. ⚠️ Shipping a dependency the code does not
+# run is the quiet version of a broken install — it costs the user 2 GB and buys nothing.
+#
+#   pip install -r requirements.txt         base: ~150 MB, text search, no torch
+#   pip install -r requirements-media.txt   + PDF and OCR  (~110 MB more)
+#   pip install -r requirements-torch.txt   + the PyTorch embedding path (GPU-capable, ~2 GB)
 
-# ⚠️ NOT INSTALLED, ON PURPOSE:
+numpy>=1.24          # BM25 scoring and vector maths
+requests>=2.28       # ONLY for the optional --llm rerank. Everything else works offline.
+
+# ---- embeddings via ONNX Runtime (no PyTorch) --------------------------------
+fastembed>=0.4       # the LOCAL embedding model
+# ⚠️ onnxruntime IS PINNED, AND THE PIN IS NOT COSMETIC.
+#    1.23+ is built for macOS 13.4 and FAILS TO LOAD on macOS 13.0 with
+#      Symbol not found: __ZNSt3__18to_charsEPcS0_d
+#    Measured on the machine this was developed on. The failure is an ImportError at startup,
+#    so an unpinned install produces an app that dies before it can explain itself.
+onnxruntime<1.20
+
+# ⚠️ NOT INCLUDED, ON PURPOSE:
 #   * no vector database — SQLite holds this corpus comfortably (see store.py)
+#   * no PDF/OCR — that is requirements-media.txt, and only matters if the user actually has
+#     PDFs and screenshots to search
 #   * no LangChain/LlamaIndex — the routing logic is ~80 lines and reading it is the point
-
-# ---- media text extraction (⚠️ both torch-free) --------------------------------
-# Quantified: pdftext pulls pypdfium2 (3.5 MB, bundles the PDF engine, no system deps);
-# rapidocr-onnxruntime pulls onnxruntime + opencv-python (~110 MB total). Neither needs torch.
-# ⚠️ Install as extras, not base: a user who only searches text should not download OCR.
-#
-# pdftext>=0.7          # PDF -> text, WITH page positions
-# rapidocr-onnxruntime  # image -> text (OCR), via ONNX Runtime
-#
-# ⚠️ onnxruntime MUST be pinned below 1.23 on macOS 13.x:
-#     onnxruntime==1.19.2   # 1.23 is built for macOS 13.4 and will not load on 13.0
