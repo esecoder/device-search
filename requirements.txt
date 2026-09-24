@@ -6,3 +6,14 @@ requests>=2.28         # only for the optional --llm rerank
 # ⚠️ NOT INSTALLED, ON PURPOSE:
 #   * no vector database — SQLite holds this corpus comfortably (see store.py)
 #   * no LangChain/LlamaIndex — the routing logic is ~80 lines and reading it is the point
+
+# ---- media text extraction (⚠️ both torch-free) --------------------------------
+# Quantified: pdftext pulls pypdfium2 (3.5 MB, bundles the PDF engine, no system deps);
+# rapidocr-onnxruntime pulls onnxruntime + opencv-python (~110 MB total). Neither needs torch.
+# ⚠️ Install as extras, not base: a user who only searches text should not download OCR.
+#
+# pdftext>=0.7          # PDF -> text, WITH page positions
+# rapidocr-onnxruntime  # image -> text (OCR), via ONNX Runtime
+#
+# ⚠️ onnxruntime MUST be pinned below 1.23 on macOS 13.x:
+#     onnxruntime==1.19.2   # 1.23 is built for macOS 13.4 and will not load on 13.0

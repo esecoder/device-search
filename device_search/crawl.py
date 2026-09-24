@@ -19,7 +19,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import (MAX_FILE_BYTES, MAX_LINE_BYTES, SKIP_DIR_NAMES, is_text_file, lang_of)
+from .config import (MAX_FILE_BYTES, MAX_LINE_BYTES, MEDIA_EXTS, SKIP_DIR_NAMES,
+                     is_text_file, lang_of)
+from .extract import extract
 
 
 @dataclass
@@ -28,6 +30,8 @@ class CrawlStats:
     seen: int = 0
     indexed: int = 0
     unchanged: int = 0       # ⚠️ skipped because mtime+size matched the index
+    media_seen: int = 0      # ⚠️ PDFs and images that went through extract()
+    media_indexed: int = 0   # ⚠️ of those, how many actually contained text
     skipped: dict = field(default_factory=dict)
     bytes_indexed: int = 0
     errors: int = 0
@@ -41,6 +45,12 @@ class CrawlStats:
             f"  unchanged       : {self.unchanged:,}  (skipped — mtime+size match the index)",
             f"  re-indexed      : {self.indexed:,}  ({self.bytes_indexed/1e6:.1f} MB of text)",
         ]
+        if self.media_seen:
+            # ⚠️ Media is reported SEPARATELY and always, once any was seen. A PDF-heavy or
+            # photo-heavy corpus otherwise looks identical to one where media was skipped.
+            lines.append(f"  media seen      : {self.media_seen:,}  "
+                         f"({self.media_indexed:,} contained text, "
+                         f"{self.media_seen - self.media_indexed:,} did not)")
         if self.skipped:
             lines.append("  skipped:")
             for reason, n in sorted(self.skipped.items(), key=lambda kv: -kv[1]):
@@ -58,6 +68,10 @@ class FileDoc:
     lang: str
     text: str
     n_lines: int
+    # ⚠️ HOW the text was obtained: "utf8", "pdftext", "ocr". This travels into the index and
+    # into search results, because "found in scan.pdf" and "found in scan.pdf via OCR" are
+    # different claims about reliability and the user is entitled to know which one they got.
+    method: str = "utf8"
 
 
 def _read_text(path: Path) -> str | None:
@@ -173,18 +187,33 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 if not ok:
                     stats.skip(reason)
                     continue
-                text = _read_text(p)
-                if text is None:
-                    stats.errors += 1
-                    stats.skip("read_failed")
-                    continue
-                if not text.strip():
-                    stats.skip("empty")
-                    continue
+                ext = p.suffix.lower()
+                if ext in MEDIA_EXTS:
+                    # ⚠️ MEDIA GOES THROUGH extract(), WHICH IS SLOW (OCR is ~1-2s a file).
+                    # ⚠️ AND AN IMAGE WITH NO TEXT IS NOT AN ERROR — it is the common case for
+                    # photos, and it gets its own counter so a user can see the difference
+                    # between "not indexed" and "indexed, found no text".
+                    text, method = extract(p)
+                    stats.media_seen += 1
+                    if not text.strip():
+                        stats.skip("media_no_text")
+                        continue
+                    stats.media_indexed += 1
+                else:
+                    text = _read_text(p)
+                    method = "utf8"
+                    if text is None:
+                        stats.errors += 1
+                        stats.skip("read_failed")
+                        continue
+                    if not text.strip():
+                        stats.skip("empty")
+                        continue
                 stats.indexed += 1
                 stats.bytes_indexed += len(text)
-                yield FileDoc(str(p), st.st_mtime, st.st_size, lang_of(p), text,
-                              text.count("\n") + 1)
+                yield FileDoc(str(p), st.st_mtime, st.st_size,
+                              "ocr" if method == "ocr" else lang_of(p), text,
+                              text.count("\n") + 1, method)
     # ⚠️ Stats are attached to the generator so the caller can print them after the loop.
     walk.stats = stats
 
