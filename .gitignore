@@ -1,0 +1,19 @@
+# ⚠️⚠️ THE INDEX MUST NEVER BE COMMITTED. It contains the TEXT OF YOUR FILES — it is a copy of
+# your documents in a second location, and publishing it would publish them.
+# It lives at ~/.device-search by default, which is already outside this repo. This is a
+# backstop for anyone who overrides --index-dir into the project.
+*.db
+*.sqlite
+*.sqlite3
+*.npy
+index/
+.device-search/
+
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

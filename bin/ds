@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ⚠️ A WRAPPER, NOT A PACKAGE. A console-script entry point would need a build step and an
+# install, and this repo is meant to be readable and runnable without either.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ⚠️ Prefer the repo's own venv so `ds` and `pip install -r requirements.txt` agree.
+if [ -x "$HERE/.venv/bin/python" ]; then
+    PY="$HERE/.venv/bin/python"
+elif [ -n "${DEVICE_SEARCH_PYTHON:-}" ]; then
+    PY="$DEVICE_SEARCH_PYTHON"
+else
+    echo "  ✗ No .venv found in $HERE" >&2
+    echo "    Create one:  python3 -m venv .venv && source .venv/bin/activate" >&2
+    echo "                 pip install -r requirements.txt" >&2
+    echo "    Or point at an existing interpreter:  export DEVICE_SEARCH_PYTHON=/path/to/python" >&2
+    exit 2
+fi
+cd "$HERE"
+exec "$PY" -m device_search.cli "$@"
