@@ -17,14 +17,45 @@ the same: the shortcut's failure mode was invisible.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
 import sqlite3
+import threading
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
+
+
+# =============================================================================
+# ⚠️⚠️ THREAD SAFETY, AND WHY THE OBVIOUS FIX IS THE WRONG ONE
+# =============================================================================
+# The daemon serves each request in its own thread (`ThreadingHTTPServer`), but a SQLite
+# connection is bound to the thread that created it. That produced:
+#
+#     sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that
+#     same thread.
+#
+# ⚠️ THE FIX EVERYONE COPIES IS `check_same_thread=False`, AND IT IS THE DANGEROUS ONE.
+# That flag silences the error and lets several threads use ONE connection with no
+# synchronisation at all. It trades a loud crash for **silent corruption** — interleaved
+# statements, mismatched cursors, and a database that is wrong in ways nobody can reproduce.
+#
+# ⚠️ So the flag is used HERE ONLY WITH A LOCK AROUND EVERY METHOD. The flag makes the crash go
+# away; the lock is what makes it correct. **Either one alone is a bug.**
+#
+# ⚠️ A lock is acceptable because the work is tiny — a search is a few milliseconds of SQLite
+# and NumPy — and there is one user. The alternative that scales better is a connection per
+# thread, which is more code for a load this service will never see.
+def _serialised(fn):
+    """⚠️ Hold the store lock for the whole call. Applied to EVERY public method."""
+    @functools.wraps(fn)
+    def wrapper(self, *a, **kw):
+        with self._lock:
+            return fn(self, *a, **kw)
+    return wrapper
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -58,7 +89,11 @@ class Store:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path))
+        # ⚠️ THE LOCK IS CREATED BEFORE THE CONNECTION, because the connection is the thing
+        # that needs guarding and a half-constructed object must not be reachable.
+        self._lock = threading.RLock()
+        # ⚠️ check_same_thread=False IS ONLY SAFE WITH THE LOCK ABOVE. See the module note.
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.executescript(SCHEMA)
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
@@ -76,6 +111,7 @@ class Store:
         self._avgdl: float = 1.0
 
     # ---------------------------------------------------------------- writes
+    @_serialised
     def clear(self) -> None:
         self.conn.execute("DELETE FROM documents")
         self.conn.commit()
@@ -85,6 +121,7 @@ class Store:
         self._postings = None
         self._doc_len = None
 
+    @_serialised
     def add_many(self, docs) -> int:
         """Bulk insert. ⚠️ `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
         a file that has not changed is simply overwritten with identical content."""
@@ -101,6 +138,7 @@ class Store:
         self._invalidate()
         return len(rows)
 
+    @_serialised
     def known_state(self) -> dict:
         """path -> (mtime, size) for everything already indexed.
 
@@ -110,6 +148,7 @@ class Store:
         return {p: (m, sz) for p, m, sz in
                 self.conn.execute("SELECT path, mtime, size FROM documents")}
 
+    @_serialised
     def prune_missing(self) -> int:
         """Drop rows whose file no longer exists. ⚠️ Without this the index only grows, and a
         deleted secret stays searchable forever — which is the exact thing a user would never
@@ -124,25 +163,30 @@ class Store:
             self._invalidate()
         return len(gone)
 
+    @_serialised
     def set_meta(self, key: str, value) -> None:
         self.conn.execute("INSERT INTO meta(key,value) VALUES (?,?) "
                           "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                           (key, json.dumps(value)))
         self.conn.commit()
 
+    @_serialised
     def get_meta(self, key: str, default=None):
         row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
 
     # ----------------------------------------------------------------- reads
+    @_serialised
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
 
+    @_serialised
     def by_id(self, doc_id: int) -> tuple | None:
         return self.conn.execute(
             "SELECT id, path, lang, n_lines, text FROM documents WHERE id=?", (doc_id,)
         ).fetchone()
 
+    @_serialised
     def stats(self) -> dict:
         row = self.conn.execute(
             "SELECT COUNT(*), COALESCE(SUM(size),0), COALESCE(SUM(n_lines),0) FROM documents"
@@ -153,6 +197,7 @@ class Store:
         return {"documents": row[0], "bytes": row[1], "lines": row[2], "langs": langs}
 
     # ------------------------------------------------------- backend 1: exact
+    @_serialised
     def exact_search(self, literal: str, limit: int = 40) -> list[tuple[int, float]]:
         """Literal substring match. **THIS IS THE BACKEND YOUR EXAMPLE NEEDS.**
 
@@ -183,6 +228,7 @@ class Store:
         out.sort(key=lambda kv: -kv[1])
         return out[:limit]
 
+    @_serialised
     def regex_search(self, pattern: str, limit: int = 40) -> list[tuple[int, float]]:
         """Regex over stored text. ⚠️ Pure Python, so it is the slowest backend; it reports how
         many documents it had to scan so the cost is visible rather than mysterious."""
@@ -226,6 +272,7 @@ class Store:
         self._n_docs = len(ids)
         self._avgdl = float(self._doc_len.mean()) if self._n_docs else 1.0
 
+    @_serialised
     def keyword_search(self, query: str, limit: int = 40, k1: float = 1.5,
                        b: float = 0.75) -> list[tuple[int, float]]:
         """Okapi BM25. ⚠️ Same formula as the RAG track, same constants, deliberately: a
@@ -251,6 +298,7 @@ class Store:
         top = np.argsort(-scores)[:limit]
         return [(self._doc_ids[i], float(scores[i])) for i in top if scores[i] > 0]
 
+    @_serialised
     def path_search(self, query: str, limit: int = 40) -> list[tuple[int, float]]:
         """Match against the PATH. ⚠️ A separate backend because 'where is my file called X' is
         a completely different question from 'which file contains X', and conflating them makes
