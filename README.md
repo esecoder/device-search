@@ -80,8 +80,22 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`sentence-transformers` is optional — without it, exact + keyword + path still work and the CLI
-says so. The model (~130 MB) downloads on first index.
+⚠️ **The base install is TORCH-FREE (~264 MB)**, and the code defaults to ONNX to match.
+The previous version of `requirements.txt` installed `sentence-transformers`, which downloads
+~2 GB of PyTorch that nothing runs unless you ask for it.
+
+| Install | Size | Adds |
+|---|---|---|
+| `pip install -r requirements.txt` | **~264 MB** | text search, ONNX embeddings |
+| `+ pip install -r requirements-media.txt` | ~110 MB more | PDF and OCR |
+| `+ pip install -r requirements-torch.txt` | ~2 GB | the PyTorch path, for GPU or large indexing runs |
+
+⚠️ **`onnxruntime` is pinned below 1.20 in `requirements.txt`, and the pin is not cosmetic.**
+1.23+ is built for macOS 13.4 and **fails to load on macOS 13.0**. An unpinned install produces
+an app that dies at import with a symbol error before it can explain itself.
+
+The embedding model (~130 MB) downloads on first index. Without it, exact + keyword + path still
+work and the CLI says so.
 
 Put `ds` on your PATH, or call it directly:
 ```bash
@@ -109,6 +123,48 @@ ds secrets-report                    # recognised secrets in the index, redacted
 
 ⚠️ **Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
 miss from a full one are different facts, and only the tool knows which one you just had.
+
+## Run the desktop app
+
+⚠️ **Requires the venv to exist first** (see Install above) — the shell launches the Python
+daemon itself, and cannot if there is no interpreter to launch.
+
+```bash
+cd ~/WebstormProjects/device-search
+
+./bin/ds setup --roots ~/Documents ~/work   # ⚠️ YOUR folders, not a test corpus
+./bin/ds index                              # build the index
+
+cd src-tauri
+cargo run                                   # first build compiles ~400 crates, then ~5s
+```
+
+A **tray icon** appears. Press **`Cmd+Shift+Space`** (Windows/Linux: `Ctrl+Shift+Space`) to
+summon the search box. Left-click the tray icon does the same. `Esc` dismisses; the app stays
+running in the tray.
+
+⚠️ **NOT `Cmd+Space`** — that is Spotlight's, and overriding a well-known system shortcut in an
+open-source app is a hostile default.
+
+⚠️ **If the hotkey does nothing on macOS**, grant Accessibility permission in
+System Settings → Privacy & Security. A global hotkey is an OS-level capability and macOS gates
+it. ⚠️ **This is unverified** — the app was built on a machine where the window could not be
+seen, so the layout and the hotkey firing are unchecked.
+
+### What needs to be running
+
+Two processes:
+
+| Process | Started by | Purpose |
+|---|---|---|
+| `python -m device_search.server` | **the shell starts it automatically** | the search engine, warm model, HTTP on 127.0.0.1:8734 |
+| the Tauri app | you | tray icon, hotkey, window |
+
+If a search says *"daemon unreachable"*, start it manually and read the error:
+```bash
+./bin/ds                    # if this fails, the venv is the problem
+./.venv/bin/python -m device_search.server
+```
 
 ## Privacy
 
