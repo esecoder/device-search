@@ -120,7 +120,12 @@ def cmd_index(args) -> int:
     print("=" * 78)
 
     t0 = time.time()
-    docs = walk(roots, include_deps=include_deps)
+    # ⚠️ HAND THE CRAWLER WHAT WE ALREADY KNOW. Without this line the check above exists in
+    # `crawl.py` and never fires — a parameter that is plumbed but not passed is the same bug
+    # as no parameter at all, and it would have looked like the optimisation simply "not helping".
+    known = store.known_state()
+    print(f"  index already knows about {len(known):,} files")
+    docs = walk(roots, include_deps=include_deps, known=known)
     batch, total, indexed = [], 0, 0
     for doc in docs:
         batch.append(doc)

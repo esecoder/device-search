@@ -91,6 +91,15 @@ class Store:
         self._invalidate()
         return len(rows)
 
+    def known_state(self) -> dict:
+        """path -> (mtime, size) for everything already indexed.
+
+        ⚠️ THIS IS WHAT MAKES RE-INDEX INCREMENTAL. It is one query over the index, and it is
+        the difference between re-reading every file on disk and re-reading only what changed.
+        """
+        return {p: (m, sz) for p, m, sz in
+                self.conn.execute("SELECT path, mtime, size FROM documents")}
+
     def prune_missing(self) -> int:
         """Drop rows whose file no longer exists. ⚠️ Without this the index only grows, and a
         deleted secret stays searchable forever — which is the exact thing a user would never

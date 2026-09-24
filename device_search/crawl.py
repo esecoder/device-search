@@ -27,6 +27,7 @@ class CrawlStats:
     """⚠️ Every number here is printed at the end of a crawl. Nothing is silent."""
     seen: int = 0
     indexed: int = 0
+    unchanged: int = 0       # ⚠️ skipped because mtime+size matched the index
     skipped: dict = field(default_factory=dict)
     bytes_indexed: int = 0
     errors: int = 0
@@ -37,7 +38,8 @@ class CrawlStats:
     def report(self) -> str:
         lines = [
             f"  files seen      : {self.seen:,}",
-            f"  indexed         : {self.indexed:,}  ({self.bytes_indexed/1e6:.1f} MB of text)",
+            f"  unchanged       : {self.unchanged:,}  (skipped — mtime+size match the index)",
+            f"  re-indexed      : {self.indexed:,}  ({self.bytes_indexed/1e6:.1f} MB of text)",
         ]
         if self.skipped:
             lines.append("  skipped:")
@@ -91,8 +93,24 @@ def _read_text(path: Path) -> str | None:
     return "\n".join(out)
 
 
-def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20000):
+def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20000,
+         known: dict | None = None):
     """Yield FileDoc for every indexable file under `roots`.
+
+    ⚠️⚠️ `known` IS THE INCREMENTAL RE-INDEX, AND IT IS THE MOST IMPORTANT PARAMETER HERE.
+    It maps path -> (mtime, size) from the existing index. A file whose mtime AND size are
+    unchanged is SKIPPED WITHOUT BEING OPENED.
+
+    ⚠️ WHY THIS IS NOT AN OPTIMISATION BUT A PREREQUISITE: `stat` costs microseconds; reading,
+    extracting and embedding costs seconds. Without this, every run is a full rebuild — which
+    for a text corpus is minutes, and for OCR over 66k images is 18-36 HOURS. An app you cannot
+    re-run is an app you run once, and then it silently stops finding new files.
+
+    ⚠️ AND WHY SIZE IS CHECKED TOO, NOT JUST MTIME: mtime LIES. `rsync -t`, archivers and some
+    editors preserve an old modification time on new content, so an mtime-only check would
+    serve a stale index forever. Size catches nearly all of those for one extra integer
+    comparison. (A content hash would be exact, but it requires reading the file — which is the
+    cost we are trying to avoid.)
 
     ⚠️ `os.walk(followlinks=False)` IS THE DEFAULT AND MUST STAY THAT WAY. Following symlinks
     on a home directory is the classic way to walk `/` through a link in a project folder and
@@ -102,6 +120,8 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
     ⚠️ THE IN-PLACE `dirnames[:]` FILTER is what makes this fast: pruning `node_modules` here
     means the walk never stats its 40,000 files at all.
     """
+    if known is None:
+        known = {}
     stats = CrawlStats()
     for root in roots:
         root = Path(root)
@@ -140,6 +160,15 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 if not p.is_file():
                     stats.skip("not_regular_file")
                     continue
+
+                # ⚠️ THE INCREMENTAL CHECK. It must come AFTER the file-type check (so a
+                # binary file is still counted as skipped for the right reason) and BEFORE
+                # `is_text_file` / `_read_text` (which is where the cost lives).
+                prev = known.get(str(p))
+                if prev is not None and prev[0] == st.st_mtime and prev[1] == st.st_size:
+                    stats.unchanged += 1
+                    continue
+
                 ok, reason = is_text_file(p, st.st_size)
                 if not ok:
                     stats.skip(reason)
