@@ -172,7 +172,7 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
     working job — which, before this change, meant losing all of it.
     """
     from .semantic import Semantic
-    from .vectors import SHARD_DOCS, VectorStore
+    from .vectors import SHARD_DOCS, VectorStore, write_status
     from .runtime import ensure_onnx_usable
 
     try:
@@ -262,6 +262,14 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
                         else "onnx_chunks_per_sec", 8.2)
     t_start = time.time()
     t_last, chunks_last = t_start, vs.total_chunks()
+    # ⚠️ ANNOUNCE THE RUN so the desktop app can show progress for a job it did not start.
+    # ⚠️ AND CLEAR IT IN A `finally` at the end of this function — a crashed run must not leave
+    # the UI reporting progress for ever. The reader also checks the pid, so even a SIGKILL is
+    # handled; this is belt and braces because both failures are cheap to prevent.
+    write_status(INDEX_DIR, stage="embedding", running=True, finished=False,
+                 documents_total=doc_count, documents_done=already,
+                 chunks_done=vs.total_chunks(), est_chunks=est_chunks,
+                 started=t_start, shards=len(vs.man.shards))
 
     for i in range(0, len(todo), SHARD_DOCS):
         batch = todo[i:i + SHARD_DOCS]
@@ -314,12 +322,20 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
         eta = (remaining / rate) if (rate > 0 and pct < 99.9) else 0
         bar_n = 24
         filled = int(bar_n * pct / 100)
+        write_status(INDEX_DIR, stage="embedding", finished=False,
+                     documents_total=doc_count, documents_done=done_docs,
+                     chunks_done=vs.total_chunks(), est_chunks=est_chunks,
+                     percent=round(pct, 1), rate=round(rate, 2),
+                     eta_seconds=int(eta), started=t_start, shards=len(vs.man.shards))
         print(f"    [{'█' * filled}{'·' * (bar_n - filled)}] {pct:5.1f}%  "
               f"{done_docs:,}/{doc_count:,} docs  {vs.total_chunks():,} chunks  "
               f"{rate:.1f} ch/s"
               + (f"  ETA {human_time(eta)}" if eta > 0 else "  done"), flush=True)
 
     vs.finish(doc_count, doc_max_id, doc_mtime_sum)
+    write_status(INDEX_DIR, stage="done", running=False, finished=True,
+                 documents_total=doc_count, documents_done=doc_count,
+                 chunks_done=vs.total_chunks(), percent=100.0, shards=len(vs.man.shards))
     took = time.time() - t_start
     print(f"  ✅ {vs.total_chunks():,} chunks in {len(vs.man.shards)} shards "
           f"({human_time(took)} this run)")

@@ -148,8 +148,13 @@ class Engine:
             emb["percent"] = round(emb["documents_embedded"] / emb["documents_total"] * 100, 1)
         else:
             emb["percent"] = 0.0
-        return {"indexing": run.get("running", False), "run": run,
-                "embedding": emb, "stale": stale,
+        # ⚠️ THE TERMINAL RUN IS THE AUTHORITY WHEN THERE IS ONE. `ds index` in a shell and
+        # `POST /api/index` both write the same status file, so the UI reports either of them
+        # identically — including the ETA, which the daemon could never compute on its own.
+        from .vectors import read_status
+        live = read_status(INDEX_DIR)
+        return {"indexing": bool(live.get("running")) or run.get("running", False),
+                "live": live, "run": run, "embedding": emb, "stale": stale,
                 "searchable_now": doc_count > 0}
 
     def stats(self) -> dict:
@@ -221,7 +226,12 @@ class Handler(BaseHTTPRequestHandler):
                              # boolean.
                              "stale": st["stale"],
                              "embedding_percent": st["embedding"]["percent"],
-                             "indexing": st["indexing"]})
+                             "indexing": st["indexing"],
+                             # ⚠️ The ETA and rate come from the process DOING the work. The
+                             # daemon cannot derive them, so it must not invent them.
+                             "live": {k: st["live"].get(k) for k in
+                                      ("running", "percent", "rate", "eta_seconds",
+                                       "documents_done", "documents_total", "reason")}})
             return
         if not self._authorised():
             return
