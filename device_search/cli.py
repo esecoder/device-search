@@ -226,9 +226,35 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
         print(f"  ✅ nothing to do — {vs.total_chunks():,} chunks, complete")
         return
 
-    est_chunks = max(1, int(len(todo) * 34))       # measured mean chunks/doc
-    print(f"  embedding {len(todo):,} documents (~{est_chunks:,} chunks) in "
-          f"{SHARD_DOCS}-document shards")
+    # ⚠️⚠️ ESTIMATED FROM TEXT VOLUME, NOT FROM DOCUMENT COUNT.
+    #
+    # The first version used `chunks_per_document = 34`, measured on a repo of long markdown
+    # files. On a real corpus of 5,573 Documents/Desktop/Downloads files it is 8.2 —
+    # **a 4.1x error, which turned a 1h 21m job into a 6h 33m estimate.** The progress bar was
+    # then wrong in the same direction for the whole run, and at 100% it still claimed
+    # "ETA 4h 10m", which is self-evidently absurd and should have been the tell.
+    #
+    # ⚠️ `chunks per document` is NOT a property of the chunker. It is a property of how big the
+    # documents are. `bytes per chunk` IS a property of the chunker (1102 and 1357 on the two
+    # corpora — 1.2x apart, against 4.1x for chunks/doc).
+    #
+    # ⚠️ AND WE CAN DO BETTER THAN A CONSTANT: the text phase has ALREADY finished, so the exact
+    # total is sitting in SQLite. Measured on completed shards where possible.
+    text_bytes = sum(len(r[4] or "") for r in todo)
+    done_bytes = sum(len(r[4] or "") for r in rows if r[0] not in set(plan["todo"]))
+    done_chunks = vs.total_chunks()
+    if done_chunks > 500 and done_bytes > 0:
+        # ⚠️ The observed ratio from THIS corpus beats any constant from another one.
+        bpc = done_bytes / done_chunks
+        basis = f"measured on {done_chunks:,} chunks already embedded here"
+    else:
+        bpc = 1200.0
+        basis = "default 1200 bytes/chunk"
+    est_chunks = done_chunks + max(1, int(text_bytes / bpc))
+    print(f"  embedding {len(todo):,} documents "
+          f"(~{est_chunks - done_chunks:,} chunks, project total {est_chunks:,}; "
+          f"{bpc:.0f} bytes/chunk, {basis})")
+    print(f"  in {SHARD_DOCS}-document shards")
     print(f"  ⚠️ interrupt any time — completed shards are kept and this resumes here")
 
     from .runtime import MEASURED
@@ -281,12 +307,17 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
             rate = grew / span
             t_last, chunks_last = now, vs.total_chunks()
         remaining = max(0, est_chunks - vs.total_chunks())
-        eta = remaining / rate if rate > 0 else 0
+        # ⚠️ NO ETA WHEN THERE IS NOTHING LEFT. The old code printed "ETA 4h 10m" on the final
+        # line of a finished run, because the estimate exceeded reality and the subtraction
+        # never reached zero. A completion line that says four hours remain is a warning sign
+        # about the estimate, not about the run.
+        eta = (remaining / rate) if (rate > 0 and pct < 99.9) else 0
         bar_n = 24
         filled = int(bar_n * pct / 100)
         print(f"    [{'█' * filled}{'·' * (bar_n - filled)}] {pct:5.1f}%  "
               f"{done_docs:,}/{doc_count:,} docs  {vs.total_chunks():,} chunks  "
-              f"{rate:.1f} ch/s  ETA {human_time(eta)}", flush=True)
+              f"{rate:.1f} ch/s"
+              + (f"  ETA {human_time(eta)}" if eta > 0 else "  done"), flush=True)
 
     vs.finish(doc_count, doc_max_id, doc_mtime_sum)
     took = time.time() - t_start
