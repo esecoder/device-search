@@ -160,6 +160,14 @@ def cmd_index(args) -> int:
 
 def _build_vectors(store: Store) -> None:
     from .semantic import Semantic
+    # ⚠️ CHECK THE RUNTIME LOADS BEFORE STARTING AN INDEX THAT WILL DIE PART-WAY THROUGH.
+    # A failed import here happens AFTER the text phase has already run, so the user waits
+    # minutes and then gets a symbol error with no idea which of the two phases broke.
+    try:
+        from .runtime import ensure_onnx_usable
+        ensure_onnx_usable(progress=lambda m: print(f"    runtime: {m}"))
+    except Exception:
+        pass
     sem = Semantic()
     ok, why = sem.available()
     print(f"\n  semantic backend: {'ON  ' + why if ok else 'OFF ' + why}")
@@ -306,6 +314,51 @@ def cmd_search(args) -> int:
 # =============================================================================
 # stats / secrets
 # =============================================================================
+def cmd_runtime(args) -> int:
+    """The runtime chooser: what is installed, what works, and what the trade is."""
+    from .runtime import options, survey, ensure_onnx_usable, upgrade_to_latest_if_usable
+    print("=" * 78)
+    print("EMBEDDING RUNTIME")
+    print("=" * 78)
+    sv = survey()
+    for k in ("onnx", "torch", "embeddings"):
+        p = sv[k]
+        print(f"  {k:<12}: {'✅' if p['ok'] else '❌'} {p['version'] or p['error'][:64]}")
+
+    # ⚠️ ESTIMATE THE CHUNKS so the time column means something. A rate without the user's own
+    # corpus size attached is a fact they cannot act on.
+    est = args.chunks
+    if not est:
+        store = Store(DB_PATH)
+        n = store.count()
+        if n:
+            est = int(n * 34)     # ⚠️ 34 chunks/doc, the measured mean on a real corpus
+            print(f"\n  estimating from {n:,} indexed documents (~{est:,} chunks)")
+    print()
+    print(f"  {'runtime':<16}{'installed':<11}{'download':>10}{'index rate':>13}{'this corpus':>14}")
+    for o in options(est):
+        print(f"  {o['label']:<16}{'yes' if o['installed'] else 'no':<11}"
+              f"{o['download_mb']:>8} MB{o['chunks_per_sec']:>11.1f}/s{o['est_human']:>14}")
+    print()
+    print("  ⚠️ rates are MEASURED here, on CPU (117 docs / 5,726 chunks) — not vendor claims.")
+    print("  ⚠️ torch wins at INDEXING (3.8x) and loses at QUERYING (10x). The default is ONNX")
+    print("     because indexing happens once and querying happens constantly.")
+    print()
+    print("  to switch:")
+    print("    ./.venv/bin/python -m pip install -r requirements-torch.txt")
+    print("    DEVICE_SEARCH_RUNTIME=torch ./bin/ds index")
+    print()
+    print("  to check the onnxruntime version is the best this machine supports:")
+    print("    ./.venv/bin/python -m device_search.runtime --try-latest")
+    if args.fix_onnx:
+        print()
+        print(ensure_onnx_usable(progress=lambda m: print("   ", m)))
+    if args.try_latest:
+        print()
+        print(upgrade_to_latest_if_usable(progress=lambda m: print("   ", m)))
+    return 0
+
+
 def cmd_stats(args) -> int:
     store = Store(DB_PATH)
     s = store.stats()
@@ -407,6 +460,12 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true")
     p.add_argument("--explain", action="store_true")
     p.set_defaults(fn=cmd_search)
+
+    p = sub.add_parser("runtime", help="which embedding runtime, and what it costs")
+    p.add_argument("--chunks", type=int, default=0, help="project onto this many chunks")
+    p.add_argument("--fix-onnx", action="store_true")
+    p.add_argument("--try-latest", action="store_true")
+    p.set_defaults(fn=cmd_runtime)
 
     p = sub.add_parser("stats", help="what is in the index")
     p.set_defaults(fn=cmd_stats)
