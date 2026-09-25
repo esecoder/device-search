@@ -192,6 +192,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm))
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/runtime":
+                # ⚠️ THE CHOOSER, SERVED. The UI cannot run pip itself and must not try — it
+                # has no idea which interpreter is running the engine, and installing into the
+                # wrong one succeeds while changing nothing.
+                from .runtime import options, survey
+                est = 0
+                n = ENGINE.store.count()
+                if n:
+                    est = int(n * 34)          # measured mean chunks/doc
+                self._send(200, {"survey": survey(), "options": options(est),
+                                 "estimated_chunks": est})
+            elif url.path == "/api/install/status":
+                from .runtime import INSTALLER
+                self._send(200, INSTALLER.snapshot())
             else:
                 self._send(404, {"error": "no such route"})
         except Exception as e:
@@ -203,7 +217,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._authorised():
             return
-        if urlparse(self.path).path == "/api/index":
+        if urlparse(self.path).path == "/api/install":
+            # ⚠️ RETURNS 202 AND POLLS, because a pip install takes minutes and a blocked
+            # request would look like a hang. ⚠️ AND STARTING TWICE IS REFUSED, not queued —
+            # two pips writing the same environment is a way to corrupt it, and a double-click
+            # in a UI is all it takes.
+            from .runtime import INSTALLER
+            if not INSTALLER.start(["sentence-transformers"]):
+                self._send(409, {"error": "an install is already running",
+                                 "state": INSTALLER.snapshot()})
+                return
+            self._send(202, {"accepted": True, "note": "installing in the background",
+                             "poll": "/api/install/status"})
+        elif urlparse(self.path).path == "/api/index":
             # ⚠️ RUNS IN A THREAD so the UI stays responsive and can poll /api/health while a
             # long media index runs. The alternative — blocking the request — makes the app
             # look frozen for the 18-36 hours a full OCR pass could take.
