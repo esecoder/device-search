@@ -37,17 +37,29 @@ struct Daemon(Mutex<Option<Child>>);
 /// ⚠️ WHERE THE PYTHON LIVES IS CONFIGURATION, NOT A CONSTANT. In development the venv is a
 /// sibling directory; in a packaged app it would be a bundled sidecar. Guessing one path is how
 /// an app works on the author's machine and nowhere else.
+// ⚠️ RETURNS None WHEN NO VENV EXISTS, AND THAT IS THE FIX RATHER THAN A DETAIL.
+//
+// This list used to end with `"python3"` as a per-root fallback, and the caller does:
+//
+//     let py = roots.iter().find_map(|r| python_for(r))?;
+//
+// ⚠️ So the FIRST root always "succeeded", because `python3` always exists. The resource
+// directory is tried before the repo root, and under `cargo run` it resolves to `target/debug/`
+// — where there is no venv. The shell therefore launched THE SYSTEM PYTHON, which has no numpy,
+// and the daemon died with:
+//
+//     ModuleNotFoundError: No module named 'numpy'
+//
+// ⚠️ THE LESSON IS ABOUT WHERE A FALLBACK LIVES. A fallback inside a loop over candidates makes
+// every candidate look valid, so the loop can never reach the good one. **It belongs after the
+// search, not inside it.**
 fn python_for(repo: &str) -> Option<String> {
     for cand in [
         std::env::var("DEVICE_SEARCH_PYTHON").unwrap_or_default(),
         format!("{repo}/.venv/bin/python"),
         format!("{repo}/../ai-engineer-learning/.venv/bin/python"),
-        "python3".to_string(),
     ] {
-        if cand.is_empty() {
-            continue;
-        }
-        if cand == "python3" || std::path::Path::new(&cand).exists() {
+        if !cand.is_empty() && std::path::Path::new(&cand).exists() {
             return Some(cand);
         }
     }
@@ -95,7 +107,14 @@ fn ensure_daemon(app: &tauri::AppHandle) -> Option<Child> {
         roots.push(dev_root);
     }
 
-    let py = roots.iter().find_map(|r| python_for(r))?;
+    // ⚠️ TRY EVERY ROOT FOR A REAL VENV *BEFORE* FALLING BACK. The fallback is deliberately
+    // OUTSIDE the loop: inside it, it made the first root always match and the venv on any later
+    // root could never be reached. That is how the shell ended up running system python, which
+    // has no numpy, and dying with a ModuleNotFoundError while everything looked correct.
+    let py = roots
+        .iter()
+        .find_map(|r| python_for(r))
+        .or_else(|| Some("python3".to_string()))?;
     let repo = roots
         .iter()
         .find(|r| std::path::Path::new(&format!("{r}/device_search")).is_dir())
