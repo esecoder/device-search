@@ -43,6 +43,18 @@ from pathlib import Path
 import numpy as np
 
 MANIFEST = "vectors.manifest.json"
+# ⚠️⚠️ THE CROSS-PROCESS PROGRESS FILE, AND WHY IT IS NOT THE MANIFEST.
+#
+# The manifest records what is DONE. This records what is HAPPENING — and they are different
+# questions asked by different processes. `./bin/ds index` runs in a terminal; the desktop app
+# runs a daemon. The daemon can see shards appearing but cannot tell "a run is in progress"
+# from "a run finished 30 seconds ago", and it has no idea of the ETA.
+#
+# ⚠️ A LOCKFILE WITH A PID IS THE STANDARD ANSWER, and the failure it prevents is the classic
+# one: a run that is killed leaves a status file claiming "indexing, 47%", and the app reports
+# progress for a process that no longer exists. So the reader CHECKS THE PID IS ALIVE rather
+# than trusting the file.
+STATUS = "index.status.json"
 # ⚠️ A SHARD IS A DOCUMENT BATCH, NOT A SIZE. Bounding by bytes would split a document's chunks
 # across two files, and then a resume has to reason about partial documents. Bounding by
 # documents makes every shard self-contained.
@@ -74,6 +86,48 @@ class Manifest:
     doc_count: int = 0
     doc_max_id: int = 0
     doc_mtime_sum: float = 0.0
+
+
+def write_status(index_dir: Path, **fields) -> None:
+    """⚠️ Written by whichever process is doing the work, read by every other one."""
+    p = Path(index_dir) / STATUS
+    try:
+        fields["pid"] = os.getpid()
+        fields["updated"] = time.time()
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(fields))
+        os.replace(tmp, p)          # ⚠️ atomic, so a reader never sees a half-written file
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+
+
+def read_status(index_dir: Path) -> dict:
+    """⚠️ RETURNS running=False FOR A DEAD PID, whatever the file says.
+
+    A killed process cannot clean up after itself, so the file on disk is not evidence that
+    anything is running. Asking the OS whether that pid still exists is.
+    """
+    p = Path(index_dir) / STATUS
+    if not p.exists():
+        return {"running": False, "reason": "no run has been started"}
+    try:
+        d = json.loads(p.read_text())
+    except Exception:
+        return {"running": False, "reason": "unreadable status file"}
+    pid = d.get("pid")
+    if d.get("finished"):
+        d["running"] = False
+        return d
+    if pid:
+        try:
+            os.kill(pid, 0)         # ⚠️ signal 0 = "does this process exist?" and nothing else
+        except (OSError, ProcessLookupError):
+            d["running"] = False
+            d["reason"] = f"the process that was indexing ({pid}) is gone"
+            return d
+    d["running"] = True
+    return d
 
 
 class VectorStore:
