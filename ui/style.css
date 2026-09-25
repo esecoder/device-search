@@ -58,6 +58,14 @@ kbd {
   border-radius: 4px; padding: 3px 5px;
 }
 
+/* ------------------------------------------------------------------- banner */
+/* ⚠️ HIDDEN BY DEFAULT, and shown only when the daemon says something is wrong. A persistent
+   banner trains the user to ignore the space it occupies, so an empty banner occupies none. */
+#banner { display: none; padding: 9px 18px; font-size: 12px; line-height: 1.4; }
+#banner.show { display: block; }
+#banner.info { background: rgba(10, 132, 255, 0.16); color: #9fd0ff; }
+#banner.warn { background: rgba(255, 159, 10, 0.16); color: #ffc46b; }
+
 /* ------------------------------------------------------------------- status */
 #status { padding: 0 18px; font-size: 12px; color: var(--dim); }
 #status:not(:empty) { padding: 10px 18px; border-bottom: 1px solid var(--sep); }

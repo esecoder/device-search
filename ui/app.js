@@ -41,10 +41,53 @@ async function boot() {
       `${h.documents.toLocaleString()} documents indexed` +
       (h.semantic ? ` · ${h.semantic}` : " · semantic off");
     setStatus("", "");
+    // ⚠️ THE BANNER IS DRIVEN BY THE DAEMON, NOT GUESSED BY THE UI. Only the engine knows which
+    // documents are embedded and whether the vectors still describe them. A frontend computing
+    // this itself would draw a confident progress bar attached to nothing.
+    applyIndexState(h);
   } else {
     setStatus("err", "The search daemon is not responding on 127.0.0.1:" + PORT);
   }
   $("q").focus();
+}
+
+// ⚠️ ONE STATE OBJECT, TWO RENDERINGS. An in-progress index and a stale vector set are
+// DIFFERENT problems — one resolves by waiting, the other does not — so they must not share a
+// message. Showing "indexing…" for stale vectors would tell the user to wait for something that
+// is not happening.
+function applyIndexState(h) {
+  const bar = $("banner");
+  const pct = h.embedding_percent || 0;
+  if (h.indexing) {
+    bar.className = "show info";
+    bar.textContent = `Indexing… ${pct.toFixed(0)}% — results are incomplete`;
+  } else if (h.stale && h.stale.stale) {
+    if (h.stale.severity === "incomplete") {
+      bar.className = "show warn";
+      bar.textContent = `⚠️ Embedding stopped at ${pct.toFixed(0)}% — meaning-based results ` +
+                        `cover only part of the index. Exact and keyword matches are complete.`;
+    } else {
+      bar.className = "show warn";
+      bar.textContent = `⚠️ Semantic index is out of date — ${h.stale.reason}. ` +
+                        `Re-run \`ds index\`. Exact and keyword matches are unaffected.`;
+    }
+  } else {
+    bar.className = "";
+    bar.textContent = "";
+  }
+}
+
+// ⚠️ POLLED WHILE INDEXING, and the poll stops when it stops. A permanent 2-second timer in a
+// tray app that is mostly idle is a battery cost for no information.
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    const h = await api("/api/health", { auth: false });
+    if (!h.ok) return;
+    applyIndexState(h);
+    if (!h.indexing) { clearInterval(pollTimer); pollTimer = null; }
+  }, 2000);
 }
 
 function setStatus(cls, text) {

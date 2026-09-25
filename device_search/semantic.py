@@ -171,6 +171,9 @@ class Semantic:
         self.runtime = runtime
         self._model = None
         self._runtime_used = None
+        # ⚠️ THE SHARDED STORE, when one exists. `vectors`/`doc_ids` below remain only as the
+        # legacy single-file fallback.
+        self.vstore = None
         self.vectors: np.ndarray | None = None   # L2-normalised, so cosine == dot product
         self.doc_ids: np.ndarray | None = None
         self.offsets: np.ndarray | None = None
@@ -315,8 +318,19 @@ class Semantic:
 
     # ---------------------------------------------------------------- search
     def search(self, query: str, limit: int = 40, doc_id_of_chunk=None):
-        """Cosine similarity. ⚠️ Vectors are already L2-normalised, so this is one matmul —
-        not a norm per candidate, which is the usual accidental O(n) per comparison."""
+        """Cosine similarity over the SHARDED store. ⚠️ Vectors are L2-normalised, so this is one
+        matmul — not a norm per candidate, which is the usual accidental O(n) per comparison.
+
+        ⚠️⚠️ THIS READS FROM THE SHARDS ON DISK, NOT FROM AN IN-MEMORY MATRIX BUILT AT INDEX
+        TIME. That is what makes the index RESUMABLE: a run that stops at 40% has 40% of its
+        shards on disk, and search uses them immediately instead of waiting for a complete file.
+        """
+        if self.vstore is not None:
+            return self.vstore.search(
+                self.model.encode_query(query), limit)
+        # ⚠️ FALLBACK for an index built by the previous format (a single vectors.npy). Kept so
+        # an upgrade does not silently lose a working index — the old file is still read, and
+        # `check_stale` reports that it is not the current format.
         if self.vectors is None or self.vectors.shape[0] == 0:
             return []
         # ⚠️ `encode_query`, NOT `encode`. The two runtimes apply the bge query prefix in
@@ -357,6 +371,22 @@ class Semantic:
             pass
 
     def load(self, vec_path: Path, ids_path: Path) -> bool:
+        """⚠️ PREFERS THE SHARDED STORE AND FALLS BACK TO THE OLD SINGLE FILE.
+
+        A user who built an index before this change keeps a working index; the format change
+        does not silently break them. `check_stale()` will report that the vectors came from the
+        older format so the difference is visible rather than assumed.
+        """
+        from .config import INDEX_DIR
+        from .vectors import VectorStore
+        vs = VectorStore(INDEX_DIR, dim=384)
+        if vs.man.shards:
+            self.vstore = vs
+            # ⚠️ Report whether the build finished, because a partial index that LOOKS complete
+            # is the failure this whole mechanism exists to prevent.
+            self.partial = not vs.man.complete
+            self.manifest = vs.man
+            return True
         vec_path, ids_path = Path(vec_path), Path(ids_path)
         if not vec_path.exists() or not ids_path.exists():
             return False
