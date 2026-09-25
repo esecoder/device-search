@@ -9,7 +9,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # ⚠️ tray-icon is a FEATURE of tauri; global-shortcut is a SEPARATE PLUGIN CRATE.
 # Guessing both as features produced "tauri does not have these features".
-tauri = { version = "2", features = ["tray-icon"] }
+# ⚠️ `image-png` IS REQUIRED, AND ITS ABSENCE IS NOT OBVIOUS.
+# `tauri::image::Image::from_path` and `from_bytes` are gated behind
+# `#[cfg(any(feature = "image-ico", feature = "image-png"))]`, so without this the compiler
+# reports "no associated function named from_path" — which reads as a wrong API rather than a
+# missing feature. ⚠️ And the tray icon NEEDS it: a runtime PNG cannot be loaded without a
+# decoder, and the compiled-in default icon is the only other option.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
