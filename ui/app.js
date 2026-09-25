@@ -47,9 +47,14 @@ async function boot() {
   // happening is normal startup, and saying so is the difference between waiting and quitting.
   let h = await api("/api/health", { auth: false });
   if (!h.ok) {
-    for (let i = 0; i < 40 && !h.ok; i++) {
-      // ⚠️ 500ms x 40 = 20s of patience, then it is a real failure and saying so is honest.
-      setStatus("", `starting the search engine… (${i}s)`);
+    // ⚠️ MEASURE THE ELAPSED TIME, DO NOT USE THE LOOP COUNTER.
+    // The old code printed `(${i}s)` where `i` was an ITERATION INDEX — and each iteration is a
+    // 500ms sleep PLUS a failed fetch that has to time out, so it counted to 39 while claiming
+    // 20 and the count was never seconds at all. ⚠️ A number labelled with the wrong unit is
+    // worse than no number: it makes the user distrust every other figure on screen.
+    const t0 = Date.now();
+    while (!h.ok && Date.now() - t0 < 30000) {
+      setStatus("", `starting the search engine… ${((Date.now() - t0) / 1000).toFixed(0)}s`);
       await new Promise((r) => setTimeout(r, 500));
       h = await api("/api/health", { auth: false });
     }
@@ -74,8 +79,10 @@ async function boot() {
   } else {
     // ⚠️ ONLY REACHED AFTER ~20 SECONDS OF RETRIES, so this now means what it says. It also gives
     // the command that produces the real error, because "not responding" alone is unactionable.
-    setStatus("err", `The search engine did not start after 20s on 127.0.0.1:${PORT}. ` +
-                     `Run this to see why:  ./bin/ds`);
+    // ⚠️ POINT AT THE LOG, NOT AT A COMMAND. The shell now writes the daemon's own output to
+    // ~/.device-search/daemon.log, so the reason is in a file rather than lost to /dev/null.
+    setStatus("err", `The search engine did not start on 127.0.0.1:${PORT}. ` +
+                     `See ~/.device-search/daemon.log — or run ./bin/ds to see the error here.`);
   }
   $("q").focus();
 }
@@ -322,7 +329,17 @@ $("settings").addEventListener("click", () => Setup.open());
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { $("q").value = ""; results = []; render(); setStatus("", ""); }
+  if (document.hidden) {
+    // ⚠️ CLEAR THE QUERY, NOT THE DIAGNOSIS.
+    //
+    // This used to call setStatus("", "") as well, which wiped any error. So the sequence was:
+    // the engine fails to start, the user is told why, they click another app, the window hides,
+    // and on return THE MESSAGE IS GONE — which reads as "it fixed itself" when nothing changed.
+    // ⚠️ An error that erases itself is worse than no error, because the user stops looking.
+    $("q").value = "";
+    results = [];
+    render();
+  }
 });
 
 boot();
