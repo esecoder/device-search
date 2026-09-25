@@ -202,8 +202,21 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
     doc_max_id = max((r[0] for r in rows), default=0)
     doc_mtime_sum = float(sum(r[5] or 0 for r in rows))
 
-    done = vs.done_doc_ids()
-    todo = [r for r in rows if r[0] not in done]
+    # ⚠️⚠️ RESUME IS DRIVEN BY CONTENT FINGERPRINTS, NOT BY DOCUMENT IDS.
+    # Keying on the id alone asked "have we seen this document?" when the question that matters
+    # is "do our vectors still describe its CURRENT content?". A file edited from one topic to
+    # another answers yes to the first and no to the second — measured: re-indexing said
+    # "nothing to do — complete" for a file whose entire contents had changed, leaving a warning
+    # that no amount of re-running could clear.
+    current = {r[0]: f"{r[5] or 0:.3f}:{len(r[4])}" for r in rows}
+    plan = vs.plan_resume(current)
+    if plan["invalid_shards"]:
+        n = vs.drop_shards(plan["invalid_shards"])
+        # ⚠️ SAID OUT LOUD, because re-embedding neighbours costs time the user did not ask to
+        # spend and would otherwise look like the resume not working.
+        print(f"  ⚠️  {n} shard(s) contained changed or unverifiable documents — dropped "
+              f"and queued for re-embedding")
+    todo = [r for r in rows if r[0] in set(plan["todo"])]
     already = len(rows) - len(todo)
     if already:
         print(f"  resuming: {already:,} of {doc_count:,} documents already embedded "
@@ -252,7 +265,8 @@ def _build_vectors(store: Store, resume: bool = True) -> None:
         # ⚠️ BOTH LISTS, AND THEY ARE NOT THE SAME LIST. `ids` is one entry per DOCUMENT;
         # `per_chunk` is one entry per VECTOR. Passing only the second made the manifest count
         # 4,780 "documents" for a 117-document corpus.
-        vs.add_shard(ids, per_chunk, vecs, seconds=time.time() - t0)
+        vs.add_shard(ids, per_chunk, vecs, seconds=time.time() - t0,
+                     fingerprints=[current[i] for i in ids])
 
         # ---- progress with a MEASURED rate --------------------------------------
         now = time.time()

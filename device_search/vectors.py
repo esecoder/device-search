@@ -135,6 +135,71 @@ class VectorStore:
     def done_doc_ids(self) -> set[int]:
         return set(self.man.done_doc_ids)
 
+    def plan_resume(self, current: dict[int, str]) -> dict:
+        """Which shards are invalid, and which documents still need embedding.
+
+        ⚠️⚠️ THIS IS THE FIX FOR "THE WARNING HAS NO REMEDY". `done_doc_ids` answers "have we seen
+        this document?", which is the wrong question. The right one is "do our vectors still
+        describe this document's CURRENT CONTENT?" — and a file edited from one topic to another
+        answers yes to the first and no to the second.
+
+        ⚠️ INVALIDATION IS PER-SHARD, NOT PER-DOCUMENT. A shard is ~250 documents and is written
+        as one unit, so a changed document means re-embedding its whole shard. That is
+        deliberately wasteful: the alternative is surgery inside a written shard, and 250
+        documents is a few seconds of work against a 6-hour run.
+        """
+        invalid: list[int] = []
+        for i, sh in enumerate(self.man.shards):
+            fps = sh.get("doc_fps") or {}
+            # ⚠️ A shard written before fingerprints existed has no way to prove it is current,
+            # so it is treated as invalid. Re-embedding once is the price of not silently
+            # trusting data that cannot be checked.
+            if not fps:
+                invalid.append(i)
+                continue
+            for did_s, fp in fps.items():
+                did = int(did_s)
+                if did not in current or current[did] != fp:
+                    invalid.append(i)
+                    break
+
+        surviving = {i for i in range(len(self.man.shards))} - set(invalid)
+        covered: set[int] = set()
+        for i in surviving:
+            covered.update(int(d) for d in (self.man.shards[i].get("doc_fps") or {}))
+        todo = sorted(d for d in current if d not in covered)
+        return {"invalid_shards": invalid, "todo": todo,
+                "kept_documents": len(covered), "total_documents": len(current),
+                "will_reembed": len(todo) + sum(self.man.shards[i].get("documents", 0)
+                                                for i in invalid)}
+
+    def drop_shards(self, indices: list[int]) -> int:
+        """Remove shards from the manifest AND the disk. ⚠️ Both, or the index is corrupt."""
+        if not indices:
+            return 0
+        drop = set(indices)
+        keep, removed = [], 0
+        for i, sh in enumerate(self.man.shards):
+            if i in drop:
+                for name in (sh.get("file"), sh.get("ids_file")):
+                    if name:
+                        try:
+                            (self.dir / name).unlink()
+                        except OSError:
+                            pass
+                removed += 1
+            else:
+                keep.append(sh)
+        self.man.shards = keep
+        # ⚠️ done_doc_ids is DERIVED from the shards, so it is rebuilt rather than edited. Leaving
+        # a stale id in it would make the next resume skip a document that is no longer covered.
+        self.man.done_doc_ids = [int(d) for sh in keep for d in (sh.get("doc_fps") or {})]
+        self.man.complete = False
+        self._write_manifest()
+        self._vectors = self._ids = None
+        self._loaded_shards = 0
+        return removed
+
     def is_complete(self) -> bool:
         return bool(self.man.complete) and bool(self.man.shards)
 
@@ -156,7 +221,7 @@ class VectorStore:
 
     # ------------------------------------------------------------------ writing
     def add_shard(self, documents: list[int], chunk_ids: list[int], vectors: np.ndarray,
-                  seconds: float = 0.0) -> int:
+                  seconds: float = 0.0, fingerprints: list[str] | None = None) -> int:
         """Append one batch. ⚠️ Files first, manifest SECOND — see the module docstring.
 
         ⚠️⚠️ `documents` AND `chunk_ids` ARE DIFFERENT LISTS AND CONFLATING THEM WAS A BUG I
@@ -177,6 +242,10 @@ class VectorStore:
             raise ValueError(f"{len(chunk_ids)} chunk ids for {vectors.shape[0]} vectors")
         if not documents:
             raise ValueError("a shard must record which documents it covers")
+        # ⚠️ A SHARD WITHOUT FINGERPRINTS CANNOT BE INVALIDATED LATER, so it is refused here
+        # rather than producing a shard that silently cannot be repaired.
+        if fingerprints is None or len(fingerprints) != len(documents):
+            raise ValueError("every embedded document needs a fingerprint")
         idx = len(self.man.shards)
         vf = self.dir / f"vectors.{idx:04d}.npy"
         idsf = self.dir / f"vectors.{idx:04d}.ids.npy"
@@ -193,7 +262,15 @@ class VectorStore:
                 pass
         self.man.shards.append({"file": vf.name, "ids_file": idsf.name,
                                 "documents": len(documents), "chunks": int(vectors.shape[0]),
-                                "seconds": round(seconds, 3)})
+                                "seconds": round(seconds, 3),
+                                # ⚠️⚠️ THE FINGERPRINTS ARE WHAT MAKE STALENESS FIXABLE INSTEAD
+                                # OF MERELY DETECTABLE. Without them, "already embedded" means
+                                # "this doc id appears somewhere" — so a file edited from one
+                                # topic to another keeps its OLD vector for ever, re-indexing
+                                # says "nothing to do", and the staleness warning fires with no
+                                # remedy but --restart. Measured: editing a file's entire content
+                                # left `nothing to do — complete`.
+                                "doc_fps": {str(d): fp for d, fp in zip(documents, fingerprints)}})
         self.man.done_doc_ids.extend(int(d) for d in documents)
         if not self.man.started:
             self.man.started = time.time()
