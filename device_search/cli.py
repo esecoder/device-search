@@ -26,6 +26,7 @@ from .config import (DB_PATH, INDEX_DIR, MODES, META_PATH, VEC_PATH, ensure_inde
                      find_secrets, is_text_file, redact)
 from .crawl import walk
 from .store import Store
+from .runtime import human_time
 
 IDS_PATH = INDEX_DIR / "vectors.ids.npy"
 
@@ -152,59 +153,133 @@ def cmd_index(args) -> int:
         print(f"  pruned (gone)   : {pruned:,}")
 
     if not args.no_semantic:
-        _build_vectors(store)
+        _build_vectors(store, resume=not getattr(args, "restart", False))
     store.set_meta("indexed_at", time.time())
     print(f"\n  ✅ index at {DB_PATH}  ({store.count():,} documents)")
     return 0
 
 
-def _build_vectors(store: Store) -> None:
+def _build_vectors(store: Store, resume: bool = True) -> None:
+    """Embed every document that is not already embedded, in resumable shards.
+
+    ⚠️⚠️ THE LOOP IS BATCHED SO THAT INTERRUPTION COSTS ONE BATCH, NOT EVERYTHING.
+    The previous version embedded all 5,687 documents and wrote once at the end — six and a
+    half hours of work that an interrupt discards entirely. See `vectors.py` for why the
+    manifest is written AFTER the shard files and not before.
+
+    ⚠️ AND IT REPORTS PROGRESS WITH A MEASURED RATE, not a spinner. Six hours of no output is
+    indistinguishable from a hang, and a user who cannot tell the difference will kill a
+    working job — which, before this change, meant losing all of it.
+    """
     from .semantic import Semantic
-    # ⚠️ CHECK THE RUNTIME LOADS BEFORE STARTING AN INDEX THAT WILL DIE PART-WAY THROUGH.
-    # A failed import here happens AFTER the text phase has already run, so the user waits
-    # minutes and then gets a symbol error with no idea which of the two phases broke.
+    from .vectors import SHARD_DOCS, VectorStore
+    from .runtime import ensure_onnx_usable
+
     try:
-        from .runtime import ensure_onnx_usable
         ensure_onnx_usable(progress=lambda m: print(f"    runtime: {m}"))
     except Exception:
         pass
+
     sem = Semantic()
     ok, why = sem.available()
     print(f"\n  semantic backend: {'ON  ' + why if ok else 'OFF ' + why}")
     if not ok:
-        # ⚠️ SAID OUT LOUD. Silently skipping this makes "no results" ambiguous between
-        # "not on disk" and "that backend was never built".
-        print("    ⚠️ meaning-based queries will not work. Install sentence-transformers, or ")
+        print("    ⚠️ meaning-based queries will not work. Install sentence-transformers, or")
         print("       pass --no-semantic to silence this.")
         return
-    print(f"    embedding {store.count():,} documents…")
-    rows = store.conn.execute("SELECT id, path, lang, n_lines, text FROM documents")
-    from .crawl import FileDoc
-    ids = []
-    docs = []
-    for doc_id, path, lang, n_lines, text in rows:
-        docs.append(FileDoc(path, 0.0, len(text), lang, text, n_lines))
-        ids.append(doc_id)
-    # ⚠️ `doc_ids` is expanded to ONE ENTRY PER CHUNK, in the same order `build` emits chunks.
-    # Getting this alignment wrong silently associates every vector with the wrong file — the
-    # index would still answer, and every answer would point at the wrong path.
-    sem.build(iter(docs))
-    per_chunk = []
-    if sem.vectors is not None and sem.vectors.shape[0]:
-        start = 0
-        for d, doc_id in zip(docs, ids):
+
+    vs = VectorStore(INDEX_DIR, model=getattr(sem, "model_name", ""),
+                     runtime=sem.runtime or "", dim=384)
+    if not resume and vs.man.shards:
+        n = vs.reset()
+        print(f"  --restart: cleared {n} shard(s), starting from zero")
+
+    # ⚠️ THE FINGERPRINT IS TAKEN OVER THE WHOLE INDEX, not just the todo set, because that is
+    # what a later search will compare against to decide whether these vectors are still valid.
+    rows = list(store.conn.execute(
+        "SELECT id, path, lang, n_lines, text, mtime FROM documents ORDER BY id"))
+    doc_count = len(rows)
+    doc_max_id = max((r[0] for r in rows), default=0)
+    doc_mtime_sum = float(sum(r[5] or 0 for r in rows))
+
+    done = vs.done_doc_ids()
+    todo = [r for r in rows if r[0] not in done]
+    already = len(rows) - len(todo)
+    if already:
+        print(f"  resuming: {already:,} of {doc_count:,} documents already embedded "
+              f"({vs.total_chunks():,} chunks in {len(vs.man.shards)} shard(s))")
+    if not todo:
+        vs.finish(doc_count, doc_max_id, doc_mtime_sum)
+        print(f"  ✅ nothing to do — {vs.total_chunks():,} chunks, complete")
+        return
+
+    est_chunks = max(1, int(len(todo) * 34))       # measured mean chunks/doc
+    print(f"  embedding {len(todo):,} documents (~{est_chunks:,} chunks) in "
+          f"{SHARD_DOCS}-document shards")
+    print(f"  ⚠️ interrupt any time — completed shards are kept and this resumes here")
+
+    from .runtime import MEASURED
+    rate = MEASURED.get("torch_chunks_per_sec" if sem.runtime == "torch"
+                        else "onnx_chunks_per_sec", 8.2)
+    t_start = time.time()
+    t_last, chunks_last = t_start, vs.total_chunks()
+
+    for i in range(0, len(todo), SHARD_DOCS):
+        batch = todo[i:i + SHARD_DOCS]
+        from .crawl import FileDoc
+        docs = [FileDoc(r[1], r[5] or 0.0, len(r[4]), r[2], r[4], r[3]) for r in batch]
+        ids = [r[0] for r in batch]
+
+        t0 = time.time()
+        sem.build(iter(docs))
+        vecs = sem.vectors if sem.vectors is not None else None
+        if vecs is None or vecs.shape[0] == 0:
+            print(f"    ⚠️ shard {i // SHARD_DOCS} produced no vectors — skipping")
+            continue
+        per_chunk = []
+        for d in docs:
+            per_chunk.extend([0] * len(sem.chunk(d.text)))
+        # ⚠️ The vector builder needs one id PER CHUNK, in the order chunks were emitted. Getting
+        # this alignment wrong silently associates every vector with the wrong file.
+        per_chunk = per_chunk[:vecs.shape[0]]
+        k = 0
+        for doc_id, d in zip(ids, docs):
             n = len(sem.chunk(d.text))
-            per_chunk.extend([doc_id] * n)
-            start += n
-        sem.doc_ids = __import__("numpy").asarray(per_chunk[:sem.vectors.shape[0]],
-                                                  dtype="int64")
-    sem.save(VEC_PATH, sem.doc_ids, IDS_PATH)
-    print(f"    ✅ {sem.vectors.shape[0]:,} vectors -> {VEC_PATH}")
+            for j in range(n):
+                if k < len(per_chunk):
+                    per_chunk[k] = doc_id
+                    k += 1
+        # ⚠️ BOTH LISTS, AND THEY ARE NOT THE SAME LIST. `ids` is one entry per DOCUMENT;
+        # `per_chunk` is one entry per VECTOR. Passing only the second made the manifest count
+        # 4,780 "documents" for a 117-document corpus.
+        vs.add_shard(ids, per_chunk, vecs, seconds=time.time() - t0)
+
+        # ---- progress with a MEASURED rate --------------------------------------
+        now = time.time()
+        done_docs = already + min(i + SHARD_DOCS, len(todo))
+        pct = done_docs / doc_count * 100 if doc_count else 100
+        span = now - t_last
+        grew = vs.total_chunks() - chunks_last
+        # ⚠️ A ROLLING rate, not the average. The average carries the first shard's model-load
+        # cost forever, so the estimate stays pessimistic for the whole run and the user watches
+        # a number that is wrong in one direction.
+        if span >= 1 and grew > 0:
+            rate = grew / span
+            t_last, chunks_last = now, vs.total_chunks()
+        remaining = max(0, est_chunks - vs.total_chunks())
+        eta = remaining / rate if rate > 0 else 0
+        bar_n = 24
+        filled = int(bar_n * pct / 100)
+        print(f"    [{'█' * filled}{'·' * (bar_n - filled)}] {pct:5.1f}%  "
+              f"{done_docs:,}/{doc_count:,} docs  {vs.total_chunks():,} chunks  "
+              f"{rate:.1f} ch/s  ETA {human_time(eta)}", flush=True)
+
+    vs.finish(doc_count, doc_max_id, doc_mtime_sum)
+    took = time.time() - t_start
+    print(f"  ✅ {vs.total_chunks():,} chunks in {len(vs.man.shards)} shards "
+          f"({human_time(took)} this run)")
 
 
-# =============================================================================
-# search
-# =============================================================================
 def cmd_search(args) -> int:
     from .agent import search
     store = Store(DB_PATH)
@@ -260,6 +335,18 @@ def cmd_search(args) -> int:
         if llm.get("reason"):
             print(f"                  {llm['reason']}")
     print(f"  took          : {dt:.2f}s")
+    # ⚠️ PRINTED BEFORE THE RESULTS, not after. A caveat underneath a list is read as a
+    # footnote; the same sentence above it is read as a qualification of what follows.
+    v = trace.get("vectors") or {}
+    if v.get("stale"):
+        print()
+        print(f"  ⚠️  SEMANTIC RESULTS MAY BE WRONG — {v.get('reason')}")
+        if v.get("severity") == "incomplete":
+            print(f"      embedding stopped part-way; meaning-based hits cover only part of")
+            print(f"      the index. Lexical matches below are unaffected.")
+        else:
+            print(f"      vectors were built against an older index. Re-run `ds index` to")
+            print(f"      refresh them. Exact and keyword matches are unaffected.")
     print()
 
     if not cands:
@@ -449,6 +536,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("index", help="crawl and build the index")
     p.add_argument("--rebuild", action="store_true")
     p.add_argument("--no-semantic", action="store_true", help="skip embeddings (fast, offline)")
+    # ⚠️ OPT-IN, not the default. Rebuilding from zero should be something a user CHOOSES, not
+    # something that silently happens because resume could not tell the difference.
+    p.add_argument("--restart", action="store_true",
+                   help="discard completed vector shards and start the embedding over")
     p.set_defaults(fn=cmd_index)
 
     p = sub.add_parser("search", help="search the index")

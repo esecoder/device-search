@@ -282,6 +282,21 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
         if len(cands) >= top_k:
             break
 
+    # ⚠️⚠️ STALENESS IS ATTACHED TO THE RESULT, NOT LEFT FOR THE CALLER TO REMEMBER.
+    # `--no-semantic` does not clear vectors, and an interrupted embedding run leaves the old
+    # ones in place. In both cases semantic hits are computed against a DIFFERENT document set —
+    # and a user who is not told will read a wrong answer as a right one.
+    try:
+        from .vectors import VectorStore
+        from .config import INDEX_DIR
+        vs = VectorStore(INDEX_DIR, dim=384)
+        row = store.conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
+        ).fetchone()
+        trace["vectors"] = vs.check_stale(row[0], row[1], float(row[2] or 0))
+    except Exception as e:
+        trace["vectors"] = {"stale": None, "reason": f"could not check ({type(e).__name__})"}
+
     if use_llm and cands:
         cands, llm_report = llm_rerank(query, cands)
         trace["llm"] = llm_report

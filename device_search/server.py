@@ -70,6 +70,10 @@ class Engine:
         self.semantic = None
         self.semantic_note = ""
         self._load_errors = []
+        # ⚠️ THE INDEX RUN STATE LIVES ON THE ENGINE, because that is the object the HTTP handler
+        # can actually see. Putting it on the server and reading it from the engine was a real
+        # AttributeError that only surfaced when the endpoint was called.
+        self.last_index: dict = {}
 
     def warm(self) -> None:
         """Load the embedding backend up front so the FIRST query is not the slow one."""
@@ -115,6 +119,38 @@ class Engine:
                 "via": c.sources,
             } for c in cands],
         }
+
+    def index_status(self) -> dict:
+        """⚠️ WHAT THE UI NEEDS TO SAY "indexing 6% — results are incomplete".
+
+        ⚠️ THE UI CANNOT COMPUTE THIS ITSELF. Only the daemon knows which documents are in the
+        index, which are embedded, and whether the vectors still describe the documents. A
+        frontend guessing at it would show a confident progress bar attached to nothing.
+        """
+        from .vectors import VectorStore
+        from .config import INDEX_DIR
+        vs = VectorStore(INDEX_DIR, dim=384)
+        doc_count = self.store.count()
+        # ⚠️ The same fingerprint the manifest stored, recomputed over the CURRENT index, so the
+        # comparison is like-for-like.
+        row = self.store.conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
+        ).fetchone()
+        stale = vs.check_stale(row[0], row[1], float(row[2] or 0))
+        run = dict(self.last_index or {})
+        emb = {"documents_embedded": len(vs.man.done_doc_ids),
+               "documents_total": doc_count,
+               "chunks": vs.total_chunks(),
+               "shards": len(vs.man.shards),
+               "complete": vs.man.complete,
+               "model": vs.man.model, "runtime": vs.man.runtime}
+        if emb["documents_total"]:
+            emb["percent"] = round(emb["documents_embedded"] / emb["documents_total"] * 100, 1)
+        else:
+            emb["percent"] = 0.0
+        return {"indexing": run.get("running", False), "run": run,
+                "embedding": emb, "stale": stale,
+                "searchable_now": doc_count > 0}
 
     def stats(self) -> dict:
         s = self.store.stats()
@@ -175,8 +211,17 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/health":
             # ⚠️ UNAUTHENTICATED ON PURPOSE: the UI polls this to know the daemon is up, and it
             # reveals nothing about the user's files.
+            st = ENGINE.index_status()
             self._send(200, {"ok": True, "version": "0.1",
-                             "documents": ENGINE.store.count(), "semantic": ENGINE.semantic_note})
+                             "documents": ENGINE.store.count(),
+                             "semantic": ENGINE.semantic_note,
+                             # ⚠️ THE WARNING TRAVELS ON THE CHEAP POLL. The UI polls health
+                             # every few seconds; making it also fetch /api/index/status just to
+                             # know whether to draw a banner would double the polling for one
+                             # boolean.
+                             "stale": st["stale"],
+                             "embedding_percent": st["embedding"]["percent"],
+                             "indexing": st["indexing"]})
             return
         if not self._authorised():
             return
@@ -192,6 +237,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm))
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/index/status":
+                self._send(200, ENGINE.index_status())
             elif url.path == "/api/runtime":
                 # ⚠️ THE CHOOSER, SERVED. The UI cannot run pip itself and must not try — it
                 # has no idea which interpreter is running the engine, and installing into the
@@ -234,6 +281,9 @@ class Handler(BaseHTTPRequestHandler):
             # long media index runs. The alternative — blocking the request — makes the app
             # look frozen for the 18-36 hours a full OCR pass could take.
             def run():
+                # ⚠️ THE FLAG IS SET AND CLEARED IN A `finally`, so an exception cannot leave the
+                # UI showing "indexing…" forever with no way to tell that it died.
+                ENGINE.last_index = {"running": True, "started": time.time()}
                 try:
                     from .crawl import walk
                     from .config import MODES
@@ -250,9 +300,11 @@ class Handler(BaseHTTPRequestHandler):
                         ENGINE.store.add_many(batch)
                         n += len(batch)
                     ENGINE.store.prune_missing()
-                    self.server.last_index = {"indexed": n, "at": time.time()}
+                    ENGINE.last_index = {"running": False, "indexed": n,
+                                         "at": time.time()}
                 except Exception as e:
-                    self.server.last_index = {"error": f"{type(e).__name__}: {e}"}
+                    ENGINE.last_index = {"running": False,
+                                         "error": f"{type(e).__name__}: {e}"}
             t = threading.Thread(target=run, daemon=True)
             t.start()
             self._send(202, {"accepted": True, "note": "indexing in the background"})
@@ -282,7 +334,6 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.token = token
-    httpd.last_index = None
     print(f"  device-search daemon")
     print(f"    http://127.0.0.1:{port}")
     print(f"    index  : {DB_PATH} ({ENGINE.store.count():,} documents)")
