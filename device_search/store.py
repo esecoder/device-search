@@ -18,6 +18,7 @@ the same: the shortcut's failure mode was invisible.
 from __future__ import annotations
 
 import functools
+import os
 import json
 import math
 import re
@@ -149,6 +150,81 @@ class Store:
                 self.conn.execute("SELECT path, mtime, size FROM documents")}
 
     @_serialised
+    def remove_under_roots(self, roots: list, dry_run: bool = False) -> dict:
+        """Delete every document located under any of these directories.
+
+        ⚠️⚠️ THIS IS THE MISSING HALF OF SETUP, AND ITS ABSENCE WAS A ONE-WAY DOOR.
+        `prune_missing` only deletes rows whose FILE no longer exists on disk, so switching from
+        curated folders to "everything" added documents and there was no operation anywhere in
+        the tool to take them back out. A user could widen the index and never narrow it.
+
+        ⚠️ IT MATCHES ON THE PATH PREFIX, and the trailing separator is load-bearing. Comparing
+        `/Users/x/Doc` without it also matches `/Users/x/Documents` and `/Users/x/Doc-backup` —
+        so removing one folder would silently delete two others. That is a data-loss bug that
+        looks like it works.
+        """
+        from pathlib import Path as _P
+        # ⚠️⚠️ BOTH FORMS OF EVERY PATH, AND THIS IS NOT DEFENSIVE PADDING — IT WAS A REAL BUG.
+        #
+        # On macOS `/tmp` is a SYMLINK to `/private/tmp`. `remove_under_roots(['/tmp/isotest'])`
+        # resolved the root to `/private/tmp/isotest/` while the stored document paths began
+        # `/tmp/isotest/`, so the string prefix match failed and the removal returned 0 with no
+        # error at all.
+        #
+        # ⚠️ A REMOVAL THAT SILENTLY DOES NOTHING IS WORSE THAN ONE THAT FAILS. The user is told
+        # "0 removed", assumes a bug in the count, and believes the documents are gone — while
+        # they are still indexed, still searchable, and still on disk.
+        #
+        # ⚠️ SO BOTH FORMS ARE MATCHED: the resolved one, and the literal expanded one. Which one
+        # the stored paths use depends on how they were reached at crawl time, and that is not
+        # knowable from here.
+        prefixes = []
+        for r in roots:
+            try:
+                raw = str(_P(r).expanduser())
+            except (OSError, RuntimeError):
+                continue
+            prefixes.append(raw.rstrip(os.sep) + os.sep)
+            try:
+                prefixes.append(str(_P(raw).resolve()).rstrip(os.sep) + os.sep)
+            except OSError:
+                pass
+        prefixes = sorted(set(prefixes))
+        if not prefixes:
+            return {"removed": 0, "roots": [], "error": "no usable roots given"}
+        victims = []
+        for doc_id, path in self.conn.execute("SELECT id, path FROM documents"):
+            if any(str(path).startswith(pfx) for pfx in prefixes):
+                victims.append((doc_id, path))
+        if dry_run:
+            out = {"removed": len(victims), "roots": prefixes, "dry_run": True,
+                   "sample": [v[1] for v in victims[:5]]}
+            # ⚠️ ZERO MATCHES IS REPORTED, not passed off as success. "I removed nothing" and
+            # "there was nothing to remove" look identical in a count and mean opposite things.
+            if not victims:
+                out["warning"] = ("no indexed documents are under any of those paths — check "
+                                  "the path is spelled the way it was crawled")
+            return out
+        if victims:
+            self.conn.executemany("DELETE FROM documents WHERE id=?",
+                                  [(v[0],) for v in victims])
+            self.conn.commit()
+            self._invalidate()
+        return {"removed": len(victims), "roots": prefixes}
+
+    def roots_in_index(self) -> list[dict]:
+        """⚠️ WHAT IS ACTUALLY IN THE INDEX, as opposed to what was REQUESTED.
+
+        The configured roots and the indexed roots drift apart the moment a folder is added or a
+        drive is unmounted, and the UI needs the second one to show the truth.
+        """
+        seen: dict[str, int] = {}
+        for (path,) in self.conn.execute("SELECT path FROM documents"):
+            top = os.sep.join(str(path).split(os.sep)[:4])     # /Users/<name>/<folder>
+            seen[top] = seen.get(top, 0) + 1
+        return sorted(({"path": k, "documents": v} for k, v in seen.items()),
+                      key=lambda d: -d["documents"])
+
     def prune_missing(self) -> int:
         """Drop rows whose file no longer exists. ⚠️ Without this the index only grows, and a
         deleted secret stays searchable forever — which is the exact thing a user would never

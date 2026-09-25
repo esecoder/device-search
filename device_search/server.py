@@ -198,6 +198,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):        # ⚠️ quiet: a daemon logging every poll is noise
         pass
 
+    def _read_body(self) -> str:
+        """⚠️ stdlib http.server does NOT read the body for you, and forgetting this makes every
+        POST look like it arrived empty."""
+        n = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(n).decode() if n else ""
+
     def _send(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
         self.send_response(code)
@@ -247,6 +253,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm))
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/roots":
+                from pathlib import Path as _P
+
+                from .config import MODES
+                configured = ENGINE.store.get_meta("roots") or []
+                # ⚠️ SUGGESTED FOLDERS ARE CHECKED FOR EXISTENCE, so the UI never offers a
+                # folder the user does not have. An empty Downloads on a fresh machine is normal.
+                suggested = [
+                    {"path": str(f), "name": f.name, "exists": f.is_dir()}
+                    for f in (_P.home() / "Documents", _P.home() / "Desktop", _P.home() / "Downloads")
+                ]
+                self._send(200, {"configured": configured,
+                                 "indexed": ENGINE.store.roots_in_index(),
+                                 "suggested": suggested,
+                                 "modes": sorted(MODES.keys()),
+                                 "documents": ENGINE.store.count()})
             elif url.path == "/api/index/status":
                 self._send(200, ENGINE.index_status())
             elif url.path == "/api/runtime":
@@ -274,7 +296,44 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._authorised():
             return
-        if urlparse(self.path).path == "/api/install":
+        path_q = urlparse(self.path)
+        if path_q.path == "/api/roots":
+            # ⚠️ SET THE ROOTS, THEN INDEX — two calls, deliberately. Setting roots is instant and
+            # reversible; indexing is minutes to hours. Fusing them would make a mis-typed path
+            # start a long job that cannot be stopped without killing the app.
+            try:
+                body = json.loads(self._read_body() or "{}")
+            except Exception as e:
+                self._send(400, {"error": f"bad JSON: {e}"})
+                return
+            roots = [str(r) for r in (body.get("roots") or [])]
+            missing = [r for r in roots if not Path(r).expanduser().is_dir()]
+            if missing:
+                # ⚠️ REJECTED, NOT SILENTLY SKIPPED. A typo'd path that is quietly ignored
+                # produces an empty index and a user who concludes the tool is broken.
+                self._send(400, {"error": "not a directory", "paths": missing})
+                return
+            ENGINE.store.set_meta("roots", roots)
+            ENGINE.store.set_meta("mode", body.get("mode") or "explicit")
+            self._send(200, {"roots": roots, "count": len(roots),
+                             "next": "POST /api/index to start"})
+        elif path_q.path == "/api/roots/remove":
+            try:
+                body = json.loads(self._read_body() or "{}")
+            except Exception as e:
+                self._send(400, {"error": f"bad JSON: {e}"})
+                return
+            targets = [str(r) for r in (body.get("roots") or [])]
+            # ⚠️ DRY RUN BY DEFAULT. This deletes rows, and the difference between "show me what
+            # this would remove" and "remove it" should be an explicit opt-in, not a default.
+            result = ENGINE.store.remove_under_roots(targets, dry_run=bool(body.get("dry_run", True)))
+            if not body.get("dry_run"):
+                # ⚠️ Dropping documents invalidates every shard that contained them, and the
+                # fingerprint check detects that on the next run — no special code path needed.
+                ENGINE.store.prune_missing()
+                result["note"] = "run an index to rebuild the vectors for the remaining documents"
+            self._send(200, result)
+        elif path_q.path == "/api/install":
             # ⚠️ RETURNS 202 AND POLLS, because a pip install takes minutes and a blocked
             # request would look like a hang. ⚠️ AND STARTING TWICE IS REFUSED, not queued —
             # two pips writing the same environment is a way to corrupt it, and a double-click
