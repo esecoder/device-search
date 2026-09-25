@@ -97,6 +97,11 @@ class VectorStore:
             self.man.dim = dim
         self._vectors: np.ndarray | None = None
         self._ids: np.ndarray | None = None
+        # ⚠️ HOW MANY SHARDS ARE CURRENTLY IN MEMORY, tracked separately from the manifest.
+        # This is what makes an incremental refresh possible: the daemon keeps serving while the
+        # CLI indexes, and picks up each new shard WITHOUT re-reading the ones it already has.
+        self._loaded_shards = 0
+        self._loaded_mtime = 0.0
 
     # ---------------------------------------------------------------- manifest
     def _read_manifest(self) -> Manifest:
@@ -193,8 +198,14 @@ class VectorStore:
         if not self.man.started:
             self.man.started = time.time()
         self._write_manifest()
-        self._vectors = None      # invalidate the cache; the next search reloads
-        self._ids = None
+        # ⚠️ THE COUNTER IS SYNCED, NOT RESET TO ZERO. This process just wrote the shard, so it
+        # is already accounted for — zeroing would make the next refresh load it a second time
+        # and silently duplicate every vector in the shard.
+        self._loaded_shards = len(self.man.shards)
+        try:
+            self._loaded_mtime = self.manifest_path.stat().st_mtime
+        except OSError:
+            self._loaded_mtime = 0.0
         return int(vectors.shape[0])
 
     def finish(self, doc_count: int = 0, doc_max_id: int = 0, doc_mtime_sum: float = 0.0) -> None:
@@ -217,6 +228,7 @@ class VectorStore:
         self.man = Manifest()
         self._write_manifest()
         self._vectors = self._ids = None
+        self._loaded_shards = 0
         return n
 
     def prune_orphans(self) -> int:
@@ -235,30 +247,65 @@ class VectorStore:
         return removed
 
     # ------------------------------------------------------------------ reading
-    def load(self) -> bool:
-        if self._vectors is not None:
+    def refresh(self) -> bool:
+        """⚠️⚠️ PICK UP SHARDS WRITTEN BY ANOTHER PROCESS — the whole reason this exists.
+
+        The two-terminal workflow is `./bin/ds index` in one tab and `cargo run` in another. The
+        daemon loads its vectors at startup and, without this, would keep serving THAT shard set
+        for as long as it ran: indexing proceeds, the manifest grows, and search silently returns
+        results from a frozen snapshot. ⚠️ The staleness banner would say "incomplete" — so the
+        user is warned — but the vectors on screen would never update, which is worse than a
+        warning can express.
+
+        ⚠️ INCREMENTAL, NOT A FULL RELOAD. A 250-document shard lands every ~30 seconds during a
+        long index, and re-reading every shard each time is O(n^2) over the run. Appending only
+        the new ones keeps each refresh proportional to what actually changed.
+        """
+        try:
+            mt = self.manifest_path.stat().st_mtime
+        except OSError:
+            return self._vectors is not None
+        if mt == self._loaded_mtime and self._vectors is not None:
             return True
-        if not self.man.shards:
-            return False
+        # ⚠️ Re-read the manifest itself: another process rewrote it, so our in-memory copy is
+        # the thing that is out of date, not just the shard files.
+        self.man = self._read_manifest()
+        self._loaded_mtime = mt
+
+        if len(self.man.shards) <= self._loaded_shards:
+            return self._vectors is not None
+
         vecs, ids = [], []
-        for s in self.man.shards:
+        for s in self.man.shards[self._loaded_shards:]:
             vf = self.dir / s["file"]
             if not vf.exists():
-                # ⚠️ A MISSING SHARD IS REPORTED, NOT SILENTLY SKIPPED. Skipping it would return
-                # search results that quietly omit whole batches of the corpus — a failure the
-                # user would read as "that file is not on my machine".
+                # ⚠️ A HALF-WRITTEN SHARD IS EXPECTED HERE, not an anomaly. The CLI writes the
+                # .npy and the .ids.npy and only THEN updates the manifest, so a shard named in
+                # the manifest is complete by construction. If it is missing anyway something
+                # deleted it, and skipping it would quietly drop a batch of the corpus.
                 raise FileNotFoundError(f"shard listed in the manifest is gone: {vf}")
             vecs.append(np.load(vf))
             ids.append(np.load(self.dir / s["ids_file"]))
-        self._vectors = np.concatenate(vecs, axis=0) if vecs else np.zeros((0, self.man.dim),
-                                                                          dtype=np.float32)
-        self._ids = np.concatenate(ids, axis=0) if ids else np.zeros(0, dtype=np.int64)
+        if not vecs:
+            return self._vectors is not None
+
+        newv = np.concatenate(vecs, axis=0)
+        newi = np.concatenate(ids, axis=0)
+        if self._vectors is None:
+            self._vectors, self._ids = newv, newi
+        else:
+            self._vectors = np.concatenate([self._vectors, newv], axis=0)
+            self._ids = np.concatenate([self._ids, newi], axis=0)
+        self._loaded_shards = len(self.man.shards)
         return self._vectors.shape[0] > 0
+
+    def load(self) -> bool:
+        return self.refresh()
 
     def search(self, qvec: np.ndarray, limit: int) -> list[tuple[int, float]]:
         """⚠️ ONE HIT PER DOCUMENT. Without this the top-10 is ten chunks of the same file —
         technically correct and useless."""
-        if not self.load() or self._vectors.size == 0:
+        if not self.refresh() or self._vectors is None or self._vectors.size == 0:
             return []
         sims = self._vectors @ np.asarray(qvec, dtype=np.float32).reshape(-1)
         order = np.argsort(-sims)[: max(limit * 4, 40)]
