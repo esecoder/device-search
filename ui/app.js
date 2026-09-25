@@ -45,6 +45,14 @@ async function boot() {
     // documents are embedded and whether the vectors still describe them. A frontend computing
     // this itself would draw a confident progress bar attached to nothing.
     applyIndexState(h);
+    // ⚠️⚠️ THE FIRST-RUN DECISION. An empty index with no message is what made the app look
+    // broken: it launched, showed a search box that returned nothing, and gave no hint that a
+    // terminal command was expected. If there is nothing to search, say so and offer the fix.
+    if (h.documents === 0 || !h.documents) {
+      Setup.open();
+    } else if (h.indexing) {
+      startPolling();
+    }
   } else {
     setStatus("err", "The search daemon is not responding on 127.0.0.1:" + PORT);
   }
@@ -55,12 +63,30 @@ async function boot() {
 // DIFFERENT problems — one resolves by waiting, the other does not — so they must not share a
 // message. Showing "indexing…" for stale vectors would tell the user to wait for something that
 // is not happening.
+// ⚠️ A PLAIN SETTER, separate from applyIndexState, because these are messages the APP wants to
+// show ("could not reach the daemon") rather than states the ENGINE reports.
+function setBanner(cls, text) {
+  const bar = $("banner");
+  if (!cls) { bar.className = ""; bar.textContent = ""; return; }
+  bar.className = "show " + cls;
+  bar.textContent = text;
+}
+
 function applyIndexState(h) {
   const bar = $("banner");
   const pct = h.embedding_percent || 0;
   if (h.indexing) {
     bar.className = "show info";
     bar.textContent = `Indexing… ${pct.toFixed(0)}% — results are incomplete`;
+  } else if (h.live && h.live.running) {
+    // ⚠️ A RUN STARTED SOMEWHERE ELSE — a terminal, or a previous launch. The daemon cannot
+    // compute this itself; it comes from the status file the indexing process writes, including
+    // the ETA. Without it the app would show a stale banner for a job it cannot see.
+    const p = h.live.percent;
+    bar.className = "show info";
+    bar.textContent = `Indexing${p != null ? " " + p.toFixed(0) + "%" : "…"} — results are ` +
+                      `incomplete` +
+                      (h.live.eta_seconds ? `  ·  about ${fmtEta(h.live.eta_seconds)} left` : "");
   } else if (h.stale && h.stale.stale) {
     if (h.stale.severity === "incomplete") {
       bar.className = "show warn";
@@ -100,8 +126,15 @@ function setStatus(cls, text) {
 async function api(path, opts = {}) {
   const headers = {};
   if (opts.auth !== false) headers["X-DS-Token"] = TOKEN;
+  const init = { headers, method: opts.method || "GET" };
+  if (opts.body !== undefined) {
+    // ⚠️ The Content-Type matters: without it the server's json.loads gets an empty body, and
+    // the request looks like it arrived with no data rather than being malformed.
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(opts.body);
+  }
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}${path}`, { headers });
+    const r = await fetch(`http://127.0.0.1:${PORT}${path}`, init);
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return { ok: false, error: body.error || `HTTP ${r.status}` };
     return { ok: true, ...body };
@@ -232,10 +265,26 @@ function hideWindow() {
   if (invoke) invoke("hide_window").catch(() => {});
 }
 
+function fmtEta(sec) {
+  // ⚠️ Rounded to something a person would say. "4h 12m" is actionable; "15120.4s" is not.
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 // ---------------------------------------------------------------- events
 $("q").addEventListener("input", onType);
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { e.preventDefault(); hideWindow(); }
+  // ⚠️ SETUP MUST BE REACHABLE AFTER FIRST RUN. A one-shot wizard that cannot be reopened makes
+  // "add another folder" impossible without deleting the index.
+  if (e.key === "," && (e.metaKey || e.ctrlKey)) { e.preventDefault(); Setup.open(); return; }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (Setup.isOpen()) { Setup.close(); return; }
+    hideWindow();
+  }
   else if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
   else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
   else if (e.key === "Enter") { e.preventDefault(); open(e.metaKey || e.ctrlKey); }
@@ -245,6 +294,10 @@ window.addEventListener("keydown", (e) => {
 if (window.__TAURI__?.event) {
   window.__TAURI__.event.listen("focus-input", () => $("q").select());
 }
+// ⚠️ THE SETTINGS AFFORDANCE, because a first-run wizard that cannot be reopened makes "add
+// another folder" impossible without deleting the index.
+$("settings").addEventListener("click", () => Setup.open());
+
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.
 document.addEventListener("visibilitychange", () => {

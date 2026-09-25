@@ -36,16 +36,23 @@
 
     <div id="status"></div>
 
+    <!-- ⚠️ The setup panel REPLACES the results area rather than floating over it, so an empty
+         index shows a clear next action instead of an empty list. -->
+    <div id="setup"></div>
+
     <div id="results"></div>
 
     <div id="foot">
       <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       <span><kbd>⌘↵</kbd> reveal</span>
+      <span id="settings" title="choose folders (⌘,)">folders</span>
       <span id="indexinfo"></span>
     </div>
   </div>
 
+<!-- ⚠️ setup.js loads FIRST: app.js calls Setup.open() during boot. -->
+<script src="setup.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
