@@ -35,7 +35,25 @@ async function boot() {
     setStatus("err", `Cannot read the API token (${e}). Start the daemon once:  ds index`);
     return;
   }
-  const h = await api("/api/health", { auth: false });
+  // ⚠️⚠️ WAIT FOR THE ENGINE, DO NOT CHECK IT ONCE.
+  //
+  // The shell spawns the Python daemon and then immediately asks whether it is healthy. Starting
+  // a Python process takes a moment to bind the port, so the FIRST check ALWAYS FAILS — and the
+  // old code had no retry, so it displayed "the search daemon is not responding" permanently and
+  // never looked again. The daemon was fine a second later and the user was told otherwise for
+  // the rest of the session.
+  //
+  // ⚠️ AND THE MESSAGE WAS WRONG TOO. "Not responding" describes a crash. What was actually
+  // happening is normal startup, and saying so is the difference between waiting and quitting.
+  let h = await api("/api/health", { auth: false });
+  if (!h.ok) {
+    for (let i = 0; i < 40 && !h.ok; i++) {
+      // ⚠️ 500ms x 40 = 20s of patience, then it is a real failure and saying so is honest.
+      setStatus("", `starting the search engine… (${i}s)`);
+      await new Promise((r) => setTimeout(r, 500));
+      h = await api("/api/health", { auth: false });
+    }
+  }
   if (h.ok) {
     $("indexinfo").textContent =
       `${h.documents.toLocaleString()} documents indexed` +
@@ -54,7 +72,10 @@ async function boot() {
       startPolling();
     }
   } else {
-    setStatus("err", "The search daemon is not responding on 127.0.0.1:" + PORT);
+    // ⚠️ ONLY REACHED AFTER ~20 SECONDS OF RETRIES, so this now means what it says. It also gives
+    // the command that produces the real error, because "not responding" alone is unactionable.
+    setStatus("err", `The search engine did not start after 20s on 127.0.0.1:${PORT}. ` +
+                     `Run this to see why:  ./bin/ds`);
   }
   $("q").focus();
 }

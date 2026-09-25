@@ -188,8 +188,20 @@ pub fn run() {
             let search = MenuItem::with_id(app, "search", "Search…  ⇧⌘Space", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&search, &quit])?;
+            // ⚠️⚠️ A COLOURED 512px PNG IS THE WRONG ASSET FOR A MENU-BAR ICON.
+            // macOS menu-bar items are TEMPLATE images — black plus alpha, ~22pt — which the
+            // system inverts for light and dark mode. A large coloured icon is scaled down badly
+            // and does not adapt, so the item can exist and be effectively invisible.
+            // ⚠️ AND A MISSING FILE MUST COST A NICE ICON, NOT THE TRAY ITEM. `.unwrap()` here
+            // would panic inside setup() and take the whole tray with it.
+            let tray_icon = tauri::image::Image::from_path(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/tray.png"))
+                .ok()
+                .or_else(|| app.default_window_icon().cloned());
             let _tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon.unwrap_or_else(|| tauri::image::Image::new_owned(
+                    vec![0, 0, 0, 0], 1, 1)))
+                .icon_as_template(true)
                 .tooltip("device-search")
                 .menu(&menu)
                 .show_menu_on_left_click(false)   // ⚠️ left click should SEARCH, not open a menu
@@ -240,8 +252,27 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![read_token, daemon_port, open_path,
                                                hide_window])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // ⚠️⚠️ `RunEvent::Reopen` IS THE macOS "USER CLICKED THE DOCK ICON" EVENT.
+        //
+        // Without this handler the window is a ONE-WAY DOOR. It hides on blur — which is exactly
+        // what makes it feel like a search box rather than a window — and clicking the dock icon
+        // does nothing, so getting it back requires quitting and relaunching. That was the
+        // reported behaviour.
+        //
+        // ⚠️ THE FIX IS NOT TO STOP HIDING ON BLUR. Hide-on-blur is the behaviour worth keeping.
+        // The fix is to make EVERY route back to the window work: dock, tray, and hotkey.
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.center();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                    let _ = w.emit("focus-input", ());
+                }
+            }
+        });
 }
 
 /// ⚠️ THE TOKEN IS READ IN RUST AND HANDED TO THE FRONTEND, never stored in the frontend.
