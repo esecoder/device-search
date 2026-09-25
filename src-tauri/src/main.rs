@@ -120,12 +120,33 @@ fn ensure_daemon(app: &tauri::AppHandle) -> Option<Child> {
         .find(|r| std::path::Path::new(&format!("{r}/device_search")).is_dir())
         .cloned()
         .unwrap_or_else(|| roots.first().cloned().unwrap_or_else(|| ".".into()));
-    let child = Command::new(py)
-        .args(["-m", "device_search.server", "--port", "8734"])
-        .current_dir(&repo)
-        .spawn()
-        .ok()?;
-    Some(child)
+    // ⚠️⚠️ THE DAEMON'S OUTPUT MUST GO SOMEWHERE. A spawned child inherits this process's
+    // stdout, and when the app is launched from the Finder that is /dev/null — so a daemon that
+    // crashes on startup dies IN SILENCE and the UI just says "did not start" with no reason.
+    // Measured: the daemon genuinely failed to start and there was no way to find out why.
+    let log_path = std::path::Path::new(&std::env::var("HOME").ok()?)
+        .join(".device-search")
+        .join("daemon.log");
+    if let Some(dir) = log_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let out = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).ok();
+    let err = out.as_ref().and_then(|f| f.try_clone().ok());
+
+    let mut cmd = Command::new(py);
+    // ⚠️ `-u` IS NOT OPTIONAL FOR A LOGGED CHILD. Python buffers stdout when it is not a
+    // terminal, so the daemon's startup messages sat in a 8KB buffer and never reached the file —
+    // meaning a crash before the buffer filled would produce an EMPTY log and a user staring at
+    // "did not start" with nothing to read. Unbuffered is the difference between a log that
+    // works and a log that exists.
+    cmd.args(["-u", "-m", "device_search.server", "--port", "8734"]).current_dir(&repo);
+    if let Some(f) = out {
+        cmd.stdout(std::process::Stdio::from(f));
+    }
+    if let Some(f) = err {
+        cmd.stderr(std::process::Stdio::from(f));
+    }
+    Some(cmd.spawn().ok()?)
 }
 
 /// ⚠️ HIDE ON BLUR IS WHAT MAKES IT FEEL LIKE A SEARCH BOX RATHER THAN A WINDOW. Spotlight
@@ -198,7 +219,7 @@ pub fn run() {
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/tray.png"))
                 .ok()
                 .or_else(|| app.default_window_icon().cloned());
-            let _tray = TrayIconBuilder::with_id("main")
+            let tray = TrayIconBuilder::with_id("main")
                 .icon(tray_icon.unwrap_or_else(|| tauri::image::Image::new_owned(
                     vec![0, 0, 0, 0], 1, 1)))
                 .icon_as_template(true)
@@ -237,6 +258,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            // ⚠️ THE HANDLE MUST OUTLIVE SETUP OR THE ICON IS REMOVED. `manage` stores it in the
+            // app's state, which lives as long as the app does.
+            app.manage(tray);
 
             // ⚠️ HIDE, DO NOT CLOSE. Closing the window would exit the app on some platforms
             // and leave the tray icon orphaned on others. Escape must dismiss, not quit.
