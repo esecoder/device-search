@@ -32,13 +32,17 @@
          If the daemon is down or the index is partial, that has to be on screen. -->
     <!-- ⚠️ ABOVE the results, not below them. A caveat underneath a list reads as a footnote;
          the same sentence above it qualifies what follows. -->
-    <div id="banner"></div>
+    <!-- ⚠️ ONE COMPONENT SHOWS STATUS, NOT THREE. banner + status + setup used to stack above
+         the results, and each one that appeared pushed the list further down the window. -->
+    <div id="banner">
+      <div id="banner-text"></div>
+      <!-- ⚠️ A REAL BAR, driven by the daemon's own percentage. A spinner says "something is
+           happening"; a bar says "12% done, 8 minutes left", and only the second tells a user
+           whether to wait or go and do something else. -->
+      <div id="banner-bar"><div id="banner-fill"></div></div>
+    </div>
 
     <div id="status"></div>
-
-    <!-- ⚠️ The setup panel REPLACES the results area rather than floating over it, so an empty
-         index shows a clear next action instead of an empty list. -->
-    <div id="setup"></div>
 
     <div id="results"></div>
 
@@ -47,9 +51,17 @@
       <span><kbd>↵</kbd> open</span>
       <span><kbd>⌘↵</kbd> reveal</span>
       <span id="settings" title="choose folders (⌘,)">folders</span>
+      <span id="activity"></span>
       <span id="indexinfo"></span>
     </div>
   </div>
+
+<!-- ⚠️⚠️ SETUP IS AN OVERLAY, AND THAT IS A BUG FIX RATHER THAN A STYLE CHOICE.
+     It used to be a `flex: 1` sibling between the status line and the results, so whenever it
+     was shown it took HALF THE WINDOW — and when it was shown but EMPTY, because /api/roots
+     failed or had not answered, that half was a blank box that pushed every result down.
+     ⚠️ An overlay cannot affect the layout of what it covers. That is the whole point. -->
+<div id="setup-overlay"><div id="setup"></div></div>
 
 <!-- ⚠️ setup.js loads FIRST: app.js calls Setup.open() during boot. -->
 <script src="setup.js"></script>
