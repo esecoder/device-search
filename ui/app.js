@@ -54,7 +54,12 @@ async function boot() {
     // worse than no number: it makes the user distrust every other figure on screen.
     const t0 = Date.now();
     while (!h.ok && Date.now() - t0 < 30000) {
-      setStatus("", `starting the search engine… ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+      // ⚠️ SHOW THE REAL REASON WHILE WAITING. The retry loop used to print only a counter and
+      // discard h.error — which is the string that says WHY, and it was computed every time and
+      // thrown away. Diagnosing this took a macOS ATS investigation that one visible error
+      // message would have short-circuited.
+      setStatus("", `starting the search engine… ${((Date.now() - t0) / 1000).toFixed(0)}s` +
+                    (h.error ? `   [${h.error}]` : ""));
       await new Promise((r) => setTimeout(r, 500));
       h = await api("/api/health", { auth: false });
     }
@@ -82,7 +87,8 @@ async function boot() {
     // ⚠️ POINT AT THE LOG, NOT AT A COMMAND. The shell now writes the daemon's own output to
     // ~/.device-search/daemon.log, so the reason is in a file rather than lost to /dev/null.
     setStatus("err", `The search engine did not start on 127.0.0.1:${PORT}. ` +
-                     `See ~/.device-search/daemon.log — or run ./bin/ds to see the error here.`);
+                     `${h.error ? h.error + ". " : ""}` +
+                     `The engine's own log is ~/.device-search/daemon.log`);
   }
   $("q").focus();
 }

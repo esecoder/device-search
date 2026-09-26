@@ -78,6 +78,22 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
          problem this bundle was built to fix. -->
     <key>LSUIElement</key>              <false/>
 
+    <!-- ⚠️⚠️ APP TRANSPORT SECURITY, AND ITS ABSENCE IS THE WHOLE BUG.
+         macOS BLOCKS PLAIN-HTTP REQUESTS from a WKWebView by default. The UI fetches
+         http://127.0.0.1:8734/api/health, which ATS refuses — so the app reported "the search
+         engine did not start" while the daemon was RUNNING, LISTENING, and answering curl
+         perfectly. ⚠️ ATS applies to the APP, not to the shell, which is why testing with curl
+         proved nothing was wrong.
+
+         ⚠️ `NSAllowsLocalNetworking` IS THE RIGHT KEY, not `NSAllowsArbitraryLoads`.
+         It permits loopback and .local connections while KEEPING ATS protection for everything
+         on the internet. Using ArbitraryLoads would fix this by disabling the protection
+         entirely — the kind of fix that works and quietly removes a security property. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key><true/>
+    </dict>
+
     <key>NSHumanReadableCopyright</key> <string>open source</string>
 </dict>
 </plist>
