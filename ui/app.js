@@ -32,7 +32,9 @@ async function boot() {
   } catch (e) {
     // ⚠️ A MISSING TOKEN IS THE MOST LIKELY FIRST-RUN FAILURE, and the reason is almost always
     // "the daemon has never been started". Say that, rather than showing a stack trace.
-    setStatus("err", `Cannot read the API token (${e}). Start the daemon once:  ds index`);
+    // ⚠️ NO TERMINAL COMMAND. If the app cannot start its own engine, that is the APP's failure
+    // and the message should say what happened, not hand the user homework.
+    setStatus("err", `The search engine could not be started (${e}).`);
     return;
   }
   // ⚠️⚠️ WAIT FOR THE ENGINE, DO NOT CHECK IT ONCE.
@@ -86,9 +88,9 @@ async function boot() {
     // the command that produces the real error, because "not responding" alone is unactionable.
     // ⚠️ POINT AT THE LOG, NOT AT A COMMAND. The shell now writes the daemon's own output to
     // ~/.device-search/daemon.log, so the reason is in a file rather than lost to /dev/null.
-    setStatus("err", `The search engine did not start on 127.0.0.1:${PORT}. ` +
+    setStatus("err", `The search engine did not start. ` +
                      `${h.error ? h.error + ". " : ""}` +
-                     `The engine's own log is ~/.device-search/daemon.log`);
+                     `Details are in ~/.device-search/daemon.log`);
   }
   $("q").focus();
 }
@@ -99,42 +101,92 @@ async function boot() {
 // is not happening.
 // ⚠️ A PLAIN SETTER, separate from applyIndexState, because these are messages the APP wants to
 // show ("could not reach the daemon") rather than states the ENGINE reports.
-function setBanner(cls, text) {
+function setBanner(cls, msg) {
+  // ⚠️ WRITES TO #banner-text, NOT #banner. Setting textContent on the container DELETES the
+  // progress bar element inside it, so the bar would disappear the first time any message was
+  // set — a bug that only appears on the second banner.
   const bar = $("banner");
-  if (!cls) { bar.className = ""; bar.textContent = ""; return; }
+  const t = $("banner-text");
+  if (!cls) { bar.className = ""; if (t) t.textContent = ""; return; }
   bar.className = "show " + cls;
-  bar.textContent = text;
+  if (t) t.textContent = msg;
 }
 
 function applyIndexState(h) {
+  // ⚠️⚠️ WHAT THIS SAYS, AND WHAT IT MUST NEVER SAY.
+  //
+  // The message it replaces read:
+  //
+  //   "Semantic index is out of date — document count changed (5,573 -> 5,570); files were
+  //    modified. Re-run `ds index`. Exact and keyword matches are unaffected."
+  //
+  // ⚠️ FIVE THINGS WRONG WITH THAT, in order of how much they matter:
+  //   1. It told the user to run a TERMINAL COMMAND. A shipped app must never do that.
+  //   2. "semantic index", "document count changed", "exact and keyword matches" — someone
+  //      searching their own files does not know what those are and should not have to.
+  //   3. It reported a NUMBER DIFFERENCE (5,573 -> 5,570) as if three were a quantity worth
+  //      reading. It is not. The user needs to know results might be wrong, not by how much.
+  //   4. It implied the user had to act, when the app repairs itself automatically.
+  //   5. It was three wrapped lines that pushed the results down the window.
+  //
+  // ⚠️ THE RULE: say what is happening, in plain words, and only when it changes what the user
+  // should do. If everything is fine, say NOTHING — an empty banner takes no space.
   const bar = $("banner");
-  const pct = h.embedding_percent || 0;
-  if (h.indexing) {
-    bar.className = "show info";
-    bar.textContent = `Indexing… ${pct.toFixed(0)}% — results are incomplete`;
-  } else if (h.live && h.live.running) {
-    // ⚠️ A RUN STARTED SOMEWHERE ELSE — a terminal, or a previous launch. The daemon cannot
-    // compute this itself; it comes from the status file the indexing process writes, including
-    // the ETA. Without it the app would show a stale banner for a job it cannot see.
-    const p = h.live.percent;
-    bar.className = "show info";
-    bar.textContent = `Indexing${p != null ? " " + p.toFixed(0) + "%" : "…"} — results are ` +
-                      `incomplete` +
-                      (h.live.eta_seconds ? `  ·  about ${fmtEta(h.live.eta_seconds)} left` : "");
-  } else if (h.stale && h.stale.stale) {
-    if (h.stale.severity === "incomplete") {
-      bar.className = "show warn";
-      bar.textContent = `⚠️ Embedding stopped at ${pct.toFixed(0)}% — meaning-based results ` +
-                        `cover only part of the index. Exact and keyword matches are complete.`;
+  const text = $("banner-text");
+  const fill = $("banner-fill");
+  const gauge = $("banner-bar");
+
+  const show = (cls, msg, pct) => {
+    bar.className = "show " + cls;
+    text.textContent = msg;
+    if (pct == null) {
+      gauge.classList.remove("show");
     } else {
-      bar.className = "show warn";
-      bar.textContent = `⚠️ Semantic index is out of date — ${h.stale.reason}. ` +
-                        `Re-run \`ds index\`. Exact and keyword matches are unaffected.`;
+      gauge.classList.add("show");
+      fill.style.width = Math.max(1, Math.min(100, pct)) + "%";
     }
-  } else {
-    bar.className = "";
-    bar.textContent = "";
+  };
+
+  const live = h.live || {};
+  const working = h.indexing || live.running;
+  const pct = live.percent != null ? live.percent : (h.embedding_percent || 0);
+
+  if (working) {
+    // ⚠️ "UPDATING", NOT "INDEXING". Indexing is our word; updating is what the user
+    // experiences — their search catching up with their files.
+    show("info",
+         pct > 0 ? `Updating your search index — ${pct.toFixed(0)}%`
+                 : "Updating your search index…",
+         pct);
+    // ⚠️ The ETA sits in the FOOTER with the document count. Two numbers in one 12px line makes
+    // both of them unreadable.
+    if (live.eta_seconds && $("activity")) {
+      $("activity").textContent = `· about ${fmtEta(live.eta_seconds)} left`;
+    }
+    return;
   }
+  if ($("activity")) $("activity").textContent = "";
+
+  if (h.stale && h.stale.stale) {
+    // ⚠️ THE APP REPAIRS ITSELF, SO THE MESSAGE SAYS SO RATHER THAN ASKING THE USER ANYTHING.
+    // An index that is about to be fixed automatically is a different situation from one that
+    // cannot be fixed, and only the second needs the user to care or to act.
+    const rep = h.auto_repair || {};
+    if (rep.enabled && rep.failures) {
+      show("warn", "Some results may be out of date. The automatic fix is not working — "
+                 + "details are in ~/.device-search/daemon.log", null);
+    } else if (rep.enabled) {
+      show("warn", "Some results may be out of date — updating shortly.", null);
+    } else {
+      show("warn", "Some results may be out of date.", null);
+    }
+    return;
+  }
+
+  // ⚠️ NOTHING TO SAY. A banner that is always present is one the user learns to stop reading.
+  bar.className = "";
+  text.textContent = "";
+  gauge.classList.remove("show");
 }
 
 // ⚠️ POLLED WHILE INDEXING, and the poll stops when it stops. A permanent 2-second timer in a

@@ -61,10 +61,29 @@ kbd {
 /* ------------------------------------------------------------------- banner */
 /* ⚠️ HIDDEN BY DEFAULT, and shown only when the daemon says something is wrong. A persistent
    banner trains the user to ignore the space it occupies, so an empty banner occupies none. */
-#banner { display: none; padding: 9px 18px; font-size: 12px; line-height: 1.4; }
+/* ⚠️ ONE LINE, AND IT STAYS ONE LINE. The message this replaces was three lines of jargon that
+   wrapped, mentioned a terminal command, and cost more vertical space than the results it was
+   describing. */
+#banner { display: none; padding: 9px 18px 10px; font-size: 12px; line-height: 1.35; }
 #banner.show { display: block; }
 #banner.info { background: rgba(10, 132, 255, 0.16); color: #9fd0ff; }
 #banner.warn { background: rgba(255, 159, 10, 0.16); color: #ffc46b; }
+#banner-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#banner-bar {
+  display: none; height: 3px; margin-top: 6px; border-radius: 2px;
+  background: rgba(255,255,255,0.14); overflow: hidden;
+}
+#banner-bar.show { display: block; }
+#banner-fill { height: 100%; width: 0%; background: #0a84ff; transition: width 0.4s linear; }
+
+/* ⚠️ THE OVERLAY. An absolutely positioned panel cannot push a sibling down, which is exactly
+   the property the previous layout was missing. */
+#setup-overlay {
+  display: none; position: absolute; inset: 0; z-index: 20;
+  background: rgba(0, 0, 0, 0.45); border-radius: 14px;
+}
+#setup-overlay.show { display: block; }
+#activity { color: #0a84ff; }
 
 /* ------------------------------------------------------------------- status */
 #status { padding: 0 18px; font-size: 12px; color: var(--dim); }
@@ -108,9 +127,10 @@ kbd {
 .empty { padding: 28px 18px; color: var(--dim); text-align: center; font-size: 13px; }
 
 /* -------------------------------------------------------------------- setup */
-#setup { display: none; padding: 18px; overflow-y: auto; flex: 1; }
-#setup.show { display: block; }
-#results.hidden { display: none; }
+#setup {
+  position: absolute; inset: 30px 0 0 0; padding: 18px; overflow-y: auto;
+  background: var(--bg); border-radius: 12px;
+}
 .setup-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 .setup-sub { font-size: 12px; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }
 .setup-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }

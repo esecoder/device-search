@@ -106,7 +106,7 @@ const Setup = (() => {
     go.onclick = start;
     const skip = document.createElement("button");
     skip.textContent = "Not now";
-    skip.onclick = () => el("setup").classList.remove("show");
+    skip.onclick = () => el("setup-overlay").classList.remove("show");
     foot.append(go, skip);
     host.appendChild(foot);
   }
@@ -145,14 +145,20 @@ const Setup = (() => {
     }
     const idx = await api("/api/index", { method: "POST", body: {} });
     busy = false;
-    el("setup").classList.remove("show");
+    el("setup-overlay").classList.remove("show");
     if (!idx.ok) setBanner("warn", `Could not start indexing: ${idx.error}`);
     else { setBanner("info", "Indexing… 0%"); startPolling(); }
     render();
   }
 
-  function open() { refresh().then(() => el("setup").classList.add("show")); }
-  function close() { el("setup").classList.remove("show"); }
+  // ⚠️ THE OVERLAY IS WHAT SHOWS AND HIDES, not the panel inside it. Toggling the inner element
+  // would leave the opaque full-window backdrop in place with nothing on it.
+  function open() {
+    el("setup-overlay").classList.add("show");
+    refresh();
+  }
+  function close() { el("setup-overlay").classList.remove("show"); }
+  function isOpen() { return el("setup-overlay")?.classList.contains("show"); }
 
   return { refresh, open, close, isOpen: () => el("setup")?.classList.contains("show") };
 })();
