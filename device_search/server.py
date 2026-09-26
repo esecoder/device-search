@@ -204,7 +204,10 @@ class Engine:
         # one is the truth, because it is the one the repair actually acts on.
         stale = vs.check_stale(row[0], row[1], float(row[2] or 0))
         try:
-            cur = {r[0]: f"{r[2] or 0:.3f}:{r[3]}" for r in self.store.conn.execute(
+            # ⚠️ COLUMN INDICES MUST MATCH THE SELECT. This said r[3] for a 3-column query, so it
+            # raised IndexError on every call — and the handler below reported the result as
+            # "not stale", which is the worst possible presentation of "the check did not run".
+            cur = {r[0]: f"{r[1] or 0:.3f}:{r[2]}" for r in self.store.conn.execute(
                 "SELECT id, mtime, LENGTH(text) FROM documents")}
             plan = vs.plan_resume(cur)
             if plan["invalid_shards"]:
@@ -215,7 +218,19 @@ class Engine:
                                     f"{len(vs.man.shards)} vector shards no longer match their "
                                     f"documents ({plan['will_reembed']:,} documents)")}
         except Exception as e:
-            stale.setdefault("note", f"per-shard check unavailable: {type(e).__name__}")
+            # ⚠️⚠️ A CHECK THAT CANNOT RUN MUST NOT REPORT SUCCESS.
+            #
+            # This previously did `stale.setdefault("note", ...)`, which left `stale: False` in
+            # place. So an IndexError in the verification produced the SAME ANSWER as a healthy
+            # index — **a check that fails silently is not a check**, and this one quietly
+            # reported "vectors match the index" while 750 documents had wrong vectors.
+            #
+            # ⚠️ UNKNOWN IS NOW ITS OWN ANSWER, and it is treated as stale because the cost of
+            # being wrong differs wildly: re-embedding a shard wastes CPU, while trusting wrong
+            # vectors returns wrong results and says nothing.
+            stale = {"stale": True, "severity": "unknown",
+                     "reason": f"could not verify the vectors ({type(e).__name__}: {e}) — "
+                               f"treating them as unverified until the check succeeds"}
         run = dict(self.last_index or {})
         emb = {"documents_embedded": len(vs.man.done_doc_ids),
                "documents_total": doc_count,
