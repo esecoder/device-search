@@ -57,6 +57,17 @@ IDS_PATH = INDEX_DIR / "vectors.ids.npy"
 TOKEN_PATH = INDEX_DIR / "api.token"
 DEFAULT_PORT = 8734
 
+# ⚠️ AN ALLOWLIST, NOT A WILDCARD. These are the origins the webview can actually have:
+#   tauri://localhost       macOS and Linux, Tauri's custom scheme
+#   http://tauri.localhost  Windows
+#   http://127.0.0.1:<port> a browser pointed directly at the daemon, for debugging
+# ⚠️ A wildcard would let any web page the user visits read their indexed file contents.
+ALLOWED_ORIGINS = {
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+}
+
 
 # =============================================================================
 # THE ENGINE, LOADED ONCE
@@ -209,14 +220,60 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        # ⚠️ NO CORS HEADER, DELIBERATELY. Adding `Access-Control-Allow-Origin: *` to a service
-        # that returns your file contents would let any web page read them. The UI is served
-        # from this same origin, so it does not need CORS at all.
+        # ⚠️⚠️ CORS, AND THE COMMENT THAT WAS HERE FOR SEVERAL ROUNDS WAS WRONG.
+        #
+        # It said: "The UI is served from this same origin, so it does not need CORS at all."
+        # ⚠️ THAT IS FALSE. The Tauri webview runs at `tauri://localhost` — a CUSTOM SCHEME,
+        # not http://127.0.0.1:8734. Different origin, so CORS applies, and omitting the headers
+        # blocked the app's OWN interface while curl (which has no origin and no CORS) kept
+        # working perfectly. That is why every terminal test I ran said the daemon was healthy.
+        #
+        # ⚠️ AND `X-DS-Token` IS WHY IT FAILED OUTRIGHT RATHER THAN PARTIALLY. A custom header
+        # is not a "simple request", so the browser MUST send an OPTIONS preflight first. There
+        # was no do_OPTIONS, so it got 501 and the real request was never sent.
+        #
+        # ⚠️ THE ORIGIN IS AN ALLOWLIST, NOT `*`. `Access-Control-Allow-Origin: *` would let ANY
+        # web page the user visits read their file contents — the exact threat the Host-header
+        # check exists to stop, reopened through a different door.
+        self._cors()
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
     # ---- routes ----------------------------------------------------------
+    def _cors(self) -> None:
+        """⚠️ EMITTED FROM ONE PLACE, because the preflight and the real response MUST agree.
+
+        The first version of this fix set these headers inside `_send()` only, so `do_OPTIONS`
+        returned a bare `204` with no `Access-Control-Allow-*` at all — and the browser rejects
+        that exactly as it rejected the 501. A preflight that does not actually authorise the
+        request it precedes is the same as no preflight.
+        """
+        origin = self.headers.get("Origin") or ""
+        if origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            # ⚠️ Vary matters: without it a cache can serve one origin's response to another.
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "X-DS-Token, Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Max-Age", "600")
+
+    def do_OPTIONS(self):
+        """⚠️⚠️ THE PREFLIGHT, AND ITS ABSENCE WAS THE ENTIRE BUG.
+
+        The webview sends `OPTIONS` before every request carrying `X-DS-Token`. Without this
+        handler the stdlib answers **501 Unsupported method**, the browser refuses to send the
+        real request, and `fetch` rejects with WebKit's unhelpful "Load failed" — which is what
+        the UI displayed as "daemon unreachable (loading failed)".
+
+        ⚠️ It is answered WITHOUT a token check on purpose: a preflight carries no credentials
+        by design, and the real request is still authenticated immediately afterwards.
+        """
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/health":
