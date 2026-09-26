@@ -74,11 +74,23 @@ def classify(query: str) -> dict:
         reasons.append("contains code punctuation or a call/attribute shape")
         # ⚠️ KEYWORD AS WELL AS EXACT: a fragment may have been reformatted by an editor and
         # no longer match byte-for-byte. Exact alone would report "not on disk", which is a lie.
-        return {"kind": "code", "backends": ["exact", "keyword"], "reasons": reasons}
+        # ⚠️⚠️ `path` BELONGS HERE, AND ITS ABSENCE WAS WHY FILENAME SEARCH APPEARED BROKEN.
+        #
+        # This route runs for anything that LOOKS like code — an identifier, a dotted name, a
+        # symbol. `db_acl.php` classifies as code, so it came here, and this list did not
+        # include `path`. The filename backend existed, worked, and WAS NEVER CALLED for
+        # exactly the queries most likely to be filenames.
+        #
+        # ⚠️ Measured: the router sent 'db_acl.php' to code/exact/keyword and returned path=0.
+        # A user searching for a file by name got content matches from files they did not ask
+        # for, and no match on the file itself.
+        return {"kind": "code", "backends": ["exact", "keyword", "path"], "reasons": reasons}
 
     if ql.startswith(QUESTION_STARTS):
         reasons.append("phrased as a question -> meaning matters more than wording")
-        return {"kind": "question", "backends": ["semantic", "keyword"], "reasons": reasons}
+        # ⚠️ Same reasoning: a question can name a file, and file names are cheap to check.
+        return {"kind": "question", "backends": ["semantic", "keyword", "path"],
+                "reasons": reasons}
 
     reasons.append("natural language with no code shapes -> try everything")
     return {"kind": "prose", "backends": ["semantic", "keyword", "exact", "path"],

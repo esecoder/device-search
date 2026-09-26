@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 # identifiers have `_`, `.`, `:` and `(` in them, so the pattern below preserves those runs.
 # This is the tokenizer equivalent of the "code needs its own chunking" argument in the manual.
 TOKEN_RX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+")
+_PATH_STOPWORDS = {"find", "file", "files", "called", "named", "where", "is",
+                   "the", "my", "locate", "show", "get", "open", "search",
+                   "for", "path", "folder", "directory", "in", "of", "to"}
 
 
 def tokenize(text: str) -> list[str]:
@@ -416,18 +419,41 @@ class Store:
         """Match against the PATH. ⚠️ A separate backend because 'where is my file called X' is
         a completely different question from 'which file contains X', and conflating them makes
         filename lookups fail whenever the file is small or its content is unrelated."""
-        esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        rows = self.conn.execute(
-            "SELECT id, path FROM documents WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
-            (f"%{esc}%", limit)).fetchall()
-        # ⚠️ Prefer matches in the BASENAME: searching "config" should not rank
-        # `…/config-helper/src/main/java/…/Thing.java` above `config.py`.
-        out = []
-        for doc_id, path in rows:
-            base = Path(path).name.lower()
-            score = 2.0 if query.lower() in base else 1.0
-            if base.startswith(query.lower()):
-                score = 3.0
-            out.append((doc_id, score))
-        out.sort(key=lambda kv: -kv[1])
+        # ⚠️⚠️ TOKENISED, NOT A LITERAL SUBSTRING OF THE WHOLE QUERY.
+        #
+        # This matched the raw query against the path, so "find db_acl.php" searched for the
+        # literal string "find db_acl.php" in a filename and found nothing — while "db_acl.php"
+        # worked. ⚠️ Anyone who types a verb first got zero results, and would reasonably
+        # conclude filename search does not exist.
+        #
+        # ⚠️ Separate terms rather than the whole string also means a query naming a file AND a
+        # directory scores higher for matching both.
+        terms = [t for t in re.findall(r"[A-Za-z0-9_.+\-]{2,}", query)
+                 if t.lower() not in _PATH_STOPWORDS]
+        if not terms:
+            return []
+        seen: dict[int, float] = {}
+        for term in terms:
+            esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            rows = self.conn.execute(
+                "SELECT id, path FROM documents WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
+                (f"%{esc}%", limit * 4)).fetchall()
+            for doc_id, path in rows:
+                base = Path(path).name.lower()
+                t = term.lower()
+                # ⚠️ Matches in the BASENAME outrank matches anywhere in the path, so
+                # `config.py` beats `…/config-helper/src/…/Thing.java`. A bare extension match
+                # (".php") scores lowest — it is true of thousands of files and identifies none.
+                if base == t or base.rsplit(".", 1)[0] == t:
+                    sc = 4.0
+                elif base.startswith(t):
+                    sc = 3.0
+                elif t in base:
+                    sc = 2.0
+                elif t.startswith(".") :
+                    sc = 0.3
+                else:
+                    sc = 1.0
+                seen[doc_id] = max(seen.get(doc_id, 0.0), sc)
+        out = sorted(seen.items(), key=lambda kv: -kv[1])
         return out[:limit]
