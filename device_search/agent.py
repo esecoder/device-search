@@ -252,6 +252,19 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
         trace["broadened_with"] = extra
         results.update(run(extra))
 
+    # ⚠️ METADATA RUNS ALONGSIDE, NOT INSTEAD. A sentence can carry both: "recent php files
+    # about authentication" is a filter AND a text query, and answering only one of them answers
+    # a different question than the one asked.
+    try:
+        from .metadata import describe as _mdesc, parse as _mparse, run as _mrun
+        _mf = _mparse(query)
+        if _mf:
+            results["meta"] = _mrun(store, _mf, limit=40)
+            trace["meta"] = {"filters": _mf, "explain": _mdesc(_mf),
+                             "hits": len(results["meta"])}
+    except Exception as e:
+        trace["meta"] = {"error": f"{type(e).__name__}: {e}"}
+
     fused = rrf(results)
     cands: list[Candidate] = []
     for doc_id, score in fused[:top_k * 3]:
@@ -285,7 +298,9 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
         #     MEANING  (semantic only)      -> "this is the closest thing I have"
         # ⚠️ Only the first is evidence of existence. Those are not the same sentence and the
         # output must not present them as one list.
-        cand.lexical = any(b in ("exact", "keyword", "path") for b in srcs)
+        # ⚠️ METADATA IS LEXICAL EVIDENCE: "this file is 200 MB" is a fact about a file that
+        # EXISTS, in the same category as "your words are in it". It is not a similarity.
+        cand.lexical = any(b in ("exact", "keyword", "path", "meta") for b in srcs)
         if loc:
             cand.line_no, cand.snippet = loc
         else:
@@ -303,6 +318,31 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # ⚠️ IT ONLY RUNS WHEN THE QUERY CONTAINS AN IDENTIFIER THE GRAPH KNOWS, so a prose question
     # costs nothing extra. A graph lookup on "how do I fix the deploy" finds no seed and returns
     # immediately.
+    # ⚠️⚠️ GREP, AND IT RUNS ONLY WHEN THE INDEX FOUND NOTHING.
+    #
+    # This is the ONE case where grep beats an index: the files were excluded FROM the index by
+    # definition — too large, binary, or media with no extractable text — so there is nothing to
+    # search and reading them is the only option left.
+    #
+    # ⚠️ IT IS THE LAST RESORT AND IT SAYS SO. Reading 4.9 GB takes minutes, so it is triggered
+    # by an empty result rather than run on every query, it has a time budget, and it reports how
+    # much it actually covered. A grep that silently checks 40 of 249 files is a lie by omission.
+    grep_hits, grep_meta = [], {}
+    if not cands and len(query.strip()) >= 4:
+        try:
+            for _item in store.grep_skipped(query, limit=15):
+                if isinstance(_item, tuple) and len(_item) == 3 and isinstance(_item[2], dict):
+                    grep_meta = _item[2]
+                    continue
+                _path, _size, _ = _item
+                grep_hits.append({"path": _path, "size": _size})
+            if grep_hits or grep_meta:
+                trace["grep"] = {"hits": grep_hits, "note":
+                                 "found in files that are NOT in the index (too large or binary)",
+                                 **grep_meta}
+        except Exception as e:
+            trace["grep"] = {"error": f"{type(e).__name__}: {e}"}
+
     graph_hits = []
     try:
         from .codegraph import KEYWORDS as _KW
