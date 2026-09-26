@@ -222,10 +222,20 @@ class VectorStore:
         for i in surviving:
             covered.update(int(d) for d in (self.man.shards[i].get("doc_fps") or {}))
         todo = sorted(d for d in current if d not in covered)
+        # ⚠️⚠️ `will_reembed` IS JUST `len(todo)` — THE FIRST VERSION ADDED THE INVALID SHARDS'
+        # DOCUMENT COUNTS ON TOP, WHICH COUNTS THE SAME DOCUMENTS TWICE.
+        #
+        # ⚠️ `todo` is defined as the documents NOT covered by a surviving shard, and an invalid
+        # shard is not surviving — so todo IS the contents of the invalid shards. Adding them
+        # again reported 1,503 documents to re-embed when the real figure was 750, roughly
+        # DOUBLE. ⚠️ And it is wrong in the expensive direction: it tells the user a job will
+        # take twice as long as it will, which is how a real 12-minute wait gets abandoned.
+        #
+        # ⚠️ The two numbers differ by exactly the documents that disappeared (753 shard entries
+        # vs 750 still present), which is the tell that they describe the same set.
         return {"invalid_shards": invalid, "todo": todo,
                 "kept_documents": len(covered), "total_documents": len(current),
-                "will_reembed": len(todo) + sum(self.man.shards[i].get("documents", 0)
-                                                for i in invalid)}
+                "will_reembed": len(todo)}
 
     def drop_shards(self, indices: list[int]) -> int:
         """Remove shards from the manifest AND the disk. ⚠️ Both, or the index is corrupt."""
