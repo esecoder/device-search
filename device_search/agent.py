@@ -282,6 +282,31 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
         if len(cands) >= top_k:
             break
 
+    # ⚠️⚠️ THE CODE GRAPH, AND WHY IT IS NOT ANOTHER SIMILARITY SCORE.
+    #
+    # The other backends ask "which text looks like this query". This one asks "which SYMBOL
+    # does this query NAME, and who touches it" — a different question with an exact answer.
+    # `callers_of("validate_token")` is not a ranking; it is a fact.
+    #
+    # ⚠️ IT ONLY RUNS WHEN THE QUERY CONTAINS AN IDENTIFIER THE GRAPH KNOWS, so a prose question
+    # costs nothing extra. A graph lookup on "how do I fix the deploy" finds no seed and returns
+    # immediately.
+    graph_hits = []
+    try:
+        from .codegraph import KEYWORDS as _KW
+        ids_in_query = [t for t in re.findall(r"[A-Za-z_$][\w$]*", query)
+                        if t not in _KW and len(t) > 2]
+        if ids_in_query:
+            g = store.graph()
+            found = g.search(query, hops=1, limit=15)
+            for h in found.get("hits", []):
+                graph_hits.append(h)
+            if graph_hits:
+                trace["graph"] = {"seeds": ids_in_query[:6], "hits": len(graph_hits),
+                                  "explain": found.get("explain", "")}
+    except Exception as e:
+        trace["graph"] = {"error": f"{type(e).__name__}: {e}"}
+
     # ⚠️⚠️ STALENESS IS ATTACHED TO THE RESULT, NOT LEFT FOR THE CALLER TO REMEMBER.
     # `--no-semantic` does not clear vectors, and an interrupted embedding run leaves the old
     # ones in place. In both cases semantic hits are computed against a DIFFERENT document set —

@@ -150,6 +150,35 @@ class Store:
                 self.conn.execute("SELECT path, mtime, size FROM documents")}
 
     @_serialised
+    def graph(self):
+        """⚠️ ONE CONNECTION, TWO USES. A symbol is a property of a document, and splitting them
+        across two stores lets them disagree about which files exist — the exact class of bug the
+        vector manifest already had to be fixed for."""
+        from .codegraph import CodeGraph
+        g = CodeGraph(self.conn)
+        g.ensure_schema()
+        return g
+
+    def build_graph(self, docs) -> dict:
+        """Extract symbols and edges for a batch of documents.
+
+        ⚠️ REBUILDS PER PATH RATHER THAN APPENDING. Re-indexing a file must not leave the
+        previous version's symbols in the graph, or a renamed function would still have callers
+        pointing at a name that no longer exists anywhere.
+        """
+        g = self.graph()
+        files = syms = 0
+        for d in docs:
+            if not d.path:
+                continue
+            g.remove_path(d.path)
+            n = g.add(d.path, getattr(d, "doc_id", 0) or 0, d.text)
+            if n:
+                files += 1
+                syms += n
+        self.conn.commit()
+        return {"files": files, "symbols": syms}
+
     def remove_under_roots(self, roots: list, dry_run: bool = False) -> dict:
         """Delete every document located under any of these directories.
 
@@ -206,6 +235,14 @@ class Store:
                                   "the path is spelled the way it was crawled")
             return out
         if victims:
+            # ⚠️ THE GRAPH IS CLEANED WITH THE DOCUMENTS. Leaving symbols behind means a graph
+            # query returns hits in files that are no longer indexed — results the user cannot
+            # open, from a store that claims not to contain them.
+            for _did, path in victims:
+                try:
+                    self.graph().remove_path(path)
+                except Exception:
+                    pass
             self.conn.executemany("DELETE FROM documents WHERE id=?",
                                   [(v[0],) for v in victims])
             self.conn.commit()
