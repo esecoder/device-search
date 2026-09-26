@@ -69,6 +69,10 @@ DEFAULT_PORT = 8734
 #   900s  how often to ACT. A repair is minutes of CPU, so acting on every glance
 #         at the disk would keep a working machine permanently busy.
 REPAIR_CHECK_EVERY = 300
+# ⚠️ HOW LONG AFTER STARTUP BEFORE THE FIRST LOOK. Long enough that the daemon has bound its
+# port and can serve searches while the repair runs; short enough that a user opening a stale
+# app sees it start fixing itself rather than wonder whether it noticed.
+REPAIR_FIRST_CHECK = 20
 REPAIR_COOLDOWN = 900
 # ⚠️ HOW LONG TO WAIT BEFORE RETRYING A FAILED REPAIR. Separate from the success cooldown,
 # because "it worked, do not do it again soon" and "it broke, try again shortly" are different
@@ -209,14 +213,23 @@ class Engine:
             # "not stale", which is the worst possible presentation of "the check did not run".
             cur = {r[0]: f"{r[1] or 0:.3f}:{r[2]}" for r in self.store.conn.execute(
                 "SELECT id, mtime, LENGTH(text) FROM documents")}
-            plan = vs.plan_resume(cur)
+            # ⚠️ THE POLICY MUST BE PASSED HERE, OR THE API CANNOT SEE A POLICY CHANGE AT ALL.
+            # It reported "3 of 23 shards no longer match their documents" while the real answer
+            # was "every shard was built by a policy we no longer use" — the two are different
+            # facts and only the second explains why a trivial-looking drift needs 24 minutes.
+            from .comments import policy_version
+            plan = vs.plan_resume(cur, policy=policy_version())
             if plan["invalid_shards"]:
+                if plan.get("policy_changed"):
+                    reason = (f"the embedding policy changed ({plan['policy_changed']}) — "
+                              f"every vector is rebuilt")
+                else:
+                    reason = (f"{len(plan['invalid_shards'])} of {len(vs.man.shards)} vector "
+                              f"shards no longer match their documents "
+                              f"({plan['will_reembed']:,} documents)")
                 stale = {"stale": True, "severity": "outdated",
                          "invalid_shards": len(plan["invalid_shards"]),
-                         "documents": plan["will_reembed"],
-                         "reason": (f"{len(plan['invalid_shards'])} of "
-                                    f"{len(vs.man.shards)} vector shards no longer match their "
-                                    f"documents ({plan['will_reembed']:,} documents)")}
+                         "documents": plan["will_reembed"], "reason": reason}
         except Exception as e:
             # ⚠️⚠️ A CHECK THAT CANNOT RUN MUST NOT REPORT SUCCESS.
             #
@@ -628,6 +641,26 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
     # ⚠️ THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
     # daemon is idle, and idle is exactly when a repair should happen.
     def _repair_loop():
+        # ⚠️⚠️ CHECK AT STARTUP, DO NOT SLEEP FIRST.
+        #
+        # This loop used to sleep REPAIR_CHECK_EVERY (300s) before its first look. So a user
+        # who opened the app with a stale or policy-outdated index saw the warning sit there
+        # for five minutes before anything noticed — and on a first run after an upgrade,
+        # "the app is aware and doing nothing" is indistinguishable from "the app is broken".
+        #
+        # ⚠️ AND THE FIX FOR A SHIPPED APP IS NOT TO TELL THE USER TO RUN A TERMINAL COMMAND.
+        # The whole point of auto-repair is that the app repairs itself; making the first check
+        # wait five minutes means the documentation has to say "or just wait", which is worse
+        # than saying nothing.
+        time.sleep(REPAIR_FIRST_CHECK)
+        while True:
+            try:
+                r = ENGINE.maybe_repair()
+                if r.get("started"):
+                    print(f"  auto-repair started at startup: {r.get('why')}")
+            except Exception as e:
+                print(f"  startup repair check failed: {type(e).__name__}: {e}")
+            break
         while True:
             time.sleep(REPAIR_CHECK_EVERY)
             try:
