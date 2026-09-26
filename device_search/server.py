@@ -70,6 +70,10 @@ DEFAULT_PORT = 8734
 #         at the disk would keep a working machine permanently busy.
 REPAIR_CHECK_EVERY = 300
 REPAIR_COOLDOWN = 900
+# ⚠️ HOW LONG TO WAIT BEFORE RETRYING A FAILED REPAIR. Separate from the success cooldown,
+# because "it worked, do not do it again soon" and "it broke, try again shortly" are different
+# instructions and sharing one number means a one-off failure costs 15 minutes of staleness.
+REPAIR_FAIL_BACKOFF = 120
 
 ALLOWED_ORIGINS = {
     "tauri://localhost",
@@ -113,6 +117,11 @@ class Engine:
         self.auto_repair = os.environ.get("DEVICE_SEARCH_AUTO_REPAIR", "1") != "0"
         self._last_repair = 0.0
         self._repair_note = "not needed yet"
+        # ⚠️ THE CHILD IS HELD SO ITS DEATH CAN BE SEEN. A repair that starts and dies silently
+        # is indistinguishable from one that is running: the banner says "indexing", the index
+        # never changes, and the user waits for a job that no longer exists.
+        self._repair_proc = None
+        self._repair_failures = 0
 
     def warm(self) -> None:
         """Load the embedding backend up front so the FIRST query is not the slow one."""
@@ -175,7 +184,38 @@ class Engine:
         row = self.store.conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
         ).fetchone()
+        # ⚠️⚠️ THE PER-SHARD CHECK DECIDES, NOT THE GLOBAL ONE.
+        #
+        # `check_stale` compares a GLOBAL fingerprint — document count, max id, sum of mtimes —
+        # against what `finish()` stamped at the end of a run. `plan_resume` compares PER-SHARD
+        # fingerprints: which documents each shard actually contains.
+        #
+        # ⚠️ AND THEY CAN DISAGREE, WHICH IS WHAT MADE THIS SO CONFUSING. Measured right now:
+        #
+        #     plan_resume()  -> 3 invalid shards, 750 documents to re-embed
+        #     check_stale()  -> stale: False, "vectors match the index"
+        #
+        # Because `finish()` stamps the global fingerprint from the CURRENT store whether or not
+        # the shards cover it. So a run that stopped part-way, or a document removed after the
+        # shards were written, leaves the coarse check saying "fine" while 750 documents have
+        # vectors that describe something else.
+        #
+        # ⚠️ THE COARSE CHECK IS A SUMMARY AND IT WAS BEING TRUSTED AS THE ANSWER. The per-shard
+        # one is the truth, because it is the one the repair actually acts on.
         stale = vs.check_stale(row[0], row[1], float(row[2] or 0))
+        try:
+            cur = {r[0]: f"{r[2] or 0:.3f}:{r[3]}" for r in self.store.conn.execute(
+                "SELECT id, mtime, LENGTH(text) FROM documents")}
+            plan = vs.plan_resume(cur)
+            if plan["invalid_shards"]:
+                stale = {"stale": True, "severity": "outdated",
+                         "invalid_shards": len(plan["invalid_shards"]),
+                         "documents": plan["will_reembed"],
+                         "reason": (f"{len(plan['invalid_shards'])} of "
+                                    f"{len(vs.man.shards)} vector shards no longer match their "
+                                    f"documents ({plan['will_reembed']:,} documents)")}
+        except Exception as e:
+            stale.setdefault("note", f"per-shard check unavailable: {type(e).__name__}")
         run = dict(self.last_index or {})
         emb = {"documents_embedded": len(vs.man.done_doc_ids),
                "documents_total": doc_count,
@@ -198,7 +238,12 @@ class Engine:
                 # ⚠️ THE USER IS TOLD WHAT THE APP DOES ON ITS OWN. A background job that starts
                 # itself and is not surfaced is indistinguishable from a machine that got slow.
                 "auto_repair": {"enabled": self.auto_repair,
-                                "last": self._last_repair, "note": self._repair_note}}
+                                "last": self._last_repair, "note": self._repair_note,
+                                "failures": self._repair_failures,
+                                # ⚠️ So the UI can say "the repair died" instead of showing a
+                                # progress bar for a process that is gone.
+                                "child_alive": (self._repair_proc is not None
+                                                and self._repair_proc.poll() is None)}}
 
     def maybe_repair(self) -> dict:
         """Spawn a repair run if the vectors have drifted. ⚠️ Called on a timer, never inline.
@@ -213,9 +258,29 @@ class Engine:
         live = read_status(INDEX_DIR)
         if live.get("running"):
             return {"started": False, "reason": "a run is already in progress"}
+        # ⚠️ FIRST: DID THE LAST REPAIR DIE? Checked BEFORE the cooldown, because a repair that
+        # failed must not be locked out for 15 minutes by the same timer that paces successful
+        # ones. ⚠️ And the failure is surfaced rather than absorbed — the banner must not go on
+        # claiming progress for a process that exited.
+        if self._repair_proc is not None:
+            code = self._repair_proc.poll()
+            if code is None:
+                return {"started": False, "reason": "the repair started earlier is still running"}
+            self._repair_proc = None
+            if code != 0:
+                self._repair_failures += 1
+                self._repair_note = (f"the last repair exited with code {code} "
+                                     f"({self._repair_failures} failure(s))")
+                # ⚠️ A SHORT BACKOFF AFTER FAILURE, not the full cooldown. Long enough not to
+                # spin on a broken environment, short enough to recover from a one-off.
+                self._last_repair = time.time() - (REPAIR_COOLDOWN - REPAIR_FAIL_BACKOFF)
+
         if time.time() - self._last_repair < REPAIR_COOLDOWN:
             left = int((REPAIR_COOLDOWN - (time.time() - self._last_repair)) / 60)
-            return {"started": False, "reason": f"cooldown, {left}m remaining"}
+            return {"started": False,
+                    "reason": f"cooldown, {left}m remaining"
+                              + (f" — last attempt: {self._repair_note}"
+                                 if self._repair_failures else "")}
         st = self.index_status()
         if not st["stale"].get("stale"):
             self._repair_note = "up to date"
@@ -234,6 +299,7 @@ class Engine:
             self._repair_note = f"could not start: {e}"
             return {"started": False, "reason": self._repair_note}
         self._last_repair = time.time()
+        self._repair_proc = proc
         self._repair_note = f"repairing ({st['stale'].get('reason', '')[:60]})"
         return {"started": True, "pid": proc.pid, "why": st["stale"].get("reason")}
 
