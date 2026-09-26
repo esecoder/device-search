@@ -553,37 +553,54 @@ class Handler(BaseHTTPRequestHandler):
             self._send(202, {"accepted": True, "note": "installing in the background",
                              "poll": "/api/install/status"})
         elif urlparse(self.path).path == "/api/index":
-            # ⚠️ RUNS IN A THREAD so the UI stays responsive and can poll /api/health while a
-            # long media index runs. The alternative — blocking the request — makes the app
-            # look frozen for the 18-36 hours a full OCR pass could take.
-            def run():
-                # ⚠️ THE FLAG IS SET AND CLEARED IN A `finally`, so an exception cannot leave the
-                # UI showing "indexing…" forever with no way to tell that it died.
-                ENGINE.last_index = {"running": True, "started": time.time()}
-                try:
-                    from .crawl import walk
-                    from .config import MODES
-                    roots = [Path(p) for p in (ENGINE.store.get_meta("roots") or [])]
-                    known = ENGINE.store.known_state()
-                    batch, n = [], 0
-                    for doc in walk(roots, known=known):
-                        batch.append(doc)
-                        if len(batch) >= 200:
-                            ENGINE.store.add_many(batch)
-                            n += len(batch)
-                            batch = []
-                    if batch:
-                        ENGINE.store.add_many(batch)
-                        n += len(batch)
-                    ENGINE.store.prune_missing()
-                    ENGINE.last_index = {"running": False, "indexed": n,
-                                         "at": time.time()}
-                except Exception as e:
-                    ENGINE.last_index = {"running": False,
-                                         "error": f"{type(e).__name__}: {e}"}
-            t = threading.Thread(target=run, daemon=True)
-            t.start()
-            self._send(202, {"accepted": True, "note": "indexing in the background"})
+            # ⚠️⚠️ THE BUTTON MUST DO WHAT THE COMMAND DOES, AND IT DID NOT.
+            #
+            # This used to run its own inline crawl: walk the roots, store the text, prune.
+            # Measured against what `ds index` does, it was MISSING:
+            #     - the code graph        (18,777 symbols, 58,475 edges)
+            #     - every vector          (semantic search simply did not exist)
+            #     - the embedding policy  (the 71% cost reduction)
+            #
+            # ⚠️ So the setup screen produced a text-only index and the app looked like it had
+            # no semantic search — while the CLI produced a complete one. TWO INDEXING PATHS
+            # THAT DISAGREE is the same class of bug as the two staleness checks that disagreed,
+            # and the fix is the same: one implementation, called from both places.
+            #
+            # ⚠️ IT SPAWNS THE CLI RATHER THAN REIMPLEMENTING IT. The daemon supervises; the
+            # CLI does the work. Progress arrives through index.status.json, so the UI reports a
+            # button-started run and a terminal run identically.
+            from .vectors import read_status
+            if read_status(INDEX_DIR).get("running"):
+                self._send(409, {"error": "an index run is already in progress",
+                                 "state": read_status(INDEX_DIR)})
+                return
+            roots = ENGINE.store.get_meta("roots") or []
+            if not roots:
+                # ⚠️ REFUSED WITH A REASON. Silently indexing nothing would produce an empty
+                # index and a user who concludes the app is broken.
+                self._send(400, {"error": "no folders are set",
+                                 "next": "POST /api/roots first"})
+                return
+            log_path = DB_PATH.parent / "daemon.log"
+            try:
+                out = open(log_path, "a")
+            except OSError:
+                out = subprocess.DEVNULL
+            # ⚠️ `-u` so the log is written immediately rather than sitting in a buffer.
+            cmd = [sys.executable, "-u", "-m", "device_search.cli", "index"]
+            try:
+                proc = subprocess.Popen(cmd, stdout=out, stderr=out,
+                                        cwd=str(Path(__file__).resolve().parent.parent))
+            except Exception as e:
+                self._send(500, {"error": f"could not start indexing: {e}"})
+                return
+            # ⚠️ HANDED TO THE SAME SUPERVISION auto-repair uses, so a crash is noticed and
+            # retried instead of leaving the banner claiming progress forever.
+            ENGINE._repair_proc = proc
+            ENGINE.last_index = {"running": True, "started": time.time(), "pid": proc.pid}
+            self._send(202, {"accepted": True, "pid": proc.pid,
+                             "note": "indexing in the background: text, code graph and vectors",
+                             "poll": "/api/index/status"})
         else:
             self._send(404, {"error": "no such route"})
 
