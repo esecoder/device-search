@@ -168,7 +168,26 @@ async function api(path, opts = {}) {
     init.body = JSON.stringify(opts.body);
   }
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}${path}`, init);
+    let r = await fetch(`http://127.0.0.1:${PORT}${path}`, init);
+    if (r.status === 401 && opts.auth !== false && !opts._retried) {
+      // ⚠️⚠️ THE TOKEN CHANGES WHILE THE APP IS OPEN, AND THE UI CACHED IT.
+      //
+      // The daemon writes a NEW token every time it starts, deliberately — a leaked token is
+      // worthless after a restart. But the UI reads it ONCE at boot, so the moment a daemon
+      // starts (or restarts) the UI's copy is stale and every request returns 401
+      // "bad or missing token" until the APP is restarted.
+      //
+      // ⚠️ That is exactly the reported symptom: "bad token" for a while, then it started
+      // working — because a new daemon eventually matched the token the UI was holding.
+      //
+      // ⚠️ RE-READ AND RETRY ONCE, rather than making the token permanent. Persisting it would
+      // fix this by giving up the property that makes a leaked token harmless.
+      try {
+        TOKEN = await invoke("read_token");
+        const h2 = Object.assign({}, opts, { _retried: true });
+        return await api(path, h2);
+      } catch (e) { /* fall through to the original error */ }
+    }
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return { ok: false, error: body.error || `HTTP ${r.status}` };
     return { ok: true, ...body };
@@ -317,6 +336,12 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     e.preventDefault();
     if (Setup.isOpen()) { Setup.close(); return; }
+    // ⚠️ ESCAPE CLEARS FIRST, THEN HIDES. One keystroke that both erases the search and makes
+    // the window disappear gives the user no way to edit a query they are halfway through.
+    if ($("q").value) {
+      $("q").value = ""; results = []; render(); setBanner("", "");
+      return;
+    }
     hideWindow();
   }
   else if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
@@ -334,18 +359,19 @@ $("settings").addEventListener("click", () => Setup.open());
 
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.
+// ⚠️⚠️ NOTHING IS CLEARED WHEN THE WINDOW HIDES.
+//
+// This handler used to wipe the query, the results AND the status line on every blur. The
+// reasoning was "Spotlight starts fresh" — but Spotlight is a launcher and this is a FILE
+// BROWSER. The actual workflow is: search, click a result, look at the file, come back. Wiping
+// the query on every one of those round trips means retyping it, every time.
+//
+// ⚠️ And it destroyed errors as a side effect, so a failure vanished the moment the user
+// looked away — which reads as "it fixed itself" and is how a bug survives for weeks.
+//
+// ⚠️ Clearing is now EXPLICIT: Escape empties it when the window is already focused.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    // ⚠️ CLEAR THE QUERY, NOT THE DIAGNOSIS.
-    //
-    // This used to call setStatus("", "") as well, which wiped any error. So the sequence was:
-    // the engine fails to start, the user is told why, they click another app, the window hides,
-    // and on return THE MESSAGE IS GONE — which reads as "it fixed itself" when nothing changed.
-    // ⚠️ An error that erases itself is worse than no error, because the user stops looking.
-    $("q").value = "";
-    results = [];
-    render();
-  }
+  // The query survives. Deliberately nothing here.
 });
 
 boot();
