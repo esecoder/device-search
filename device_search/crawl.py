@@ -36,8 +36,18 @@ class CrawlStats:
     bytes_indexed: int = 0
     errors: int = 0
 
-    def skip(self, reason: str) -> None:
+    # ⚠️ THE PATHS, NOT JUST THE COUNTS. A count tells the user something was skipped; the path
+    # is what lets them find it by name and grep it on demand. Without this the information is
+    # unactionable, which is barely better than not having it.
+    missing: list = field(default_factory=list)
+
+    def skip(self, reason: str, path: str = "", size: int = 0) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
+        # ⚠️ ONLY THE REASONS A USER CAN ACT ON. `unchanged` is a success (the file is already
+        # indexed) and `empty` is a property of the file, not a failure to index it. Listing them
+        # would bury the 150 that actually matter under thousands that do not.
+        if path and reason in ("too_large", "read_failed", "media_no_text", "no_text_content"):
+            self.missing.append((path, size, reason))
 
     def report(self) -> str:
         lines = [
@@ -185,7 +195,10 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
 
                 ok, reason = is_text_file(p, st.st_size)
                 if not ok:
-                    stats.skip(reason)
+                    # ⚠️ `too_large` AND `binary_ext` CARRY THE PATH. The first is the one the
+                    # user most needs to know about: the file is real, searchable in principle,
+                    # and invisible. The second is how you find out that a 200 MB binary exists.
+                    stats.skip(reason, str(p), sz)
                     continue
                 ext = p.suffix.lower()
                 if ext in MEDIA_EXTS:

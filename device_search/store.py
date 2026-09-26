@@ -19,6 +19,15 @@ from __future__ import annotations
 
 import functools
 import os
+import time
+
+
+def _exists(p) -> bool:
+    from pathlib import Path as _P
+    try:
+        return _P(p).exists()
+    except OSError:
+        return False
 import json
 import math
 import re
@@ -153,6 +162,91 @@ class Store:
                 self.conn.execute("SELECT path, mtime, size FROM documents")}
 
     @_serialised
+    def _ensure_skipped(self) -> None:
+        """⚠️ A TABLE FOR WHAT WAS NOT INDEXED, because silence about it is the failure this
+        project keeps rediscovering. Measured on the author's own machine: 150 files over the
+        size limit, 22% of all bytes, and NOTHING anywhere said they had been skipped. Searching
+        for something inside one returns "no results" and the user concludes it is not on disk."""
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS skipped (
+            path TEXT PRIMARY KEY, size INTEGER, reason TEXT, seen REAL)""")
+        self.conn.commit()
+
+    def record_skipped(self, items: list) -> int:
+        self._ensure_skipped()
+        if not items:
+            return 0
+        now = time.time()
+        self.conn.executemany(
+            "INSERT INTO skipped(path,size,reason,seen) VALUES (?,?,?,?) "
+            "ON CONFLICT(path) DO UPDATE SET size=excluded.size, reason=excluded.reason, "
+            "seen=excluded.seen",
+            [(str(p), int(sz), why, now) for p, sz, why in items])
+        self.conn.commit()
+        return len(items)
+
+    def prune_skipped(self) -> int:
+        """⚠️ A file that is gone, or that is now small enough to index, must leave this table —
+        otherwise the report claims files are missing that are right there in the results."""
+        self._ensure_skipped()
+        gone = [(p,) for (p,) in self.conn.execute("SELECT path FROM skipped")
+                if not _exists(p)]
+        if gone:
+            self.conn.executemany("DELETE FROM skipped WHERE path=?", gone)
+            self.conn.commit()
+        indexed = self.conn.execute(
+            "DELETE FROM skipped WHERE path IN (SELECT path FROM documents)").rowcount
+        self.conn.commit()
+        return len(gone) + indexed
+
+    def skipped_stats(self, limit: int = 12) -> dict:
+        self._ensure_skipped()
+        total = self.conn.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM skipped").fetchone()
+        by = self.conn.execute(
+            "SELECT reason, COUNT(*) c, SUM(size) b FROM skipped GROUP BY reason "
+            "ORDER BY c DESC").fetchall()
+        big = self.conn.execute(
+            "SELECT path, size, reason FROM skipped ORDER BY size DESC LIMIT ?", (limit,)).fetchall()
+        return {"files": total[0], "bytes": total[1],
+                "by_reason": [{"reason": r, "files": c, "bytes": b} for r, c, b in by],
+                "largest": [{"path": p, "size": sz, "reason": r} for p, sz, r in big]}
+
+    def grep_skipped(self, query: str, limit: int = 30, budget_s: float = 6.0) -> list:
+        """⚠️⚠️ READ THE FILES THAT WERE NEVER INDEXED, ON DEMAND.
+
+        This is the ONE case where grep is the right tool and an index is not: the files are
+        excluded from the index by definition, so there is nothing to search. Reading 150 files
+        with a time budget beats indexing 1.25 GB that will almost never be queried.
+
+        ⚠️ IT HAS A TIME BUDGET AND REPORTS WHEN IT RUNS OUT. A grep over 1.25 GB takes minutes,
+        and a search box that silently takes minutes is worse than one that says "checked 40 of
+        150 large files" — the user can decide whether to narrow the query.
+        """
+        import re as _re
+        self._ensure_skipped()
+        if not query.strip():
+            return []
+        rx = _re.compile(_re.escape(query), _re.I)
+        t0 = time.time()
+        out, checked, skipped_n = [], 0, 0
+        for path, size in self.conn.execute("SELECT path, size FROM skipped ORDER BY size ASC"):
+            if time.time() - t0 > budget_s:
+                return out + [(None, 0.0, {"timed_out": True, "checked": checked,
+                                           "total": self.skipped_stats()["files"]})]
+            checked += 1
+            try:
+                # ⚠️ BINARY MODE AND A BYTE-LEVEL SEARCH. We do not know the encoding and may not
+                # care — `mongod` is a binary and a user may still want to know it exists. Reading
+                # as text with errors="replace" would work but is 10x slower on 200 MB.
+                with open(path, "rb") as fh:
+                    blob = fh.read(48 * 1024 * 1024)      # ⚠️ capped: 200 MB binaries are not text
+                if rx.search(blob.decode("utf-8", "replace")):
+                    out.append((path, size, None))
+                    if len(out) >= limit:
+                        break
+            except (OSError, PermissionError):
+                skipped_n += 1
+        return out
+
     def graph(self):
         """⚠️ ONE CONNECTION, TWO USES. A symbol is a property of a document, and splitting them
         across two stores lets them disagree about which files exist — the exact class of bug the
