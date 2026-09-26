@@ -86,6 +86,10 @@ class Manifest:
     doc_count: int = 0
     doc_max_id: int = 0
     doc_mtime_sum: float = 0.0
+    # ⚠️ WHICH EMBEDDING POLICY BUILT THESE SHARDS. Not the model, not the runtime — WHAT TEXT
+    # was fed to it. Absent from the first two revisions of this file, which meant a change in
+    # what we embed could not be detected at all.
+    policy: str = ""
 
 
 def write_status(index_dir: Path, **fields) -> None:
@@ -189,7 +193,30 @@ class VectorStore:
     def done_doc_ids(self) -> set[int]:
         return set(self.man.done_doc_ids)
 
-    def plan_resume(self, current: dict[int, str]) -> dict:
+    def plan_resume(self, current: dict[int, str], policy: str = "") -> dict:
+        # ⚠️⚠️ A POLICY CHANGE INVALIDATES EVERY SHARD, AND NOTHING ELSE WOULD CATCH IT.
+        # The per-shard fingerprints are about the DOCUMENTS, which did not change. Only the
+        # text we chose to embed changed — so without this the resume logic sees everything
+        # matching and keeps vectors that answer a question we no longer ask.
+        # ⚠️⚠️ AN ABSENT POLICY IS NOT A MATCHING POLICY.
+        #
+        # The first version only invalidated when BOTH were non-empty and differed, so an index
+        # built before policies existed (policy "") compared against a real policy and was
+        # treated as current. ⚠️ **Unknown defaulted to fine** — the same failure as the
+        # swallowed IndexError two commits ago, in a different place.
+        #
+        # ⚠️ The costs are not symmetric: rebuilding wastes CPU, while keeping unverifiable
+        # vectors answers a question we no longer ask and says nothing about it.
+        if policy and policy != self.man.policy:
+            return {"invalid_shards": list(range(len(self.man.shards))), "todo": sorted(current),
+                    "kept_documents": 0, "total_documents": len(current),
+                    "will_reembed": len(current),
+                    "policy_changed": (f"{self.man.policy} -> {policy}"
+                                       if self.man.policy else
+                                       f"(none recorded) -> {policy}")}
+        return self._plan_by_fingerprint(current)
+
+    def _plan_by_fingerprint(self, current: dict[int, str]) -> dict:
         """Which shards are invalid, and which documents still need embedding.
 
         ⚠️⚠️ THIS IS THE FIX FOR "THE WARNING HAS NO REMEDY". `done_doc_ids` answers "have we seen
@@ -351,6 +378,11 @@ class VectorStore:
 
     def finish(self, doc_count: int = 0, doc_max_id: int = 0, doc_mtime_sum: float = 0.0) -> None:
         self.man.complete = True
+        try:
+            from .comments import policy_version
+            self.man.policy = policy_version()
+        except Exception:
+            pass
         self.man.doc_count = doc_count
         self.man.doc_max_id = doc_max_id
         self.man.doc_mtime_sum = round(doc_mtime_sum, 3)
