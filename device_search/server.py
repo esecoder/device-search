@@ -44,6 +44,8 @@ import json
 import os
 import secrets
 import socket
+import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,6 +64,13 @@ DEFAULT_PORT = 8734
 #   http://tauri.localhost  Windows
 #   http://127.0.0.1:<port> a browser pointed directly at the daemon, for debugging
 # ⚠️ A wildcard would let any web page the user visits read their indexed file contents.
+# ⚠️ THE POLICY NUMBERS, stated here so they are arguable rather than buried:
+#   300s  how often to LOOK for drift. Cheap — a manifest read and a COUNT(*) .
+#   900s  how often to ACT. A repair is minutes of CPU, so acting on every glance
+#         at the disk would keep a working machine permanently busy.
+REPAIR_CHECK_EVERY = 300
+REPAIR_COOLDOWN = 900
+
 ALLOWED_ORIGINS = {
     "tauri://localhost",
     "http://tauri.localhost",
@@ -85,6 +94,25 @@ class Engine:
         # can actually see. Putting it on the server and reading it from the engine was a real
         # AttributeError that only surfaced when the endpoint was called.
         self.last_index: dict = {}
+        # ⚠️ AUTO-REPAIR, WITH A POLICY RATHER THAN A TRIGGER.
+        #
+        # The machinery to repair stale vectors has existed for several commits — plan_resume
+        # finds the invalid shards, drop_shards removes them, the shards are resumable so only
+        # those re-embed. What was missing was anything that DECIDED to run it.
+        #
+        # ⚠️ AND A NAIVE TRIGGER WOULD BE WRONG. "Repair whenever anything drifted" sounds
+        # obviously right and is not: a browser writing cache, an editor writing swap files, any
+        # log rotating — each changes a shard, and the index would re-embed CONTINUOUSLY and
+        # never settle, competing with every query for CPU.
+        #
+        # So the trigger is a POLICY, and every clause is load-bearing:
+        #   1. never while another run is active   (two writers on one index)
+        #   2. never more often than the cooldown  (a repair is minutes of CPU)
+        #   3. only when something is actually stale
+        #   4. and it can be switched off entirely
+        self.auto_repair = os.environ.get("DEVICE_SEARCH_AUTO_REPAIR", "1") != "0"
+        self._last_repair = 0.0
+        self._repair_note = "not needed yet"
 
     def warm(self) -> None:
         """Load the embedding backend up front so the FIRST query is not the slow one."""
@@ -166,7 +194,48 @@ class Engine:
         live = read_status(INDEX_DIR)
         return {"indexing": bool(live.get("running")) or run.get("running", False),
                 "live": live, "run": run, "embedding": emb, "stale": stale,
-                "searchable_now": doc_count > 0}
+                "searchable_now": doc_count > 0,
+                # ⚠️ THE USER IS TOLD WHAT THE APP DOES ON ITS OWN. A background job that starts
+                # itself and is not surfaced is indistinguishable from a machine that got slow.
+                "auto_repair": {"enabled": self.auto_repair,
+                                "last": self._last_repair, "note": self._repair_note}}
+
+    def maybe_repair(self) -> dict:
+        """Spawn a repair run if the vectors have drifted. ⚠️ Called on a timer, never inline.
+
+        ⚠️ IT SPAWNS A SEPARATE PROCESS, NOT A THREAD. Embedding is CPU-bound and would block or
+        starve the request threads that serve searches. A subprocess can also be killed, resumed
+        and observed — none of which is true of a thread inside the server.
+        """
+        if not self.auto_repair:
+            return {"started": False, "reason": "auto-repair is off"}
+        from .vectors import read_status
+        live = read_status(INDEX_DIR)
+        if live.get("running"):
+            return {"started": False, "reason": "a run is already in progress"}
+        if time.time() - self._last_repair < REPAIR_COOLDOWN:
+            left = int((REPAIR_COOLDOWN - (time.time() - self._last_repair)) / 60)
+            return {"started": False, "reason": f"cooldown, {left}m remaining"}
+        st = self.index_status()
+        if not st["stale"].get("stale"):
+            self._repair_note = "up to date"
+            return {"started": False, "reason": "up to date"}
+
+        log_path = DB_PATH.parent / "daemon.log"
+        try:
+            out = open(log_path, "a")
+        except OSError:
+            out = subprocess.DEVNULL
+        cmd = [sys.executable, "-u", "-m", "device_search.cli", "index"]
+        try:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=out,
+                                    cwd=str(Path(__file__).resolve().parent.parent))
+        except Exception as e:
+            self._repair_note = f"could not start: {e}"
+            return {"started": False, "reason": self._repair_note}
+        self._last_repair = time.time()
+        self._repair_note = f"repairing ({st['stale'].get('reason', '')[:60]})"
+        return {"started": True, "pid": proc.pid, "why": st["stale"].get("reason")}
 
     def stats(self) -> dict:
         s = self.store.stats()
@@ -457,6 +526,21 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
     ENGINE = Engine()
     ENGINE.warm()
     token = _write_token()
+
+    # ⚠️ THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
+    # daemon is idle, and idle is exactly when a repair should happen.
+    def _repair_loop():
+        while True:
+            time.sleep(REPAIR_CHECK_EVERY)
+            try:
+                r = ENGINE.maybe_repair()
+                if r.get("started"):
+                    print(f"  auto-repair started: {r.get('why')}")
+            except Exception as e:
+                # ⚠️ SWALLOWED ON PURPOSE: a failing repair must not kill the loop, or one bad
+                # cycle would disable auto-repair for the rest of the session.
+                print(f"  auto-repair check failed: {type(e).__name__}: {e}")
+    threading.Thread(target=_repair_loop, daemon=True).start()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.token = token
