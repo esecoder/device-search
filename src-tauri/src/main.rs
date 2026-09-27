@@ -196,6 +196,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_dialog::init())
         .manage(Daemon(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -275,7 +276,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![read_token, daemon_port, open_path,
-                                               hide_window])
+                                               hide_window, pick_folder])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         // ⚠️⚠️ `RunEvent::Reopen` IS THE macOS "USER CLICKED THE DOCK ICON" EVENT.
@@ -311,6 +312,40 @@ fn read_token() -> Result<String, String> {
     std::fs::read_to_string(&path)
         .map(|s| s.trim().to_string())
         .map_err(|e| format!("cannot read {path}: {e}"))
+}
+
+/// ⚠️⚠️ THE NATIVE FOLDER PICKER, AND WHY IT IS NOT A TEXT INPUT.
+///
+/// The setup screen asked the user to TYPE a path. That requires them to know where the folder
+/// is, spell it exactly, and know whether macOS calls it `~/Documents` or `~/documents` — and
+/// when they get it wrong the answer is "not a directory", which is the tool blaming them for
+/// not knowing something it could have just shown them.
+///
+/// ⚠️ IT CAN PICK MORE THAN ONE FOLDER, in one dialog. Three trips through the picker to choose
+/// Documents, Desktop and Downloads is three chances to give up.
+///
+/// ⚠️ AND IT USES A CHANNEL RATHER THAN `blocking_pick_folder`. The blocking variant waits on
+/// the MAIN THREAD, and on macOS the file dialog is ALSO on the main thread — so waiting there
+/// is how a native picker deadlocks the entire app. The callback returns, the channel carries
+/// the answer, and the command thread does the waiting.
+#[tauri::command]
+async fn pick_folder(app: tauri::AppHandle, multiple: bool) -> Vec<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let dlg = app.dialog().file();
+    if multiple {
+        dlg.pick_folders(move |paths| {
+            let _ = tx.send(paths.unwrap_or_default()
+                .into_iter().map(|p| p.to_string()).collect::<Vec<_>>());
+        });
+    } else {
+        dlg.pick_folder(move |path| {
+            let _ = tx.send(path.map(|p| vec![p.to_string()]).unwrap_or_default());
+        });
+    }
+    // ⚠️ A TIMEOUT, because a cancelled dialog that never fires its callback would otherwise
+    // leave the command hanging for the lifetime of the app.
+    rx.recv_timeout(std::time::Duration::from_secs(600)).unwrap_or_default()
 }
 
 #[tauri::command]

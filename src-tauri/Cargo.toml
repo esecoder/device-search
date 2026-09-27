@@ -17,6 +17,10 @@ tauri-build = { version = "2", features = [] }
 # decoder, and the compiled-in default icon is the only other option.
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
+# ⚠️ FOR THE NATIVE FOLDER PICKER. Asking a user to TYPE a path is asking them to do
+# the computer's job — they have to know where the folder is, spell it correctly, and
+# remember whether it is ~/Documents or ~/documents.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

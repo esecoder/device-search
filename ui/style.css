@@ -156,6 +156,13 @@ kbd {
   border-radius: 7px; padding: 8px 14px; font-size: 13px; cursor: pointer;
 }
 .setup-foot button.primary { background: #0a84ff; border-color: #0a84ff; font-weight: 600; }
+/* ⚠️ The picker is the PRIMARY action now — typing a path is the fallback, not the default,
+   and the styling should say which one the user is expected to use. */
+.setup-add button.pick { background: #0a84ff; border-color: #0a84ff; font-weight: 600; }
+.setup-add button.pick:disabled { opacity: 0.6; }
+.setup-list.disabled { opacity: 0.4; pointer-events: none; }
+.setup-row.whole { margin-top: 6px; border-top: 1px solid var(--sep); padding-top: 12px; }
+.setup-row.whole .setup-path { color: #ff9f0a; }
 .setup-foot button:disabled { opacity: 0.45; cursor: default; }
 
 /* --------------------------------------------------------------------- foot */
