@@ -27,6 +27,27 @@ ICON_PNG="$HERE/src-tauri/icons/icon.png"
 
 [ -x "$BIN" ] || { echo "  ✗ build first:  cd src-tauri && cargo build --release"; exit 1; }
 
+# ⚠️⚠️ KILL THE RUNNING INSTANCE, BECAUSE `open` DOES NOT RELAUNCH.
+#
+# The single most expensive mistake in this project's testing: on macOS, `open App.app` when the
+# app is ALREADY RUNNING just brings it to the front. It does not restart it, and it does not
+# warn. So a rebuild followed by `open` looks exactly like a successful update while the user
+# goes on interacting with the OLD process.
+#
+# ⚠️ Measured cost of not knowing this: one instance ran for 28 HOURS across seven rebuilds.
+# Every fix was reported as "still not working" because none of them had ever been loaded.
+#
+# ⚠️ AND THE DAEMON IS PYTHON, READ FROM THE REPO AT RUNTIME — so it picks up changes only when
+# it RESTARTS. A stale daemon serves stale code just as convincingly as a stale binary.
+if pgrep -f "device-search.app/Contents/MacOS/device-search" >/dev/null 2>&1 \
+   || pgrep -f "release/device-search" >/dev/null 2>&1; then
+    echo "  quitting the running instance (open does not relaunch an app)"
+    pkill -f "device-search.app/Contents/MacOS/device-search" 2>/dev/null || true
+    pkill -f "release/device-search" 2>/dev/null || true
+    pkill -f "device_search.server" 2>/dev/null || true
+    sleep 2
+fi
+
 echo "  building device-search.app"
 
 rm -rf "$APP"
@@ -111,6 +132,9 @@ echo "  ✅ $APP"
 echo
 echo "  run it:   open '$APP'"
 echo "  or:       '$APP/Contents/MacOS/device-search'"
+echo
+echo "  ⚠️ This script now quits any running instance first. If you open the app"
+echo "     WITHOUT rebuilding, and it is already running, macOS will NOT relaunch it."
 echo
 echo "  ⚠️ FIRST LAUNCH: if macOS says the app is from an unidentified developer,"
 echo "     right-click the app and choose Open, or allow it in System Settings → Privacy."
