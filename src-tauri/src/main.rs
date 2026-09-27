@@ -34,6 +34,20 @@ const HOTKEY: &str = "CmdOrCtrl+Shift+Space";
 /// "it worked once, now it says address in use" bug and the user has no way to diagnose it.
 struct Daemon(Mutex<Option<Child>>);
 
+/// ⚠️⚠️ WHY HIDE-ON-BLUR NEEDS AN EXCEPTION, AND WHY IT TOOK A BUG REPORT TO SEE IT.
+///
+/// The window hides whenever it loses focus — that is the behaviour that makes it feel like a
+/// search box rather than a window, and it is worth keeping.
+///
+/// ⚠️ BUT A NATIVE FILE DIALOG TAKES FOCUS. So opening the folder picker made the main window
+/// lose focus, the handler hid it, and the modal sheet went with its parent — **the chooser
+/// appeared and vanished in the same instant**, which is exactly what the user reported.
+///
+/// ⚠️ The two features are each correct and only conflict when combined, which is why neither
+/// code review nor either test would have found it. It needed someone to open the dialog.
+static DIALOG_OPEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// ⚠️ WHERE THE PYTHON LIVES IS CONFIGURATION, NOT A CONSTANT. In development the venv is a
 /// sibling directory; in a packaged app it would be a bundled sidecar. Guessing one path is how
 /// an app works on the author's machine and nowhere else.
@@ -269,7 +283,11 @@ pub fn run() {
                 let w2 = w.clone();
                 w.on_window_event(move |ev| {
                     if let tauri::WindowEvent::Focused(false) = ev {
-                        let _ = w2.hide();
+                        // ⚠️ UNLESS A DIALOG IS UP. Hiding the parent of a modal dialog closes the
+                        // dialog too, so focus loss caused by our own picker must not hide anything.
+                        if !DIALOG_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+                            let _ = w2.hide();
+                        }
                     }
                 });
             }
@@ -331,8 +349,17 @@ fn read_token() -> Result<String, String> {
 #[tauri::command]
 async fn pick_folder(app: tauri::AppHandle, multiple: bool) -> Vec<String> {
     use tauri_plugin_dialog::DialogExt;
+    // ⚠️ SET BEFORE THE DIALOG OPENS, CLEARED AFTER IT RETURNS, and cleared even on the timeout
+    // path — a flag left set would disable hide-on-blur for the rest of the session, which looks
+    // like the feature quietly stopped working.
+    DIALOG_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
     let (tx, rx) = std::sync::mpsc::channel();
-    let dlg = app.dialog().file();
+    let mut dlg = app.dialog().file();
+    // ⚠️ PARENTED TO THE WINDOW. An unparented dialog on macOS is a separate window that can
+    // appear behind the app, which is a different way to look like it never opened.
+    if let Some(win) = app.get_webview_window("main") {
+        dlg = dlg.set_parent(&win);
+    }
     if multiple {
         dlg.pick_folders(move |paths| {
             let _ = tx.send(paths.unwrap_or_default()
@@ -345,7 +372,16 @@ async fn pick_folder(app: tauri::AppHandle, multiple: bool) -> Vec<String> {
     }
     // ⚠️ A TIMEOUT, because a cancelled dialog that never fires its callback would otherwise
     // leave the command hanging for the lifetime of the app.
-    rx.recv_timeout(std::time::Duration::from_secs(600)).unwrap_or_default()
+    let got = rx.recv_timeout(std::time::Duration::from_secs(600)).unwrap_or_default();
+    DIALOG_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    // ⚠️ THE WINDOW IS SHOWN AGAIN AFTERWARDS. It never hid (the flag prevented it), but the
+    // dialog took focus, so without this the search box is left behind whatever the user is
+    // looking at — and typing goes nowhere.
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_focus();
+        let _ = win.emit("focus-input", ());
+    }
+    got
 }
 
 #[tauri::command]
