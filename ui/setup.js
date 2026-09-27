@@ -21,6 +21,9 @@ const Setup = (() => {
   let roots = { configured: [], indexed: [], suggested: [] };
   let chosen = new Set();
   let busy = false;
+  // ⚠️ THE WHOLE-DEVICE CHOICE, CARRIED THROUGH TO THE API. `POST /api/roots` takes a mode,
+  // and the backend has always understood "everything" — this is only the interface catching up.
+  let wholeDevice = false;
 
   const el = (id) => document.getElementById(id);
 
@@ -57,7 +60,7 @@ const Setup = (() => {
     host.appendChild(sub);
 
     const list = document.createElement("div");
-    list.className = "setup-list";
+    list.className = "setup-list" + (wholeDevice ? " disabled" : "");
     const seen = new Set();
     for (const s of roots.suggested) {
       if (!s.exists || seen.has(s.path)) continue;
@@ -74,35 +77,102 @@ const Setup = (() => {
     }
     host.appendChild(list);
 
+    // ⚠️⚠️ A BUTTON THAT OPENS THE MACOS PICKER, NOT A TEXT INPUT.
+    //
+    // This was an input box reading "or paste a folder path". That asks the user to know where
+    // the folder is, spell it exactly, and know whether the system calls it ~/Documents or
+    // ~/documents — and when they get it wrong the answer is "not a directory", which is the
+    // tool blaming them for not knowing something it could simply have shown them.
+    //
+    // ⚠️ The text input survives as a fallback, because typing a path is genuinely faster when
+    // you already know it, and remote or unusual paths are awkward in a picker.
     const add = document.createElement("div");
     add.className = "setup-add";
+
+    const pick = document.createElement("button");
+    pick.className = "pick";
+    pick.textContent = "Choose folders…";
+    pick.onclick = async () => {
+      pick.disabled = true;
+      pick.textContent = "Choosing…";
+      try {
+        const got = await invoke("pick_folder", { multiple: true });
+        for (const p of got || []) {
+          if (!chosen.has(p)) {
+            chosen.add(p);
+            list.appendChild(row(p, p.split("/").pop() || p, true));
+          }
+        }
+      } catch (e) {
+        // ⚠️ FALL BACK TO THE TEXT BOX RATHER THAN DOING NOTHING. If the native dialog is
+        // unavailable the user must still be able to add a folder.
+        inp.style.display = "";
+        inp.placeholder = `picker unavailable (${e}) — type a path`;
+      }
+      pick.disabled = false;
+      pick.textContent = "Choose folders…";
+      render();
+    };
+
     const inp = document.createElement("input");
     inp.type = "text";
-    inp.placeholder = "or paste a folder path…";
+    inp.style.display = "none";
+    inp.placeholder = "type a folder path…";
     inp.spellcheck = false;
     const btn = document.createElement("button");
     btn.textContent = "Add";
+    btn.style.display = "none";
     const doAdd = () => {
-      const v = inp.value.trim().replace(/^~/, window.__HOME__ || "~");
+      const v = inp.value.trim();
       if (!v) return;
-      // ⚠️ The PATH IS NOT VALIDATED HERE — the server rejects a non-directory, and it must,
-      // because only the server can resolve `~` correctly and a client-side check that
-      // disagrees with the server is worse than none.
       chosen.add(v);
       inp.value = "";
       list.appendChild(row(v, v.split("/").pop() || v, false));
+      render();
     };
     btn.onclick = doAdd;
     inp.onkeydown = (e) => { if (e.key === "Enter") doAdd(); };
-    add.append(inp, btn);
+
+    const type = document.createElement("button");
+    type.textContent = "or type a path";
+    type.onclick = () => {
+      const showing = inp.style.display !== "none";
+      inp.style.display = showing ? "none" : "";
+      btn.style.display = showing ? "none" : "";
+      if (!showing) inp.focus();
+    };
+
+    add.append(pick, type, inp, btn);
     host.appendChild(add);
+
+    // ⚠️⚠️ "EVERYTHING" WAS IN THE BACKEND AND NOT IN THE INTERFACE.
+    // `config.MODES` has had a mode that indexes the whole home directory since the first
+    // commit, and the setup screen never offered it — so the only way to reach it was a
+    // command-line flag. A capability nobody can find is a capability that does not exist.
+    const whole = document.createElement("label");
+    whole.className = "setup-row whole";
+    const wcb = document.createElement("input");
+    wcb.type = "checkbox";
+    wcb.checked = wholeDevice;
+    const wt = document.createElement("span");
+    wt.className = "setup-name";
+    wt.textContent = "Entire device";
+    const wp = document.createElement("span");
+    wp.className = "setup-path";
+    // ⚠️ THE COST IS STATED UP FRONT. "Everything" sounds free and is not: it is every
+    // indexable file in the home directory, and the first index of it is the slowest run the
+    // app will ever do.
+    wp.textContent = "every folder in your home directory — the slowest first index";
+    whole.append(wcb, wt, wp);
+    wcb.onchange = () => { wholeDevice = wcb.checked; render(); };
+    host.appendChild(whole);
 
     const foot = document.createElement("div");
     foot.className = "setup-foot";
     const go = document.createElement("button");
     go.className = "primary";
     go.textContent = busy ? "Starting…" : "Index these folders";
-    go.disabled = busy || chosen.size === 0;
+    go.disabled = busy || (!wholeDevice && chosen.size === 0);
     go.onclick = start;
     const skip = document.createElement("button");
     skip.textContent = "Not now";
@@ -136,7 +206,10 @@ const Setup = (() => {
 
     // ⚠️ TWO CALLS ON PURPOSE: set the roots (instant, reversible), THEN start indexing (long).
     // Fusing them would make a mistyped path begin an hour-long job.
-    const setr = await api("/api/roots", { method: "POST", body: { roots: [...chosen] } });
+    const setr = await api("/api/roots",
+                           { method: "POST",
+                             body: { roots: [...chosen], mode: wholeDevice ? "everything"
+                                                                          : "explicit" } });
     if (!setr.ok) {
       busy = false;
       setBanner("warn", `Could not set folders: ${setr.error}`);

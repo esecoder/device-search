@@ -527,6 +527,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": f"bad JSON: {e}"})
                 return
             roots = [str(r) for r in (body.get("roots") or [])]
+            mode = body.get("mode") or "explicit"
+            # ⚠️⚠️ "EVERYTHING" IS A MODE, NOT A LIST OF PATHS, AND THE LIST MUST BE DERIVED.
+            #
+            # The setup screen sends `mode: "everything"` with an empty roots list, because the
+            # user is not choosing folders — they are choosing to index all of them. If the mode
+            # were stored without expanding it, `ds index` would read `roots: []` and crawl
+            # NOTHING, and the app would report a successful index of zero files.
+            #
+            # ⚠️ A mode that stores an empty root list is a silent no-op, which is the same
+            # failure shape as every other one in this project.
+            if mode and mode != "explicit":
+                from .config import MODES
+                m = MODES.get(mode)
+                if m is None:
+                    self._send(400, {"error": f"unknown mode {mode!r}",
+                                     "known": sorted(MODES.keys())})
+                    return
+                roots = [str(r) for r in m.roots]
             missing = [r for r in roots if not Path(r).expanduser().is_dir()]
             if missing:
                 # ⚠️ REJECTED, NOT SILENTLY SKIPPED. A typo'd path that is quietly ignored
@@ -534,8 +552,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "not a directory", "paths": missing})
                 return
             ENGINE.store.set_meta("roots", roots)
-            ENGINE.store.set_meta("mode", body.get("mode") or "explicit")
-            self._send(200, {"roots": roots, "count": len(roots),
+            ENGINE.store.set_meta("mode", mode)
+            self._send(200, {"roots": roots, "count": len(roots), "mode": mode,
                              "next": "POST /api/index to start"})
         elif path_q.path == "/api/roots/remove":
             try:
