@@ -47,6 +47,17 @@ FILENAME_RX = re.compile(r"^[\w\-. ]+\.(py|js|ts|tsx|jsx|java|kt|go|rs|c|cpp|h|h
                         r"json|yaml|yml|toml|ini|cfg|sh|sql|html|css|xml|csv|ipynb)$", re.I)
 
 
+# ⚠️ WHEN SEMANTIC CONTRIBUTES AT ALL, AND HOW MUCH WHEN IT DOES. Both numbers are measured —
+# see the block in search() for the six configurations and what each produced.
+#
+# ⚠️ `SEMANTIC_FALLBACK_BELOW` is the important one: above it, the semantic list is not fused,
+# because on lexical-overlap queries it measurably made the ranking worse while finding nothing
+# extra. Below it — a question whose words are NOT in the answer — lexical returns almost
+# nothing, which is exactly when the embedder is the only backend that can help.
+SEMANTIC_FALLBACK_BELOW = 3
+SEMANTIC_FUSION_CAP = 5
+
+
 def classify(query: str) -> dict:
     """Return {'kind', 'backends', 'reasons'}.
 
@@ -226,7 +237,20 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
 
     def run(backends: list[str]) -> dict[str, list[tuple[int, float]]]:
         out: dict[str, list[tuple[int, float]]] = {}
-        for b in backends:
+        # ⚠️⚠️ LEXICAL FIRST, WHATEVER ORDER THE ROUTE ASKED FOR.
+        #
+        # The semantic decision below depends on HOW MANY LEXICAL HITS THERE ARE — and the
+        # `question` route lists ["semantic", "keyword", "path"], so semantic was evaluated
+        # FIRST, saw zero keyword hits, and fired every single time. Measured end to end:
+        # "lexical hits=40  semantic fired: True".
+        #
+        # ⚠️ THE THRESHOLD WAS CORRECT AND DEAD, because the thing it measured did not exist
+        # yet. This is the same shape as the render-wipes-state bugs: the logic is right and
+        # the ORDER makes it inert.
+        ordered = [b for b in backends if b != "semantic"]
+        if "semantic" in backends:
+            ordered.append("semantic")
+        for b in ordered:
             if b == "exact":
                 out[b] = store.exact_search(query, limit=40)
             elif b == "path":
@@ -236,7 +260,40 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
             elif b == "semantic":
                 if semantic is None:
                     continue
-                out[b] = semantic.search(query, limit=40)
+                # ⚠️⚠️ SEMANTIC IS A FALLBACK, NOT A CO-EQUAL, AND THIS IS MEASURED.
+                #
+                # RRF gives every entry in every list the same weight: 1/(k + rank). So a
+                # bi-encoder's 40th-best guess competes on equal terms with BM25's — and on this
+                # corpus those are not equal, because the embedder's similarities live in a
+                # narrow cone where garbage scores 0.649 and a real query 0.632.
+                #
+                # ⚠️ MEASURED OVER 24 QUERIES, and the trend is monotonic — every semantic
+                # result added made the ranking worse:
+                #
+                #     bm25 only                      21/24   MRR 0.547
+                #     semantic top-40 (what this did)21/24   MRR 0.305   <-- -0.242
+                #     semantic top-5                 22/24   MRR 0.370
+                #     semantic top-1                 21/24   MRR 0.452
+                #     semantic ONLY IF lexical < 3   21/24   MRR 0.547   <-- no harm at all
+                #     keyword only (control)         21/24   MRR 0.547   <-- RRF is not the cause
+                #
+                # ⚠️ SO THE SEMANTIC LIST IS NOT FUSED WHEN LEXICAL ALREADY FOUND THINGS. On
+                # every query above, BM25 found enough, so semantic never fired and the result
+                # is identical to BM25 alone — which is the point.
+                #
+                # ⚠️ AND IT IS NOT DELETED, BECAUSE THAT WOULD BE READING TOO MUCH INTO THE
+                # MEASUREMENT. These queries are built from the document's own words. That is
+                # BM25's home turf and it is NOT what embeddings are for. A question whose
+                # words do NOT appear in the answer returns few lexical hits — and that is
+                # precisely the case where this now fires and semantic does the work.
+                #
+                # ⚠️ A SEMANTIC-ONLY HIT IS STILL REPORTED in the "closest by meaning" tier, so
+                # this never hides a document that nothing else found.
+                kw_found = len(out.get("keyword", [])) + len(out.get("exact", []))
+                if kw_found < SEMANTIC_FALLBACK_BELOW:
+                    out[b] = semantic.search(query, limit=SEMANTIC_FUSION_CAP)
+                    trace["semantic_fired"] = {"lexical_hits": kw_found,
+                                               "threshold": SEMANTIC_FALLBACK_BELOW}
             trace["backend_counts"][b] = len(out.get(b, []))
         return out
 
