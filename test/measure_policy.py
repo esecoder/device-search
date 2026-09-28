@@ -140,15 +140,40 @@ def variants(path, text, policy):
 
 
 def chunks_of(path, text, policy):
+    """⚠️ CHUNK SIZE IS THE LAST UNTESTED LEVER, AND IT IS A GUESS I MADE.
+
+    1,400 characters was chosen when 512 tokens at ~3.4 chars/token suggested about 1,700,
+    and then rounded down. ⚠️ IT HAS NEVER BEEN VARIED. The model has been ruled out and the
+    policy has been ruled out; if the passage that answers a question is STRADDLING a
+    boundary, neither of those could ever have found it.
+
+    ⚠️ AND OVERLAP IS SEPARATE FROM SIZE. Two adjacent chunks that share no characters can
+    both contain half of the same sentence and neither can contain the whole of it. Overlap
+    is the direct fix for exactly that, at the cost of duplicating work — and it has never
+    been tried either.
+
+    Syntax: `comments@800` or `comments@800+200` (size 800, overlap 200).
+    """
+    import re as _re
+    base_policy, size, overlap = policy, CHUNK_CHARS, 0
+    m = _re.match(r"^(.*?)@(\d+)(?:\+(\d+))?$", policy)
+    if m:
+        base_policy = m.group(1)
+        size = int(m.group(2))
+        overlap = int(m.group(3) or 0)
+
     out = []
-    for v in variants(path, text, policy):
-        for i in range(0, len(v), CHUNK_CHARS):
-            piece = v[i:i + CHUNK_CHARS]
+    for v in variants(path, text, base_policy):
+        step = max(1, size - overlap)
+        for i in range(0, len(v), step):
+            piece = v[i:i + size]
             # ⚠️ A CHUNK THAT IS ONLY PUNCTUATION IS NOT A CHUNK. Raw code produces many of
             # them (closing braces, array commas) and embedding them spends time to add
             # near-identical vectors that compete on equal terms in the fusion.
             if len(piece.strip()) > 40:
                 out.append(piece)
+        if overlap == 0:
+            break
     return out
 
 
@@ -206,7 +231,13 @@ def main():
     space = answers + rest[: SUBSET - len(answers)]
     random.Random(6).shuffle(space)
 
+    import re as _re2
+    sizes = []
+    for p in (sys.argv[1:] or ["comments"]):
+        m = _re2.match(r"^.*?@(\d+)(?:\+(\d+))?$", p)
+        sizes.append(f"{p}" if m else f"{p}@{CHUNK_CHARS}")
     print(f"  {len(cases)} paraphrase queries, {len(space)} documents")
+    print(f"  policies: {', '.join(sizes)}")
     print(f"  ⚠️ 17 of the 20 answers are embedded under SOME policy; 3 are not")
     print(f"     under the current one. recall cannot exceed 85% however good the model.\n")
 
