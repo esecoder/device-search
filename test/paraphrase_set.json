@@ -1,0 +1,142 @@
+[
+ {
+  "doc_id": 2122,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/composer/installed.json",
+  "phrase": "\"description\": \"One class library to parse multipart content with encoding and charset support.",
+  "query": "Where can I find a tool for handling online form uploads?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5444,
+  "path": "/Users/eseudom/Downloads/compressed/Sign-in to post bridge_files/js",
+  "phrase": "t\",[\"map\",\"values\",[\"list\",[\"map\",\"type\",\"event_param\",\"event_param\",[\"map\",\"param_name\",\"page_path\"]],[\"map\",\"type\",\"const\",\"const_value\",\"?",
+  "query": "Where is the analytics configuration file?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5199,
+  "path": "/Users/eseudom/Downloads/Applybee Slides from Skyworks/Applybee+SaaS_+Product+Review+Brand+Awareness+&+Investment+Opportunity/page_9.html",
+  "phrase": "<p class=\"text-lg text-gray-700\">Applybee seeks investment to accelerate growth and solidify market position.",
+  "query": "Which file discusses obtaining funds for corporate expansion?",
+  "overlap": 0.333
+ },
+ {
+  "doc_id": 4908,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Console/Command/Task/ProjectTask.php",
+  "phrase": "$prompt = __d('cake_console', \"What is the path to the project you want to bake?",
+  "query": "Where can I find code generating script requesting folder location?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 279,
+  "path": "/Users/eseudom/Documents/kypo-kolla-openstack-terminal-out2.txt",
+  "phrase": "(kolla-venv) ese@africert-kypo-openstack-1:~$ sudo rm /var/tmp/ansible.",
+  "query": "Where is my terminal command history stored?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 1058,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/DynamoDb/LockingSessionConnection.php",
+  "phrase": "// set and item returned (via ReturnValues) in a one, atomic operation.",
+  "query": "Which file updates content while retrieving it?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 1940,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/crc32/src/Builtin.php",
+  "phrase": "* Returns true if this $polynomial is supported by the builtin PHP hash function.",
+  "query": "Which file contains code validating algebra expression compatibility?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 5253,
+  "path": "/Users/eseudom/Downloads/Applybee2 Slides from Skywork/Applybee_+AI-Powered+Job+Application+Assistant/page_10.html",
+  "phrase": "<p class=\"text-gray-600\">Applybee disrupts the job search market with AI-powered solutions that enhance efficiency for job seekers.",
+  "query": "Which local file explains software helping people locate employment faster?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2102,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Exception/AbortedException.php",
+  "phrase": "* Return the delay in seconds and nanos before retrying the failed request.",
+  "query": "Which file contains logic pausing after an unsuccessful remote operation?",
+  "overlap": 0.125
+ },
+ {
+  "doc_id": 1139,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/ApplicationDiscoveryService/ApplicationDiscoveryServiceClient.php",
+  "phrase": "* This client is used to interact with the **AWS Application Discovery Service** service.",
+  "query": "Which file lets me query data center asset inventory?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1803,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/guzzlehttp/psr7/src/functions.php",
+  "phrase": "* @deprecated mimetype_from_filename will be removed in guzzlehttp/psr7:2.",
+  "query": "Where is code that finds content type using extension?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 90,
+  "path": "/Users/eseudom/Documents/Notes on AutoJobber and SupportLine.txt",
+  "phrase": "saging apps, email for handling simple and repetitive inquiries with previously added organisational knowledge base and history of responses.",
+  "query": "Where can I find guide about chatbots answering common customer questions using stored replies",
+  "overlap": 0.273
+ },
+ {
+  "doc_id": 4848,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/I18n/Multibyte.php",
+  "phrase": "* @return int|bool The portion of $haystack, or false if $needle is not found.",
+  "query": "Where can I locate script that extracts substring from another text?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 112,
+  "path": "/Users/eseudom/Documents/Bellboy project.txt",
+  "phrase": "User accounts should be clearly defined and not interchangeable to minimize complexity and repeatition as it will incure more costs.",
+  "query": "Where is file explaining distinct profiles avoid duplication lower expenses?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4809,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/ScaffoldView.php",
+  "phrase": "* ScaffoldView provides specific view file loading features for scaffolded views.",
+  "query": "Where can I find code retrieving reusable page templates?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4811,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/JsonView.php",
+  "phrase": "* that should be serialized to JSON and used as the response for the request.",
+  "query": "Where can I find code converting data into web reply format?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 1922,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/auth/src/Credentials/InsecureCredentials.php",
+  "phrase": "* Provides a set of credentials that will always return an empty access token.",
+  "query": "Where can I find fake login details generating blank authorization key?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2449,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/league/flysystem/src/NotSupportedException.php",
+  "phrase": "$message = \"The FTP system type '$systemType' is currently not supported.",
+  "query": "Where can I find script handling file transfer protocol incompatibility notifications?",
+  "overlap": 0.125
+ },
+ {
+  "doc_id": 4851,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Error/ExceptionRenderer.php",
+  "phrase": "* and it is a type that ExceptionHandler does not know about it will be treated as a 500 error.",
+  "query": "Where might one locate documentation explaining unrecognized fault fallback behavior?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2090,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Batch/BatchJob.php",
+  "phrase": "// Fire SIGALRM after 1 second to unblock the blocking call.",
+  "query": "Which file contains code scheduling timer signal waking waiting process?",
+  "overlap": 0.111
+ }
+]
