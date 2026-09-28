@@ -414,6 +414,24 @@ def cmd_search(args) -> int:
                           top_k=args.k, explain=args.explain)
     dt = time.time() - t0
 
+    # ⚠️ RE-RANKING RUNS AFTER RETRIEVAL AND BEFORE DISPLAY. It reorders; it CANNOT add a result
+    # retrieval missed, and saying so up front prevents the obvious misreading of the feature.
+    if getattr(args, "rerank", False) and cands:
+        from .answer import MAX_CHARS_PER_SOURCE
+        from .rerank import DEFAULT_TOP_N, Reranker, rerank_candidates
+        _rr = Reranker()
+        _snips = {}
+        for _c in cands[:DEFAULT_TOP_N]:
+            _row = store.by_id(_c.doc_id)
+            _snips[_c.doc_id] = ((_row[4] if _row else "") or "")[:MAX_CHARS_PER_SOURCE]
+        _rep = rerank_candidates(args.query, cands, _snips, _rr)
+        if _rep.get("error"):
+            print(f"  re-ranking skipped: {_rep['error']}")
+        else:
+            print(f"  re-ranked {_rep['top_n']} candidates in {_rep['seconds']:.1f}s "
+                  f"({_rep['moved']} changed position, "
+                  f"{_rep.get('load_seconds', 0):.1f}s loading the model)")
+
     if args.json:
         print(json.dumps({
             "query": args.query, "took_s": round(dt, 3), "trace": trace,
@@ -455,6 +473,40 @@ def cmd_search(args) -> int:
             print(f"      vectors were built against an older index. Re-run `ds index` to")
             print(f"      refresh them. Exact and keyword matches are unaffected.")
     print()
+
+    # ⚠️⚠️ THE ANSWER IS PRINTED BEFORE THE LIST, DELIBERATELY.
+    #
+    # It is what was asked for, and the list is the evidence for it. Printing the list first
+    # buries the answer under twenty file paths the user did not ask to read — and printing
+    # the answer WITHOUT the list is worse, because then the claim has no visible support.
+    #
+    # ⚠️ AND EVERY FAILURE MODE IS SURFACED: no model configured, a request that failed, an
+    # answer citing a source that was never sent, and an answer with no citations at all. The
+    # last two are the shapes that make a generated answer untrustworthy while looking sourced.
+    if getattr(args, "ask", False) and cands:
+        from .answer import build_context, ask as ask_model
+        _srcs, _rep = build_context(
+            cands, lambda c: ((store.by_id(c.doc_id) or [None, None, None, None, ""])[4] or ""))
+        if _rep["blocked"]:
+            print(f"  ⚠️ {_rep['blocked']} snippet(s) withheld — matched a secret pattern: "
+                  f"{', '.join(_rep['blocked_kinds'])}")
+        if not _srcs:
+            print("  ⚠️ nothing could be sent to a model (all snippets withheld or empty)")
+        else:
+            _a = ask_model(args.query, _srcs)
+            print()
+            if _a.get("error"):
+                print(f"  ⚠️ no answer: {_a['error']}")
+            else:
+                print(f"  {_a['answer']}")
+                if _a.get("invented_citations"):
+                    print(f"  ⚠️ the model cited source(s) that were never sent: "
+                          f"{_a['invented_citations']} — treat this answer as unverified")
+                if _a.get("uncited"):
+                    print("  ⚠️ the answer carries no citations — it is an assertion, not a result")
+                for _c in _a.get("citations", []):
+                    print(f"      [{_c['n']}] {_c['path']}")
+            print()
 
     if not cands:
         print("  ✗ no results.")
@@ -657,6 +709,16 @@ def main(argv=None) -> int:
     p.add_argument("--no-semantic", action="store_true")
     p.add_argument("--json", action="store_true")
     p.add_argument("--explain", action="store_true")
+    # ⚠️⚠️ --ask IS THE HALF OF THE RAG PIPELINE THAT DID NOT EXIST. llm_rerank reordered
+    # results; nothing ever SYNTHESISED an answer from them. A flag rather than the default,
+    # because finding and answering are different products and the answer is only as good as
+    # the list — an answer built on results the user never saw is a claim they cannot check.
+    p.add_argument("--ask", action="store_true",
+                   help="answer the question from the top results (needs OPENAI_API_KEY)")
+    # ⚠️ THE CROSS-ENCODER, BUILT IN rerank.py AND NEVER CONNECTED — no call site anywhere.
+    # Opt-in because it is O(n) forward passes: about 8 candidates per second.
+    p.add_argument("--rerank", action="store_true",
+                   help="reorder results with a cross-encoder (~5s, 80MB model)")
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("runtime", help="which embedding runtime, and what it costs")
