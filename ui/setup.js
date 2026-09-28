@@ -26,6 +26,7 @@ const Setup = (() => {
   let wholeDevice = false;
 
   const el = (id) => document.getElementById(id);
+  const base = (p) => String(p).replace(/\/+$/, "").split("/").pop() || p;
 
   async function refresh() {
     const r = await api("/api/roots");
@@ -59,22 +60,39 @@ const Setup = (() => {
                     + "hour or more — you can keep using search while it runs.";
     host.appendChild(sub);
 
+    // ⚠️⚠️ ONE LIST, BUILT FROM THE UNION OF EVERY SOURCE.
+    //
+    // This redrew only from `roots.suggested` and `roots.indexed` — the two things the SERVER
+    // knows about — while `chosen` held what the USER had picked. So the picker added folders to
+    // `chosen`, appended rows for them, and then called render(), which wiped the panel and
+    // redrew from the server's lists. **The selected folders vanished the instant they were
+    // chosen**, which is exactly what was reported.
+    //
+    // ⚠️ THE ERROR WAS TWO SOURCES OF TRUTH FOR ONE LIST. `chosen` is the state; the panel must
+    // be drawn FROM that state, not from a different list that happens to overlap with it.
     const list = document.createElement("div");
     list.className = "setup-list" + (wholeDevice ? " disabled" : "");
-    const seen = new Set();
+
+    const cands = new Map();          // path -> { label, count }
     for (const s of roots.suggested) {
-      if (!s.exists || seen.has(s.path)) continue;
-      seen.add(s.path);
-      list.appendChild(row(s.path, s.name, true));
+      if (s.exists) cands.set(s.path, { label: s.name || base(s.path), count: 0 });
     }
-    // ⚠️ Already-indexed roots are shown with their REAL document counts, because the configured
-    // roots and what is actually in the index drift apart as soon as something is renamed,
-    // unmounted or deleted.
+    // ⚠️ Already-indexed roots carry their REAL document counts, because the configured roots and
+    // what is actually in the index drift apart as soon as something is renamed or unmounted.
     for (const i of roots.indexed) {
-      if (seen.has(i.path) || !i.path.startsWith("/Users/")) continue;
-      seen.add(i.path);
-      list.appendChild(row(i.path, i.path.split("/").pop() || i.path, true, i.documents));
+      if (!i.path.startsWith("/Users/")) continue;
+      cands.set(i.path, { label: base(i.path), count: i.documents || 0 });
     }
+    // ⚠️ AND EVERYTHING THE USER PICKED, which is the half that was missing entirely.
+    for (const p of chosen) {
+      if (!cands.has(p)) cands.set(p, { label: base(p), count: 0 });
+    }
+
+    for (const [path, meta] of cands) {
+      list.appendChild(row(path, meta.label, chosen.has(path), meta.count));
+    }
+    // ⚠️ A PICKED FOLDER THAT MATCHED NOTHING IS NOT AN ERROR — it simply has no count yet, and
+    // the "0 indexed" state is what tells the user it has not been crawled.
     host.appendChild(list);
 
     // ⚠️⚠️ A BUTTON THAT OPENS THE MACOS PICKER, NOT A TEXT INPUT.
@@ -97,11 +115,12 @@ const Setup = (() => {
       pick.textContent = "Choosing…";
       try {
         const got = await invoke("pick_folder", { multiple: true });
+        // ⚠️ ONLY MUTATE STATE; render() OWNS THE DOM. Appending rows here and then re-rendering
+        // is what produced the original bug — the panel was built twice, from two sources, and
+        // the second build did not know about the first.
         for (const p of got || []) {
-          if (!chosen.has(p)) {
-            chosen.add(p);
-            list.appendChild(row(p, p.split("/").pop() || p, true));
-          }
+          const clean = String(p).replace(/\/+$/, "");
+          if (clean) chosen.add(clean);
         }
       } catch (e) {
         // ⚠️ FALL BACK TO THE TEXT BOX RATHER THAN DOING NOTHING. If the native dialog is
@@ -125,9 +144,11 @@ const Setup = (() => {
     const doAdd = () => {
       const v = inp.value.trim();
       if (!v) return;
-      chosen.add(v);
+      // ⚠️ Same rule: state only, then re-render. And the path is added even if it does not
+      // exist yet — the server is the thing that validates, and a client-side check that
+      // disagrees with it is worse than none.
+      chosen.add(v.replace(/\/+$/, ""));
       inp.value = "";
-      list.appendChild(row(v, v.split("/").pop() || v, false));
       render();
     };
     btn.onclick = doAdd;
@@ -187,7 +208,13 @@ const Setup = (() => {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = checked;
-    cb.onchange = () => cb.checked ? chosen.add(path) : chosen.delete(path);
+    cb.onchange = () => {
+        // ⚠️ RE-RENDER, NOT JUST MUTATE. The Index button's enabled state is derived from
+        // `chosen.size`, so without this, ticking a folder when none was ticked left the button
+        // DISABLED and unticking every folder left it ENABLED — wrong in both directions.
+        if (cb.checked) chosen.add(path); else chosen.delete(path);
+        render();
+      };
     const t = document.createElement("span");
     t.className = "setup-name";
     t.textContent = label;
@@ -233,5 +260,5 @@ const Setup = (() => {
   function close() { el("setup-overlay").classList.remove("show"); }
   function isOpen() { return el("setup-overlay")?.classList.contains("show"); }
 
-  return { refresh, open, close, isOpen: () => el("setup")?.classList.contains("show") };
+  return { refresh, open, close, isOpen: () => el("setup-overlay")?.classList.contains("show") };
 })();
