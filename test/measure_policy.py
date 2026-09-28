@@ -101,6 +101,31 @@ def variants(path, text, policy):
     if policy == "raw_split":
         return [split_identifiers(text)] if text.strip() else []
 
+    # ⚠️⚠️ THE ADAPTIVE POLICY, PROPOSED BY THE USER AND SUPPORTED BY THE DATA.
+    #
+    # Measured over 4,395 code files: 600 embed 0% of themselves and a further 972 embed
+    # under 10%. A third of the corpus is invisible to meaning-based search, and the files
+    # that suffer most are machine-generated ones that have no comments by nature.
+    #
+    # ⚠️ BUT `both` — raw code everywhere — gains recall@10 (25% -> 35%) AND LOSES MRR
+    # (0.139 -> 0.100), at 4.4x the index. Adding 12,000 raw chunks dilutes the ranking, the
+    # same way semantic's top-40 did.
+    #
+    # ⚠️ SO THE QUESTION THIS ANSWERS IS WHERE THE MRR LOSS COMES FROM: the VOLUME of raw
+    # code, or something about raw code itself. Applying it only where comments are thin
+    # separates the two — and if the loss was volume, this keeps the recall gain for a
+    # fraction of the cost.
+    if policy == "adaptive" or policy.startswith("adaptive:"):
+        # ⚠️ THE THRESHOLD IS IN ABSOLUTE CHARACTERS, NOT A PERCENTAGE. A 40 KB file with 10%
+        # comments yields 4 KB of prose, which is a description. A 400-byte file with 30%
+        # yields 120 bytes, which is not. Percentage alone would send the large, well-commented
+        # file to raw code and the tiny one to comments.
+        thresh = int(policy.split(":")[1]) if ":" in policy else 600
+        comment_target, _ = embed_target(path, text)
+        if len(comment_target.strip()) >= thresh:
+            return [comment_target]
+        return [text] if text.strip() else []
+
     if policy == "both":
         comment_target, _ = embed_target(path, text)
         out = [t for t in (comment_target, text) if t and t.strip()]
