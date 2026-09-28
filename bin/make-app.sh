@@ -48,6 +48,25 @@ if pgrep -f "device-search.app/Contents/MacOS/device-search" >/dev/null 2>&1 \
     sleep 2
 fi
 
+# ⚠️⚠️ FORCE THE TAURI ASSET CODEGEN TO RERUN, AND THIS IS NOT A WORKAROUND.
+#
+# The UI is EMBEDDED IN THE BINARY at compile time (frontendDist = ../ui, brotli-compressed
+# into a content-addressed cache under target/). But cargo does NOT treat ui/*.js as an input
+# to that codegen: change ONLY the interface and `cargo build` reports "Finished" while
+# re-embedding NOTHING.
+#
+# ⚠️ MEASURED, and it is why a day of UI fixes appeared to do nothing:
+#     current ui/setup.js       18,987 bytes, contains the new code
+#     newest embedded asset      4,089 bytes, contains none of it
+#
+# Every fix was written, committed, tested and rebuilt — and the app kept serving an interface
+# from hours earlier. Worse than the `open` trap, because that one at least showed a stale
+# BINARY; this shows a current binary containing a stale UI.
+#
+# ⚠️ TOUCHING A RUST INPUT IS THE RELIABLE WAY. Deleting the cache also works but the cache is
+# keyed by content hash, so it is shared across builds and removing it is not obviously safe.
+touch "$HERE/src-tauri/src/main.rs"
+
 echo "  building device-search.app"
 
 rm -rf "$APP"
@@ -128,6 +147,14 @@ if ! plutil -lint "$APP/Contents/Info.plist" >/dev/null 2>&1; then
 fi
 
 echo "    executable: $(du -h "$APP/Contents/MacOS/device-search" | cut -f1)"
+# ⚠️ VERIFIED, NOT ASSUMED. The build succeeding says nothing about whether the CURRENT ui/ is
+# inside the binary — that is the whole lesson above. This decompresses the embedded assets and
+# checks that the newest one matches the file on disk.
+node "$HERE/check-assets.js" || {
+    echo "  ✗ the embedded UI does not match ui/ — the app would serve stale code"
+    exit 1
+}
+
 echo "  ✅ $APP"
 echo
 echo "  run it:   open '$APP'"
