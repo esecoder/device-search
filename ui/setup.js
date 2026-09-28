@@ -28,6 +28,34 @@ const Setup = (() => {
   // ⚠️ THE WHOLE-DEVICE CHOICE, CARRIED THROUGH TO THE API. `POST /api/roots` takes a mode,
   // and the backend has always understood "everything" — this is only the interface catching up.
   let wholeDevice = false;
+  // ⚠️⚠️ THE MESSAGE IS STATE, NOT A DOM WRITE, AND THIS IS THE THIRD TIME TODAY.
+  //
+  // note() wrote straight into #setup-msg. But render() begins with `host.textContent = ""`,
+  // so every sequence of
+  //
+  //     note("something failed");  render();
+  //
+  // printed the message and then DELETED IT. Which is exactly the bug that made picked folders
+  // vanish — render() wiping DOM that held state — and I fixed that one without looking for
+  // the same shape two functions away.
+  //
+  // ⚠️ CAUGHT BY test/setup.test.js, NOT BY READING. Three rounds of reading this file missed
+  // it; the four failing assertions named it in one run.
+  //
+  // So: the message lives here, and render() draws it. Same rule as `chosen`.
+  let msgText = "";
+  let msgKind = "";
+  // ⚠️ AND THE SAME PATTERN A THIRD TIME: whether the text-path fallback is OPEN is state.
+  //
+  // The picker's failure handler did `inp.style.display = ""` and then called render() — which
+  // built a BRAND NEW input element with `display: none`, discarding the one that had just been
+  // revealed. **The fallback appeared and was removed in the same tick**, which is word for word
+  // the reported symptom of the folder-picker bug two rounds ago.
+  //
+  // ⚠️ THE RULE, and it took three bugs to state it: ANYTHING A USER CAN CHANGE IS MODULE STATE,
+  // AND render() DRAWS IT. A direct DOM write in an event handler survives exactly until the
+  // next render — and every handler here ends with a render.
+  let typedOpen = false;
 
   const el = (id) => document.getElementById(id);
   const base = (p) => String(p).replace(/\/+$/, "").split("/").pop() || p;
@@ -42,10 +70,18 @@ const Setup = (() => {
   // ⚠️ A message about a panel belongs IN the panel. The overlay is a modal surface; anything
   // the user must read while it is open has to be drawn on it.
   function note(msg, kind) {
+    msgText = msg || "";
+    msgKind = kind || "";
+    paintNote();
+  }
+
+  // ⚠️ PAINTS FROM STATE, AND IS CALLED BY render(). Splitting "set the message" from "draw the
+  // message" is what makes a message survive the re-render that follows it.
+  function paintNote() {
     const m = el("setup-msg");
     if (!m) return;
-    m.className = "setup-msg" + (kind ? " " + kind : "");
-    m.textContent = msg || "";
+    m.className = "setup-msg" + (msgKind ? " " + msgKind : "");
+    m.textContent = msgText;
   }
 
   async function refresh() {
@@ -93,6 +129,8 @@ const Setup = (() => {
     msg.id = "setup-msg";
     msg.className = "setup-msg";
     host.appendChild(msg);
+    // ⚠️ DRAWN FROM STATE on every render, so a message set before a render is still there after it.
+    paintNote();
 
     // ⚠️⚠️ ONE LIST, BUILT FROM THE UNION OF EVERY SOURCE.
     //
@@ -183,7 +221,7 @@ const Setup = (() => {
         // dialog is unavailable the user must still be able to add a folder — and must be told
         // that is what happened rather than left wondering why the button did nothing.
         note(`The folder picker could not open (${e}). Type a path instead.`, "warn");
-        inp.style.display = ""; btn.style.display = "";
+        typedOpen = true;      // ⚠️ state, so the next render draws it open
       }
       pick.disabled = false;
       pick.textContent = "Choose folders…";
@@ -192,12 +230,12 @@ const Setup = (() => {
 
     const inp = document.createElement("input");
     inp.type = "text";
-    inp.style.display = "none";
+    inp.style.display = typedOpen ? "" : "none";
     inp.placeholder = "type a folder path…";
     inp.spellcheck = false;
     const btn = document.createElement("button");
     btn.textContent = "Add";
-    btn.style.display = "none";
+    btn.style.display = typedOpen ? "" : "none";
     const doAdd = () => {
       const v = inp.value.trim();
       if (!v) return;
@@ -216,10 +254,12 @@ const Setup = (() => {
     const type = document.createElement("button");
     type.textContent = "or type a path";
     type.onclick = () => {
-      const showing = inp.style.display !== "none";
-      inp.style.display = showing ? "none" : "";
-      btn.style.display = showing ? "none" : "";
-      if (!showing) inp.focus();
+      typedOpen = !typedOpen;
+      render();
+      if (typedOpen) {
+        const i2 = el("setup").querySelector(".setup-add input");
+        if (i2) i2.focus();
+      }
     };
 
     add.append(pick, type, inp, btn);
@@ -354,7 +394,7 @@ const Setup = (() => {
   }
   function close() {
     el("setup-overlay").classList.remove("show");
-    note("");
+    msgText = ""; msgKind = "";
     // ⚠️ FOCUS RETURNS TO THE SEARCH BOX. Closing a panel and leaving focus on the document means
     // the next keystroke does nothing at all, which reads as the app having frozen.
     const q = el("q"); if (q) q.focus();

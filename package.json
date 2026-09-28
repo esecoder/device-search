@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "jsdom": "^30.1.1"
+  },
+  "name": "device-search",
+  "private": true,
+  "scripts": {
+    "test": "node test/setup.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.1"
+  }
+}
