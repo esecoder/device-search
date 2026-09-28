@@ -20,6 +20,10 @@
 const Setup = (() => {
   let roots = { configured: [], indexed: [], suggested: [] };
   let chosen = new Set();
+  // ⚠️ PATHS THE USER ADDED BY HAND, kept SEPARATE FROM THE SERVER'S SUGGESTIONS. render() needs
+  // to know which rows are "options you were offered" and which are "things you added", because
+  // only the second can be removed.
+  let extras = new Set();
   let busy = false;
   // ⚠️ THE WHOLE-DEVICE CHOICE, CARRIED THROUGH TO THE API. `POST /api/roots` takes a mode,
   // and the backend has always understood "everything" — this is only the interface catching up.
@@ -28,9 +32,32 @@ const Setup = (() => {
   const el = (id) => document.getElementById(id);
   const base = (p) => String(p).replace(/\/+$/, "").split("/").pop() || p;
 
+  // ⚠️⚠️ AN ERROR AREA INSIDE THE PANEL, BECAUSE THE BANNER IS UNDERNEATH IT.
+  //
+  // #setup-overlay is `inset: 0; z-index: 20` and a SIBLING of #box, so it covers the banner
+  // completely. Every `setBanner("warn", ...)` in this file was therefore written to a pixel
+  // rectangle the user cannot see — including all of start()'s failure messages. **The panel
+  // simply closed, or did nothing, and said nothing.**
+  //
+  // ⚠️ A message about a panel belongs IN the panel. The overlay is a modal surface; anything
+  // the user must read while it is open has to be drawn on it.
+  function note(msg, kind) {
+    const m = el("setup-msg");
+    if (!m) return;
+    m.className = "setup-msg" + (kind ? " " + kind : "");
+    m.textContent = msg || "";
+  }
+
   async function refresh() {
     const r = await api("/api/roots");
-    if (!r.ok) return;
+    if (!r.ok) {
+      // ⚠️ THIS USED TO `return` AND LEAVE AN EMPTY PANEL. The user would see a title and no
+      // folders — no list, no buttons, no reason — which reads as the app being broken rather
+      // than a request having failed.
+      note(`Could not load your folders: ${r.error || "the search engine is not responding"}`, "err");
+      render();
+      return;
+    }
     roots = { configured: r.configured || [], indexed: r.indexed || [],
               suggested: r.suggested || [] };
     // ⚠️ PRE-SELECT WHAT EXISTS. A first-run user pressing one button is the goal; making them
@@ -60,6 +87,13 @@ const Setup = (() => {
                     + "hour or more — you can keep using search while it runs.";
     host.appendChild(sub);
 
+    // ⚠️ THE MESSAGE SLOT, ALWAYS PRESENT AND USUALLY EMPTY. Created here rather than shown and
+    // hidden, so render() never has to decide whether the panel has one.
+    const msg = document.createElement("div");
+    msg.id = "setup-msg";
+    msg.className = "setup-msg";
+    host.appendChild(msg);
+
     // ⚠️⚠️ ONE LIST, BUILT FROM THE UNION OF EVERY SOURCE.
     //
     // This redrew only from `roots.suggested` and `roots.indexed` — the two things the SERVER
@@ -73,15 +107,18 @@ const Setup = (() => {
     const list = document.createElement("div");
     list.className = "setup-list" + (wholeDevice ? " disabled" : "");
 
-    const cands = new Map();          // path -> { label, count }
+    const cands = new Map();          // path -> { label, count, known }
     for (const s of roots.suggested) {
-      if (s.exists) cands.set(s.path, { label: s.name || base(s.path), count: 0 });
+      if (s.exists) cands.set(s.path, { label: s.name || base(s.path), count: 0, known: true });
     }
     // ⚠️ Already-indexed roots carry their REAL document counts, because the configured roots and
     // what is actually in the index drift apart as soon as something is renamed or unmounted.
     for (const i of roots.indexed) {
-      if (!i.path.startsWith("/Users/")) continue;
-      cands.set(i.path, { label: base(i.path), count: i.documents || 0 });
+      // ⚠️ NO PLATFORM-SPECIFIC FILTER. This read `if (!i.path.startsWith("/Users/")) continue;`
+      // — a hardcoded macOS home prefix. On Windows or Linux every indexed root would have been
+      // hidden from this list, so the panel would show nothing configured while the index held
+      // thousands of documents. The app is meant to be open source and cross-platform.
+      cands.set(i.path, { label: base(i.path), count: i.documents || 0, known: true });
     }
     // ⚠️ AND EVERYTHING THE USER PICKED, which is the half that was missing entirely.
     for (const p of chosen) {
@@ -89,7 +126,25 @@ const Setup = (() => {
     }
 
     for (const [path, meta] of cands) {
-      list.appendChild(row(path, meta.label, chosen.has(path), meta.count));
+      list.appendChild(row(path, meta.label, chosen.has(path), meta.count,
+                           !meta.known));
+    }
+    // ⚠️ A COUNT OF WHAT IS ABOUT TO BE INDEXED. "Index these folders" gave no sense of whether
+    // that is thirty seconds or three hours, and the only way to find out was to start it.
+    const known = [...chosen].map((p) => cands.get(p)).filter((m) => m && m.count);
+    const unknown = [...chosen].filter((p) => !(cands.get(p) || {}).count).length;
+    if (chosen.size) {
+      const parts = [];
+      if (known.length) {
+        const total = known.reduce((a, m) => a + m.count, 0);
+        parts.push(`${total.toLocaleString()} documents already indexed`);
+      }
+      if (unknown) parts.push(`${unknown} folder${unknown > 1 ? "s" : ""} not indexed yet`);
+      const est = document.createElement("div");
+      est.className = "setup-est";
+      est.textContent = wholeDevice ? "Entire device: every folder will be crawled"
+                                    : `Selected: ${parts.join(" \u00b7 ")}`;
+      host.appendChild(est);
     }
     // ⚠️ A PICKED FOLDER THAT MATCHED NOTHING IS NOT AN ERROR — it simply has no count yet, and
     // the "0 indexed" state is what tells the user it has not been crawled.
@@ -120,13 +175,15 @@ const Setup = (() => {
         // the second build did not know about the first.
         for (const p of got || []) {
           const clean = String(p).replace(/\/+$/, "");
-          if (clean) chosen.add(clean);
+          if (clean) { chosen.add(clean); extras.add(clean); }
         }
+        if (!(got || []).length) note("");     // a cancelled dialog is not an error
       } catch (e) {
-        // ⚠️ FALL BACK TO THE TEXT BOX RATHER THAN DOING NOTHING. If the native dialog is
-        // unavailable the user must still be able to add a folder.
-        inp.style.display = "";
-        inp.placeholder = `picker unavailable (${e}) — type a path`;
+        // ⚠️ FALL BACK TO THE TEXT BOX RATHER THAN DOING NOTHING, AND SAY WHY. If the native
+        // dialog is unavailable the user must still be able to add a folder — and must be told
+        // that is what happened rather than left wondering why the button did nothing.
+        note(`The folder picker could not open (${e}). Type a path instead.`, "warn");
+        inp.style.display = ""; btn.style.display = "";
       }
       pick.disabled = false;
       pick.textContent = "Choose folders…";
@@ -147,7 +204,9 @@ const Setup = (() => {
       // ⚠️ Same rule: state only, then re-render. And the path is added even if it does not
       // exist yet — the server is the thing that validates, and a client-side check that
       // disagrees with it is worse than none.
-      chosen.add(v.replace(/\/+$/, ""));
+      const clean = v.replace(/\/+$/, "");
+      chosen.add(clean);
+      extras.add(clean);
       inp.value = "";
       render();
     };
@@ -185,7 +244,19 @@ const Setup = (() => {
     // app will ever do.
     wp.textContent = "every folder in your home directory — the slowest first index";
     whole.append(wcb, wt, wp);
-    wcb.onchange = () => { wholeDevice = wcb.checked; render(); };
+    wcb.onchange = () => {
+      wholeDevice = wcb.checked;
+      render();
+      // ⚠️ THE FOLDERS ARE NOT LOST, BUT THEY ARE NOT USED EITHER, AND THE OLD BEHAVIOUR SAID
+      // NOTHING. A user who ticked three folders and then ticked "Entire device" would start a
+      // job that ignored all three, with no indication that had happened.
+      if (wholeDevice && chosen.size) {
+        note(`Entire device is selected, so the ${chosen.size} folder(s) above are ignored. `
+             + `Untick it to index only those.`, "warn");
+      } else {
+        note("");
+      }
+    };
     host.appendChild(whole);
 
     const foot = document.createElement("div");
@@ -197,12 +268,12 @@ const Setup = (() => {
     go.onclick = start;
     const skip = document.createElement("button");
     skip.textContent = "Not now";
-    skip.onclick = () => el("setup-overlay").classList.remove("show");
+    skip.onclick = () => close();
     foot.append(go, skip);
     host.appendChild(foot);
   }
 
-  function row(path, label, checked, count) {
+  function row(path, label, checked, count, removable) {
     const d = document.createElement("label");
     d.className = "setup-row";
     const cb = document.createElement("input");
@@ -222,6 +293,23 @@ const Setup = (() => {
     p.className = "setup-path";
     p.textContent = count ? `${path}  ·  ${count.toLocaleString()} indexed` : path;
     d.append(cb, t, p);
+    // ⚠️ A REMOVE AFFORDANCE, BECAUSE UNTICKING IS NOT REMOVING. Untick a folder you picked by
+    // mistake and it stays in the list for ever — there is no way back to the list you started
+    // with. Only hand-picked rows get the button: the suggested ones are options, and removing
+    // an option you have not chosen is not a thing you can want.
+    if (removable) {
+      const x = document.createElement("button");
+      x.className = "setup-x";
+      x.textContent = "\u00d7";
+      x.title = "remove from this list";
+      x.onclick = (e) => {
+        e.preventDefault();
+        chosen.delete(path);
+        extras.delete(path);
+        render();
+      };
+      d.appendChild(x);
+    }
     return d;
   }
 
@@ -229,7 +317,7 @@ const Setup = (() => {
     if (busy) return;
     busy = true;
     render();
-    setBanner("info", "Starting…");
+    note("Starting…");
 
     // ⚠️ TWO CALLS ON PURPOSE: set the roots (instant, reversible), THEN start indexing (long).
     // Fusing them would make a mistyped path begin an hour-long job.
@@ -239,16 +327,23 @@ const Setup = (() => {
                                                                           : "explicit" } });
     if (!setr.ok) {
       busy = false;
-      setBanner("warn", `Could not set folders: ${setr.error}`);
+      note(`Could not save those folders: ${setr.error}`, "err");
       render();
       return;
     }
     const idx = await api("/api/index", { method: "POST", body: {} });
     busy = false;
-    el("setup-overlay").classList.remove("show");
-    if (!idx.ok) setBanner("warn", `Could not start indexing: ${idx.error}`);
-    else { setBanner("info", "Indexing… 0%"); startPolling(); }
-    render();
+    if (!idx.ok) {
+      // ⚠️ STAY OPEN AND SHOW THE ERROR. Closing the panel and writing the reason to the banner
+      // — which the overlay was covering — left the user with a dialog that vanished and no
+      // explanation of why nothing started.
+      note(`Could not start indexing: ${idx.error}`, "err");
+      render();
+      return;
+    }
+    close();
+    setBanner("info", "Indexing… 0%");
+    startPolling();
   }
 
   // ⚠️ THE OVERLAY IS WHAT SHOWS AND HIDES, not the panel inside it. Toggling the inner element
@@ -257,7 +352,13 @@ const Setup = (() => {
     el("setup-overlay").classList.add("show");
     refresh();
   }
-  function close() { el("setup-overlay").classList.remove("show"); }
+  function close() {
+    el("setup-overlay").classList.remove("show");
+    note("");
+    // ⚠️ FOCUS RETURNS TO THE SEARCH BOX. Closing a panel and leaving focus on the document means
+    // the next keystroke does nothing at all, which reads as the app having frozen.
+    const q = el("q"); if (q) q.focus();
+  }
   function isOpen() { return el("setup-overlay")?.classList.contains("show"); }
 
   return { refresh, open, close, isOpen: () => el("setup-overlay")?.classList.contains("show") };
