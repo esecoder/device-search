@@ -47,14 +47,15 @@ FILENAME_RX = re.compile(r"^[\w\-. ]+\.(py|js|ts|tsx|jsx|java|kt|go|rs|c|cpp|h|h
                         r"json|yaml|yml|toml|ini|cfg|sh|sql|html|css|xml|csv|ipynb)$", re.I)
 
 
-# ⚠️ WHEN SEMANTIC CONTRIBUTES AT ALL, AND HOW MUCH WHEN IT DOES. Both numbers are measured —
-# see the block in search() for the six configurations and what each produced.
+# ⚠️ HOW MANY SEMANTIC RESULTS ENTER THE FUSION. Measured on BOTH query types — see the block
+# in search() for the table and for why no threshold can replace it.
 #
-# ⚠️ `SEMANTIC_FALLBACK_BELOW` is the important one: above it, the semantic list is not fused,
-# because on lexical-overlap queries it measurably made the ranking worse while finding nothing
-# extra. Below it — a question whose words are NOT in the answer — lexical returns almost
-# nothing, which is exactly when the embedder is the only backend that can help.
-SEMANTIC_FALLBACK_BELOW = 3
+# ⚠️ THIS IS A COMPROMISE, NOT A SOLUTION, AND THE EVIDENCE SAYS SO:
+#     paraphrases (12% word overlap): top-5 finds 5/20, top-40 finds 5/20, none finds 3/20
+#     lexical      (~50% overlap):    top-5 MRR 0.370, top-40 MRR 0.305, none 0.547
+# It gains 2 of 20 on one query type and costs 0.18 MRR on the other, and nothing available
+# distinguishes them. The real bottleneck is the EMBEDDER — 35% recall on the questions it
+# exists for — not the fusion arithmetic.
 SEMANTIC_FUSION_CAP = 5
 
 
@@ -289,11 +290,33 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
                 #
                 # ⚠️ A SEMANTIC-ONLY HIT IS STILL REPORTED in the "closest by meaning" tier, so
                 # this never hides a document that nothing else found.
-                kw_found = len(out.get("keyword", [])) + len(out.get("exact", []))
-                if kw_found < SEMANTIC_FALLBACK_BELOW:
-                    out[b] = semantic.search(query, limit=SEMANTIC_FUSION_CAP)
-                    trace["semantic_fired"] = {"lexical_hits": kw_found,
-                                               "threshold": SEMANTIC_FALLBACK_BELOW}
+                # ⚠️⚠️ THE THRESHOLD THAT WAS HERE IS GONE, BECAUSE IT NEVER FIRED.
+                #
+                # It gated semantic on `len(keyword_hits) < 3`. But BM25 returns top-k
+                # REGARDLESS OF SCORE, so a query with no relevance at all still returns 40
+                # results and the guard never opened — including on the paraphrase queries it
+                # was written for. Measured: fused == bm25 alone on that set, exactly.
+                #
+                # ⚠️ AND THE OBVIOUS REPLACEMENT ALSO FAILS. Gating on BM25's top SCORE looks
+                # right and is not, because the score does not separate the two query types:
+                #
+                #     paraphrase queries   top score: median 25.13, max 39.93
+                #     lexical queries      top score: median 19.17, max 51.42
+                #
+                # ⚠️ THE PARAPHRASE QUERIES SCORE HIGHER. A BM25 score is a property of how
+                # often the query's words occur, and a paraphrase query still contains words
+                # that occur somewhere — just not in the answer. So it cannot tell "the answer
+                # is here" from "these words are common".
+                #
+                # ⚠️ SO SEMANTIC IS ALWAYS INCLUDED, CAPPED. The cap is where the two
+                # measurements meet, and it is a compromise rather than a solution:
+                #
+                #     paraphrase set:  top-40 5/20   top-10 6/20   top-5 5/20   top-3 3/20
+                #     lexical set:     top-40 MRR 0.305   top-5 MRR 0.370   none 0.547
+                #
+                # ⚠️ IT HELPS ON ONE AND HURTS ON THE OTHER, and neither threshold can tell them
+                # apart. 5 is the smallest cap that keeps the paraphrase gain.
+                out[b] = semantic.search(query, limit=SEMANTIC_FUSION_CAP)
             trace["backend_counts"][b] = len(out.get(b, []))
         return out
 
