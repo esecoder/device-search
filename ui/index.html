@@ -58,6 +58,9 @@
       <span><kbd>↵</kbd> open</span>
       <span><kbd>⌘↵</kbd> reveal</span>
       <span id="settings" title="choose folders (⌘,)">folders</span>
+      <!-- ⚠️ A FOOTER LINK, NOT A SETUP STEP. Connecting a model is something you come back
+           to, not something you do once before the app works. -->
+      <span id="aiopen" title="connect a model (⌘.)">AI</span>
       <span id="activity"></span>
       <span id="indexinfo"></span>
     </div>
@@ -70,8 +73,15 @@
      ⚠️ An overlay cannot affect the layout of what it covers. That is the whole point. -->
 <div id="setup-overlay"><div id="setup"></div></div>
 
+<!-- ⚠⚠ ITS OWN OVERLAY, SEPARATE FROM THE FOLDER PANEL. "What should be searchable?" is a
+     question about the disk; "which model?" is a question about what leaves the machine.
+     Sharing one panel made connecting an API look like a routine step on the way to picking
+     folders. -->
+<div id="ai-overlay"><div id="ai"></div></div>
+
 <!-- ⚠️ setup.js loads FIRST: app.js calls Setup.open() during boot. -->
 <script src="setup.js"></script>
+<script src="ai.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

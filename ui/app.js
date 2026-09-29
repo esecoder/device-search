@@ -107,6 +107,9 @@ async function boot() {
     } catch (e) { b.style.display = "none"; }
   };
   refreshAsk();
+  // ⚠️ AND WHENEVER THE MODEL PANEL CLOSES. Connecting a model must make the answer toggle
+  // appear immediately; waiting for a relaunch reads as the connection having failed.
+  window.addEventListener("ds:model-changed", refreshAsk);
   if ($("askbtn")) {
     $("askbtn").onclick = () => {
       $("askbtn").classList.toggle("on");
@@ -453,8 +456,12 @@ window.addEventListener("keydown", (e) => {
   // ⚠️ SETUP MUST BE REACHABLE AFTER FIRST RUN. A one-shot wizard that cannot be reopened makes
   // "add another folder" impossible without deleting the index.
   if (e.key === "," && (e.metaKey || e.ctrlKey)) { e.preventDefault(); Setup.open(); return; }
+  // ⚠️ ⌘. FOR THE MODEL PANEL. ⌘, is folders; the two are different decisions and get
+  // different keys rather than one panel that does both.
+  if (e.key === "." && (e.metaKey || e.ctrlKey)) { e.preventDefault(); AI.open(); return; }
   if (e.key === "Escape") {
     e.preventDefault();
+    if (AI.isOpen()) { AI.close(); return; }
     if (Setup.isOpen()) { Setup.close(); return; }
     // ⚠️ ESCAPE CLEARS FIRST, THEN HIDES. One keystroke that both erases the search and makes
     // the window disappear gives the user no way to edit a query they are halfway through.
@@ -476,6 +483,7 @@ if (window.__TAURI__?.event) {
 // ⚠️ THE SETTINGS AFFORDANCE, because a first-run wizard that cannot be reopened makes "add
 // another folder" impossible without deleting the index.
 $("settings").addEventListener("click", () => Setup.open());
+if ($("aiopen")) $("aiopen").addEventListener("click", () => AI.open());
 
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.

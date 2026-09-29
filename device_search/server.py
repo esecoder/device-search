@@ -135,6 +135,62 @@ def save_llm_settings(d: dict) -> None:
     os.replace(tmp, LLM_PATH)
 
 
+# ⚠⚠️ PROVIDER PRESETS, BECAUSE ASKING FOR THREE FIELDS IS ASKING FOR TWO TOO MANY.
+#
+# The first version of this screen wanted an API key, an endpoint AND a model name. That is a
+# form built by someone who already knows the answers: it asks a user to recall that DeepSeek's
+# endpoint is `api.deepseek.com` and that its model is called `deepseek-chat`, and to get both
+# right with no feedback until something fails.
+#
+# ⚠️ NOBODY KNOWS THAT, AND NOBODY SHOULD HAVE TO. Choosing which company you pay is one
+# decision. Everything else is a lookup.
+#
+# ⚠️ `local` ENTRIES HAVE NO KEY AT ALL — that is the point of them. A local model is the
+# option for someone who does not want their files leaving the machine, and a key field would
+# contradict the only reason to choose it.
+PROVIDERS = [
+    {"id": "ollama", "label": "Ollama (on this Mac)", "base_url": "http://localhost:11434/v1",
+     "model": "", "needs_key": False, "local": True, "probe": "http://localhost:11434"},
+    {"id": "lmstudio", "label": "LM Studio (on this Mac)", "base_url": "http://localhost:1234/v1",
+     "model": "", "needs_key": False, "local": True, "probe": "http://localhost:1234"},
+    {"id": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1",
+     "model": "gpt-4o-mini", "needs_key": True, "local": False, "probe": ""},
+    {"id": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com",
+     "model": "deepseek-chat", "needs_key": True, "local": False, "probe": ""},
+    {"id": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
+     "model": "", "needs_key": True, "local": False, "probe": ""},
+    {"id": "custom", "label": "Something else…", "base_url": "", "model": "",
+     "needs_key": True, "local": False, "probe": ""},
+]
+
+
+def local_models(probe: str) -> list:
+    """⚠️ ASK THE LOCAL SERVER WHAT IS INSTALLED, RATHER THAN ASKING THE USER TO SPELL IT.
+
+    Someone running Ollama already has models — they downloaded them. Making them type the name
+    from memory is asking them to repeat work they have already done, and to get it exactly
+    right. Both Ollama and LM Studio expose a list; one is an API route, the other is
+    OpenAI-compatible.
+    """
+    if not probe:
+        return []
+    import urllib.error
+    import urllib.request
+    for path in ("/api/tags", "/v1/models"):
+        try:
+            with urllib.request.urlopen(f"{probe.rstrip('/')}{path}", timeout=3) as r:
+                d = json.load(r)
+        except Exception:
+            continue
+        # ⚠️ Ollama answers with {"models":[{"name":...}]}, LM Studio and the OpenAI shape use
+        # {"data":[{"id":...}]}. Both are accepted because the difference is theirs, not ours.
+        out = [m.get("name") for m in (d.get("models") or []) if m.get("name")]
+        out += [m.get("id") for m in (d.get("data") or []) if m.get("id")]
+        if out:
+            return sorted(set(out))
+    return []
+
+
 def llm_probe(timeout: int = 25) -> dict:
     """⚠⚠ A SAVED KEY IS NOT A WORKING KEY, AND THE UI CANNOT TELL THE DIFFERENCE.
 
@@ -628,6 +684,24 @@ class Handler(BaseHTTPRequestHandler):
                                      "base_url": cfg.get("base_url") or "",
                                      "model": cfg.get("model") or "",
                                      "ok": True})
+                return
+
+            if url.path == "/api/llm/providers":
+                # ⚠️ EACH LOCAL ENTRY IS PROBED LIVE, so the panel can show "found 3 models"
+                # rather than offering a choice that will fail. A dropdown listing a server that
+                # is not running is a dropdown that produces an error message.
+                out = []
+                for p in PROVIDERS:
+                    e = dict(p)
+                    e["models"] = local_models(p["probe"]) if p.get("local") else []
+                    e["available"] = bool(e["models"]) if p.get("local") else True
+                    e.pop("probe", None)
+                    out.append(e)
+                cfg = llm_settings()
+                e = {"providers": out, "base_url": cfg.get("base_url") or "",
+                     "model": cfg.get("model") or "",
+                     "configured": bool(cfg.get("api_key"))}
+                self._send(200, e)
                 return
 
             if url.path == "/api/llm/test":
