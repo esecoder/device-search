@@ -38,6 +38,21 @@ const zlib = require("zlib");
 
 const ROOT = path.resolve(__dirname, "..");
 const UI = path.join(ROOT, "ui");
+// ⚠⚠️ THE BINARY IS THE ONLY THING THAT MATTERS, AND THIS CHECK WAS READING SOMETHING ELSE.
+//
+// It scanned target/release/build/*/out/tauri-codegen-assets - the CODEGEN OUTPUT DIRECTORY.
+// Cargo writes fresh assets there whenever the build script runs, but they are only baked
+// into the binary when the Rust code is RECOMPILED. ⚠️ So the directory can be new while the
+// binary is old, and the checker reported "embedded" for files that were newer than the
+// binary - measured: ui/app.js at 15:54:59 against a binary from 15:34:07, reported as fine.
+//
+// ⚠️ AND IT FAILED THE OTHER WAY TOO. That "false failure" inside make-app.sh which passed
+// when run by hand was not mtime granularity as I concluded - it was this same proxy
+// disagreeing with reality in the opposite direction.
+//
+// ⚠️ A CHECK THAT READS A PROXY FOR THE THING IT CLAIMS TO VERIFY IS NOT A CHECK. The mtime of
+// the actual executable is direct, needs no parsing, and cannot be fooled by an intermediate.
+const BIN = path.join(ROOT, "src-tauri/target/release/device-search.app/Contents/MacOS/device-search");
 const BUILD = path.join(ROOT, "src-tauri/target/release/build");
 
 // ⚠⚠️ EVERY FILE THE APP LOADS, AND THIS LIST HAS TO BE UPDATED WHEN ONE IS ADDED.
@@ -49,6 +64,47 @@ const BUILD = path.join(ROOT, "src-tauri/target/release/build");
 // them.** The whole point of this script is to catch a stale binary, and it would have
 // missed the most likely one.
 const WATCH = ["index.html", "app.js", "setup.js", "ai.js", "style.css"];
+
+// ⚠⚠️ MTIME IS CHECKED FIRST, BEFORE ANY PARSING, AND IT DECIDES THE EXIT CODE.
+//
+// This has to come before the content scan because the content scan reads a PROXY — the
+// codegen output directory — which can be fresh while the binary is old. Measured: ui/app.js
+// at 15:54:59 against a binary from 15:34:07, reported as "embedded" and exit 0.
+//
+// ⚠️ THE BINARY CANNOT CONTAIN A FILE THAT IS NEWER THAN IT. That is not a heuristic, it is a
+// fact about filesystems, and it is the one check here that no intermediate can disagree with.
+function mtimeCheck() {
+  let binM;
+  try {
+    binM = fs.statSync(BIN).mtimeMs;
+  } catch (e) {
+    console.log(`  ⚠️ cannot stat the executable: ${e.message}`);
+    return 1;
+  }
+  const stale = WATCH.filter((f) => {
+    try { return fs.statSync(path.join(ROOT, "ui", f)).mtimeMs > binM; }
+    catch (e) { return false; }
+  });
+  if (!stale.length) return 0;
+  console.log("");
+  console.log(`  ✗ ${stale.length} file(s) are NEWER than the executable — it cannot contain them:`);
+  for (const f of stale) {
+    const fm = fs.statSync(path.join(ROOT, "ui", f)).mtimeMs;
+    console.log(`      ui/${f}  ${new Date(fm).toTimeString().slice(0, 8)}`
+              + `  >  binary ${new Date(binM).toTimeString().slice(0, 8)}`);
+  }
+  console.log("");
+  console.log("  Rebuild:  touch src-tauri/src/main.rs && sleep 2 && \\");
+  console.log("            (cd src-tauri && cargo build --release) && ./bin/make-app.sh");
+  return 1;
+}
+
+const MTIME_FAILED = mtimeCheck();
+if (MTIME_FAILED) {
+  // ⚠️ STOPS HERE. Reporting "embedded" from the codegen directory after this would be the
+  // same lie in a different font.
+  process.exit(MTIME_FAILED);
+}
 
 function embeddedTexts() {
   const out = [];
