@@ -45,6 +45,8 @@ import os
 import secrets
 import socket
 import subprocess
+import urllib.error
+import urllib.request
 import sys
 import threading
 import time
@@ -89,6 +91,101 @@ ALLOWED_ORIGINS = {
 # =============================================================================
 # THE ENGINE, LOADED ONCE
 # =============================================================================
+# ⚠️⚠️ WHERE AN API KEY LIVES, AND WHY IT IS NOT IN THE ENVIRONMENT.
+#
+# The CLI reads OPENAI_API_KEY from the shell, which is right for a terminal and impossible for
+# a bundled app: the Tauri shell spawns the daemon with no environment at all, so a key set in
+# a shell profile never reaches it. Measured before this existed: `--ask` worked from a
+# terminal and the app had no LLM path whatsoever.
+#
+# ⚠️ SO THE KEY IS A FILE, MODE 0600, IN THE INDEX DIRECTORY — the same place and the same
+# protection as api.token. 0600 is not decoration: it is the difference between a secret the
+# user owns and a secret every process running as any local user can read.
+#
+# ⚠️ AND THE API NEVER RETURNS IT. GET /api/llm reports whether a key is configured and its
+# last four characters. A settings endpoint that echoes a secret turns every browser devtools
+# session and every screenshot into a leak.
+LLM_PATH = INDEX_DIR / "llm.json"
+
+
+def llm_settings() -> dict:
+    """Read the stored model settings. Returns {} when nothing is configured."""
+    try:
+        if LLM_PATH.exists():
+            import json as _json
+            d = _json.loads(LLM_PATH.read_text(encoding="utf-8"))
+            # ⚠️ THE FILE WINS OVER THE ENVIRONMENT for the daemon, because this is the copy
+            # the user set through the app. The CLI still prefers the environment, so a
+            # developer running from a shell is not surprised by a stale saved key.
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def save_llm_settings(d: dict) -> None:
+    import json as _json
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = LLM_PATH.with_suffix(".tmp")
+    tmp.write_text(_json.dumps(d), encoding="utf-8")
+    # ⚠️ 0600 BEFORE THE RENAME, not after. Creating the file readable and tightening it
+    # afterwards leaves a window in which it is world-readable, and on a crash the window
+    # never closes.
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, LLM_PATH)
+
+
+def llm_probe(timeout: int = 25) -> dict:
+    """⚠⚠ A SAVED KEY IS NOT A WORKING KEY, AND THE UI CANNOT TELL THE DIFFERENCE.
+
+    Wrong key, wrong base URL, no credit, a model name that does not exist, and a network that
+    blocks the endpoint all look identical from the settings form until the first real question
+    fails — and then the failure is attributed to the app rather than to the key.
+
+    ⚠️ SO THIS MAKES ONE TINY REQUEST AND REPORTS WHAT CAME BACK. It asks for a single word,
+    which costs a fraction of a cent and proves three things at once: the key authenticates,
+    the base URL resolves, and the model name is real.
+    """
+    cfg = llm_settings()
+    key = cfg.get("api_key")
+    if not key:
+        return {"ok": False, "reason": "no API key saved"}
+    base = (cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+    model = cfg.get("model") or "gpt-4o-mini"
+    body = json.dumps({"model": model,
+                       "messages": [{"role": "user", "content": "Reply with the word: ok"}],
+                       "max_tokens": 200}).encode()
+    req = urllib.request.Request(
+        f"{base}/chat/completions", data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    ctx = None
+    try:
+        import ssl
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = None      # ⚠️ correct default on Linux; macOS needs the bundle above
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        # ⚠️ THE STATUS CODE IS THE USEFUL PART. 401 is a bad key, 404 a bad model, 402 no
+        # credit — three different fixes for what the UI would otherwise show as one failure.
+        try:
+            detail = e.read().decode()[:180]
+        except Exception:
+            detail = ""
+        return {"ok": False, "reason": f"HTTP {e.code}", "detail": detail}
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {str(e)[:120]}"}
+    try:
+        txt = (d["choices"][0]["message"].get("content") or "").strip()
+    except Exception:
+        return {"ok": False, "reason": "the response had no message", "detail": str(d)[:180]}
+    return {"ok": bool(txt), "model": model,
+            "reason": "" if txt else "the model returned no content"}
+
+
 class Engine:
     """⚠️ MODULE-LEVEL STATE IS THE POINT, NOT A SMELL. The whole reason this is a daemon is
     that loading the model is expensive; a per-request object would defeat it."""
@@ -143,13 +240,68 @@ class Engine:
             self.semantic_note = f"{type(e).__name__}: {e}"
             self._load_errors.append(self.semantic_note)
 
-    def search(self, query: str, k: int = 10, use_llm: bool = False) -> dict:
+    def _llm_env(self) -> dict:
+        """⚠️ Export the stored key into the environment FOR THIS PROCESS ONLY.
+
+        answer.py and agent.py read OPENAI_* from os.environ — a convention the CLI depends on.
+        Rather than give them a second code path that only the daemon uses, the daemon loads
+        the saved settings into its own environment once. One convention, two ways to fill it.
+        """
+        cfg = llm_settings()
+        if cfg.get("api_key"):
+            os.environ["OPENAI_API_KEY"] = cfg["api_key"]
+            if cfg.get("base_url"):
+                os.environ["OPENAI_BASE_URL"] = cfg["base_url"]
+            if cfg.get("model"):
+                os.environ["OPENAI_MODEL"] = cfg["model"]
+        return cfg
+
+    def search(self, query: str, k: int = 10, use_llm: bool = False, ask: bool = False) -> dict:
         from .agent import search as agent_search
         t0 = time.time()
         cands, trace = agent_search(query, self.store, semantic=self.semantic,
                                     use_llm=use_llm, top_k=k)
+
+        # ⚠⚠ THE ANSWER, AND IT IS BUILT HERE RATHER THAN IN agent.py ON PURPOSE.
+        #
+        # agent.search() RETRIEVES. Turning a list into a sentence is a different operation with
+        # a different failure mode — a sentence is believed, a list is checked — and folding
+        # generation into retrieval would mean every caller got a model call whether it wanted
+        # one or not.
+        #
+        # ⚠️ AND IT IS BEST-EFFORT: a missing key, a failed request or an empty result set leaves
+        # `answer` absent and the results untouched. Searching must never break because the
+        # optional half is unavailable.
+        answer = None
+        if ask and cands:
+            try:
+                from .answer import ask as ask_model, build_context
+                def _text(c):
+                    row = self.store.by_id(c.doc_id)
+                    return (row[4] if row else "") or ""
+                srcs, rep = build_context(cands, _text)
+                if rep["blocked"]:
+                    # ⚠️ THE INTERLOCK IS REPORTED, NOT SILENT. A user whose snippet was withheld
+                    # needs to know the answer is based on less than everything that matched.
+                    trace["secret_blocked"] = rep
+                if srcs:
+                    a = ask_model(query, srcs)
+                    if not a.get("error"):
+                        answer = {"text": a["answer"], "citations": a.get("citations", []),
+                                  "refused": a.get("refused", False),
+                                  "invented": a.get("invented_citations") or [],
+                                  "uncited": bool(a.get("uncited"))}
+                    else:
+                        trace["answer_error"] = a["error"]
+                else:
+                    trace["answer_error"] = ("nothing could be sent to the model — every "
+                                             "matching snippet was withheld or empty")
+            except Exception as e:
+                trace["answer_error"] = f"{type(e).__name__}: {e}"
+
         home = str(Path.home())
         return {
+            "answer": answer,
             "query": query,
             "took_ms": int((time.time() - t0) * 1000),
             "kind": trace["plan"]["kind"],
@@ -463,6 +615,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         q = parse_qs(url.query)
         try:
+            if url.path == "/api/llm":
+                # ⚠⚠ GET NEVER RETURNS THE KEY. It reports whether one is configured and its
+                # last four characters — enough for a user to recognise which key is saved, and
+                # not enough to use it. A settings endpoint that echoes a secret turns every
+                # devtools session and every screenshot into a leak.
+                if self.command == "GET":
+                    cfg = llm_settings()
+                    key = cfg.get("api_key") or ""
+                    self._send(200, {"configured": bool(key),
+                                     "hint": ("\u2026" + key[-4:]) if len(key) >= 4 else "",
+                                     "base_url": cfg.get("base_url") or "",
+                                     "model": cfg.get("model") or "",
+                                     "ok": True})
+                return
+
+            if url.path == "/api/llm/test":
+                # ⚠️ A TEST BUTTON, BECAUSE A SAVED KEY IS NOT A WORKING KEY. Wrong key, wrong
+                # base URL, no credit and a network that blocks the endpoint all look identical
+                # from the UI until the first real question fails — and then the failure is
+                # attributed to the app.
+                self._send(200, llm_probe())
+                return
+
             if url.path == "/api/search":
                 query = (q.get("q") or [""])[0]
                 if not query.strip():
@@ -470,7 +645,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 k = min(int((q.get("k") or ["10"])[0]), 50)
                 llm = (q.get("llm") or ["0"])[0] == "1"
-                self._send(200, ENGINE.search(query, k=k, use_llm=llm))
+                # ⚠️ `ask` TURNS A LIST INTO AN ANSWER. It costs an API call and uploads snippets
+                # (minus anything matching a secret pattern), so it is never the default — and it
+                # fails with a reason rather than an empty box when no key is configured.
+                ask = (q.get("ask") or ["0"])[0] == "1"
+                ENGINE._llm_env()
+                self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask))
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
             elif url.path == "/api/roots":
@@ -517,6 +697,39 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             return
         path_q = urlparse(self.path)
+
+        # ⚠⚠ SAVING THE MODEL SETTINGS BELONGS HERE, NOT IN do_GET.
+        #
+        # The first version put the read and the write in the same `if url.path == "/api/llm"`
+        # block, which lived inside do_GET. So GET worked and POST returned "no such route" —
+        # measured. **A handler is per-method; a route that answers both is two routes.**
+        if path_q.path == "/api/llm":
+            try:
+                body = json.loads(self._read_body() or "{}")
+            except Exception as e:
+                self._send(400, {"error": f"bad JSON: {e}"})
+                return
+            given = (body.get("api_key") or "").strip()
+            cur = llm_settings()
+            # ⚠️ A LONE "-" MEANS REMOVE. An empty field means KEEP — a settings form that wipes a
+            # secret whenever the user edits the model name is a form that loses secrets, and a
+            # secret with no way out is one people regret saving.
+            if given == "-":
+                save_llm_settings({"api_key": "", "base_url": "", "model": ""})
+                self._send(200, {"saved": True, "configured": False})
+                return
+            if not given and not cur.get("api_key"):
+                self._send(400, {"error": "no API key supplied"})
+                return
+            save_llm_settings({
+                "api_key": given or cur.get("api_key", ""),
+                "base_url": (body.get("base_url") or cur.get("base_url")
+                             or "https://api.openai.com/v1").strip(),
+                "model": (body.get("model") or cur.get("model") or "gpt-4o-mini").strip(),
+            })
+            self._send(200, {"saved": True, "configured": True})
+            return
+
         if path_q.path == "/api/roots":
             # ⚠️ SET THE ROOTS, THEN INDEX — two calls, deliberately. Setting roots is instant and
             # reversible; indexing is minutes to hours. Fusing them would make a mis-typed path
