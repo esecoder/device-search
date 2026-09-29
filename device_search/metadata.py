@@ -99,6 +99,28 @@ def parse(query: str) -> dict:
                 f["until"] = midnight - ((lt.tm_mday - 1) * 86400)
             f["_since"] = word
 
+    # ⚠⚠️ A SIZE WITH NO COMPARATOR IS STILL A SIZE, AND THIS IS THE MOST NATURAL WAY TO ASK.
+    #
+    # The patterns above need a word like "over" or "larger than". ⚠️ Measured: "10gb files" parsed
+    # as NOTHING and became a plain text search — which then matched files whose CONTENT mentions
+    # sizes, the opposite of the question.
+    #
+    # ⚠️ "10gb files" IS HOW PEOPLE WRITE IT. The unit is the signal: nobody types "files that are
+    # larger than 10 gigabytes" into a search box, and requiring the comparator made the feature
+    # reachable only by someone who already knew the syntax.
+    #
+    # ⚠️ AND THE UNIT WORD IS REQUIRED. A bare "10" or "10 files" is not a size, and treating it
+    # as one would filter every ordinary query that happens to contain a number.
+    if "min_bytes" not in f and "max_bytes" not in f:
+        m2 = re.search(r"\b(\d+(?:\.\d+)?)\s*(tb|gb|mb|kb)\b", q)
+        if m2:
+            f["min_bytes"] = int(float(m2.group(1))
+                                 * _SIZE_UNITS.get(m2.group(2).lower(), 1))
+            f["_min"] = m2.group(0).strip()
+            # ⚠️ STATED BACK, because "10gb" was read as 10 GiB and someone who meant decimal
+            # GB needs to see which was used rather than guess.
+            f["_from_bare_unit"] = True
+
     m = _EXT_RX.search(query)
     if m:
         f["ext"] = "." + m.group(2).lower()

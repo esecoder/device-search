@@ -17,7 +17,14 @@ const invoke = window.__TAURI__?.core?.invoke;
 let TOKEN = null;
 let PORT = 8734;
 let results = [];
-let answer = null;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
+let answer = null;
+// ⚠️ WHETHER THE ROUTER CALLED THIS A QUESTION, AND WHY THERE IS NO ANSWER IF SO. Kept as
+// state rather than decided at render time, because the server is the thing that classified it
+// and a second opinion in the interface is a second source of truth.
+let isQuestion = false;
+let askReason = "";
+// ⚠️ SET BY THE BUTTON, CONSUMED BY THE NEXT QUERY. See the note in run().
+let wantsRerank = false;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
 let sel = 0;
 let timer = null;
 
@@ -290,12 +297,46 @@ async function run(q) {
   // asking the user to classify their own input before typing it is the opposite of doing the
   // least work. Results come back either way, so a wrong answer is checkable in a glance.
   const aiReady = AI.state().configured;
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}`);
+  // ⚠️ `wantsRerank` IS A ONE-SHOT FLAG. Clicking the button sets it, this query consumes it
+  // and clears it — so the next keystroke is fast again. A sticky mode would silently add five
+  // seconds to every search from then on, and the user would blame the app rather than the mode.
+  const rr = wantsRerank ? "&rerank=1" : "";
+  wantsRerank = false;
+  if (rr) setStatus("", "re-ranking…");
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
   // one is a list the user opens and checks, the other is a sentence that must be trusted or
   // verified. Merging them into one array would render them identically.
   answer = r.answer || null;
+  isQuestion = r.kind === "question";
+  // ⚠️ RE-RANKING CANNOT ADD A RESULT, ONLY REORDER ONE. Saying "0 moved" is not a failure — it
+  // means the first pass was already right, and a user who clicked and saw the same list
+  // deserves to know that rather than assume it did nothing.
+  if (r.rerank) {
+    if (r.rerank.error) setStatus("err", `Re-ranking failed: ${r.rerank.error}`);
+    else setStatus("", `re-ranked ${r.rerank.top_n} results in ${r.rerank.seconds.toFixed(1)}s`
+                     + ` — ${r.rerank.moved} changed position`);
+  }
+  // ⚠⚠️ THE REASON, IN THE USER'S WORDS. Every branch names what to DO about it — a
+  // explanation without a next step is only slightly better than silence.
+  if (isQuestion && !(answer && answer.text)) {
+    if (r.answer_error) {
+      askReason = `Could not get an answer: ${r.answer_error}`;
+    } else if (!aiReady) {
+      askReason = "This looks like a question. Connect a model in Settings and I can answer "
+                + "it — the results below are what I found.";
+    } else {
+      // ⚠️ THE MOST COMMON CASE, AND THE ONE THAT LOOKED BROKEN. A question like "how many
+      // folders are in Desktop?" asks for a COUNT, and no passage in any file states a count —
+      // so extraction from text cannot produce it. Saying so is the whole fix.
+      askReason = "I could not answer that from the text of your files. Counting and "
+                + "arithmetic are not things this can do — it quotes what files say. "
+                + "The results below are what matched.";
+    }
+  } else if (!isQuestion) {
+    askReason = "";
+  }
   // ⚠️ Ignore a response that arrived for a query the user has already moved past. Without
   // this, a slow response overwrites a fast one and the list shows results for an older query.
   if ($("q").value.trim() !== q) return;
@@ -323,6 +364,27 @@ function render() {
   // WITH IT — an answer without its sources is an assertion, and a user has no way to tell a
   // grounded answer from an invented one. The citations are clickable and the matching files
   // are in the list directly underneath, so checking the claim takes one glance.
+  // ⚠⚠️ A QUESTION MUST ALWAYS PRODUCE SOMETHING, INCLUDING "I CANNOT TELL YOU".
+  //
+  // The user asked "how many folders are in Desktop?", saw the label "routed as question" and a
+  // list of files, and had no idea why there was no answer. ⚠️ FROM THEIR SIDE THOSE ARE THE
+  // SAME PIXELS as a working search, so the app looked broken without saying it was.
+  //
+  // ⚠️ EVERY REASON GETS A SENTENCE, because they need different actions:
+  //     no model connected   -> connect one in Settings
+  //     the model refused    -> ask something the files can answer
+  //     the request failed   -> the reason
+  //     a question it cannot answer, like a COUNT, is the most common case of all
+  if (isQuestion && !(answer && answer.text)) {
+    const d = document.createElement("div");
+    d.className = "answer note";
+    const t = document.createElement("div");
+    t.className = "answer-text";
+    t.textContent = askReason;
+    d.appendChild(t);
+    box.appendChild(d);
+  }
+
   if (answer && answer.text) {
     const d = document.createElement("div");
     d.className = "answer" + (answer.uncited || (answer.invented || []).length ? " shaky" : "");
@@ -491,6 +553,12 @@ $("settings").addEventListener("click", () => Setup.open());
 // ⚠️ THE PILL IS A DOOR, NOT A LABEL. Clicking it opens Settings on the model step, so
 // "is this using my key?" is one click to check and one click to change.
 if ($("aipill")) $("aipill").addEventListener("click", () => Setup.open("ai"));
+if ($("rerank")) $("rerank").addEventListener("click", () => {
+  const q = $("q").value.trim();
+  if (!q) return;
+  wantsRerank = true;
+  run(q);
+});
 
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.

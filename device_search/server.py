@@ -312,7 +312,8 @@ class Engine:
                 os.environ["OPENAI_MODEL"] = cfg["model"]
         return cfg
 
-    def search(self, query: str, k: int = 10, use_llm: bool = False, ask: bool = False) -> dict:
+    def search(self, query: str, k: int = 10, use_llm: bool = False, ask: bool = False,
+               rerank: bool = False) -> dict:
         from .agent import search as agent_search
         t0 = time.time()
         cands, trace = agent_search(query, self.store, semantic=self.semantic,
@@ -367,8 +368,35 @@ class Engine:
             except Exception as e:
                 trace["answer_error"] = f"{type(e).__name__}: {e}"
 
+        # ⚠⚠️ RE-RANKING, AND WHY IT IS A BUTTON RATHER THAN A STEP.
+        #
+        # A cross-encoder reads (query, document) TOGETHER and orders far better than the
+        # bi-encoder that found them — but it is one forward pass PER CANDIDATE, about eight per
+        # second on this CPU. ⚠️ Running it automatically would add five seconds to every
+        # keystroke, which turns a responsive search box into a broken one.
+        #
+        # ⚠️ AND IT CANNOT ADD A RESULT. It reorders what retrieval found, so if the answer is
+        # not in the list, re-ranking does not find it — only moves the best of what is there to
+        # the top. Reported, because a user who clicks it and sees the same files deserves to
+        # know that was the expected outcome and not a failure.
+        rerank_report = None
+        if rerank and cands:
+            try:
+                from .answer import MAX_CHARS_PER_SOURCE
+                from .rerank import DEFAULT_TOP_N, Reranker, rerank_candidates
+                def _txt(c):
+                    row = self.store.by_id(c.doc_id)
+                    return (row[4] if row else "") or ""
+                snips = {c.doc_id: _txt(c)[:MAX_CHARS_PER_SOURCE]
+                         for c in cands[:DEFAULT_TOP_N]}
+                rep = rerank_candidates(query, cands, snips, Reranker())
+                rerank_report = {k: v for k, v in rep.items() if k != "worst_drop"}
+            except Exception as e:
+                rerank_report = {"error": f"{type(e).__name__}: {e}"}
+
         home = str(Path.home())
         return {
+            "rerank": rerank_report,
             "answer": answer,
             # ⚠⚠️ THE REASON IS RETURNED, NOT KEPT IN THE TRACE.
             #
@@ -742,8 +770,10 @@ class Handler(BaseHTTPRequestHandler):
                 # (minus anything matching a secret pattern), so it is never the default — and it
                 # fails with a reason rather than an empty box when no key is configured.
                 ask = (q.get("ask") or ["0"])[0] == "1"
+                rerank = (q.get("rerank") or ["0"])[0] == "1"
                 ENGINE._llm_env()
-                self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask))
+                self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask,
+                                              rerank=rerank))
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
             elif url.path == "/api/roots":
