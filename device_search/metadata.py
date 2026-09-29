@@ -122,12 +122,29 @@ def parse(query: str) -> dict:
         m2 = re.search(r"\b(\d+(?:\.\d+)?)\s*(tb|gb|mb|kb)\b", q)
         if m2:
             _spans.append(m2.span())
-            f["min_bytes"] = int(float(m2.group(1))
-                                 * _SIZE_UNITS.get(m2.group(2).lower(), 1))
+            # ⚠⚠️ A BARE UNIT NAMES A SIZE CLASS, NOT A FLOOR. THIS WAS SIMPLY WRONG.
+            #
+            # "2mb files" parsed as size >= 2 MB and returned 100 MB files. ⚠️ Reported by the
+            # user, and they are right: they expected 2.0-2.9 MB.
+            #
+            # ⚠️ "10gb files" MEANS FILES OF ABOUT 10 GB. Nobody types a unit to mean "at least
+            # that, possibly a hundred times more" — if they wanted a floor they would write
+            # "over 10gb", which is handled above and still means a floor. ⚠️ The two forms must
+            # therefore differ, and they now do.
+            #
+            # ⚠️ SO A BARE UNIT IS THE HALF-OPEN RANGE [N, N+1) IN THAT UNIT: "2mb files" is 2 MB
+            # up to but NOT including 3 MB. Inclusive of the value, exclusive of the next unit,
+            # so two adjacent classes never overlap and "2mb" does not also return 3 MB files.
+            _v = float(m2.group(1))
+            _mul = _SIZE_UNITS.get(m2.group(2).lower(), 1)
+            f["min_bytes"] = int(_v * _mul)
+            f["max_bytes"] = int((_v + 1) * _mul) - 1
+            f["_range"] = m2.group(0).strip()
+            # ⚠⚠️ `_min` MUST BE SET TOO, EVEN THOUGH THERE IS A RANGE. describe() GATES THE WHOLE
+            # SIZE BRANCH ON `_min`, so a range-only filter printed NOTHING at all — the filter
+            # ran and the interface showed no reason for the results. ⚠️ Same class as the
+            # `_leftover` bug: a display key silently deciding whether anything is displayed.
             f["_min"] = m2.group(0).strip()
-            # ⚠️ STATED BACK, because "10gb" was read as 10 GiB and someone who meant decimal
-            # GB needs to see which was used rather than guess.
-            f["_from_bare_unit"] = True
 
     # ⚠⚠️ RECORD WHAT WAS CONSUMED, BECAUSE THE LEFTOVER DECIDES WHETHER THIS IS A FILTER OR A
     # SEARCH — AND CONFLATING THE TWO IS WHY "10gb files" RETURNED FILES CONTAINING THE WORD
@@ -183,7 +200,13 @@ def describe(f: dict) -> str:
     user meant decimal, the only way they can tell is if it says which one it used."""
     bits = []
     if "_min" in f:
-        bits.append(f"size ≥ {human_bytes(f['min_bytes'])}")
+        # ⚠️ A RANGE AND A FLOOR READ DIFFERENTLY AND MUST SAY SO. "size ≥ 2 MB" for what is
+        # really "2 MB up to 3 MB" describes a filter that was not applied.
+        if "_range" in f:
+            bits.append(f"size {human_bytes(f['min_bytes'])} to "
+                        f"{human_bytes(f['max_bytes'] + 1)}")
+        else:
+            bits.append(f"size ≥ {human_bytes(f['min_bytes'])}")
     if "_max" in f:
         bits.append(f"size ≤ {human_bytes(f['max_bytes'])}")
     if "_since" in f:

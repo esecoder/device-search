@@ -113,7 +113,7 @@ const AI = (() => {
       // option feel like it did something; a bare radio button leaves the user guessing whether
       // their server was seen at all.
       det.textContent = p.local
-        ? (p.available ? `${p.models.length} model${p.models.length > 1 ? "s" : ""} found \u00b7 stays on this Mac`
+        ? (p.available ? `${p.models.length} model${p.models.length > 1 ? "s" : ""} found \u00b7 stays on this computer`
                        : "not running")
         : (p.needs_key ? "needs an API key" : "");
       row.append(radio, name, det);

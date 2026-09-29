@@ -35,6 +35,16 @@ let askReason = "";
 // looked healthy: the daemon returned 10 results, the request succeeded, the console showed
 // nothing a user would look at.
 let metaInfo = null;
+// ⚠⚠️ WHETHER A MODEL IS CONNECTED, IN STATE RATHER THAN A run() LOCAL.
+//
+// It was declared inside run() and read inside render(), so every question-shaped search threw
+// `Can't find variable: aiReady`. ⚠️ THE GUARD CAUGHT IT AND SAID SO — "The result list could
+// not be drawn" — which is exactly why the guard went in, and the alternative was the blank
+// list the user reported last time with no explanation at all.
+//
+// ⚠️ AND THE SAME MISTAKE TWICE IN A ROW IS THE POINT: moving one value (metaInfo) into state
+// without checking its neighbours left the next one to fail the same way.
+let aiReady = false;
 // ⚠️ SET BY THE BUTTON, CONSUMED BY THE NEXT QUERY. See the note in run().
 let wantsRerank = false;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
 let sel = 0;
@@ -308,7 +318,7 @@ async function run(q) {
   // query is a question — "how does the autoloader work" is one, "RetryMiddleware" is not, and
   // asking the user to classify their own input before typing it is the opposite of doing the
   // least work. Results come back either way, so a wrong answer is checkable in a glance.
-  const aiReady = AI.state().configured;
+  aiReady = AI.state().configured;
   // ⚠️ `wantsRerank` IS A ONE-SHOT FLAG. Clicking the button sets it, this query consumes it
   // and clears it — so the next keystroke is fast again. A sticky mode would silently add five
   // seconds to every search from then on, and the user would blame the app rather than the mode.
@@ -443,8 +453,16 @@ function renderInner() {
     d.className = "answer note";
     const t = document.createElement("div");
     t.className = "answer-text";
-    t.textContent = `Nothing matches ${metaInfo.explain || "that filter"}. That is the answer, `
-                  + `not an error — there is no file on this Mac that satisfies it.`;
+    // ⚠⚠️ SCOPE MATTERS: THIS INDEXES WHAT THE USER CHOSE, NOT THE WHOLE COMPUTER.
+    // "there is no file on this Mac" was wrong twice over. ⚠️ It claims a fact about the
+    // entire machine when only the selected folders were scanned — false, and it answers a
+    // question nobody asked. ⚠️ And it names a platform, in an application meant to run on
+    // Windows and Linux too.
+    //
+    // ⚠️ AND IT NO LONGER EXPLAINS ITSELF. "That is the answer, not an error" is the app
+    // reassuring the user about its own health. They wanted a fact, not a disclaimer.
+    t.textContent = `No file matches ${metaInfo.explain || "that filter"} in the folders `
+                  + `being searched. Widen the search area in Settings if you expected one.`;
     d.appendChild(t);
     box.appendChild(d);
   }
