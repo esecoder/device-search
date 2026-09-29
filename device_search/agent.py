@@ -336,12 +336,34 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # about authentication" is a filter AND a text query, and answering only one of them answers
     # a different question than the one asked.
     try:
-        from .metadata import describe as _mdesc, parse as _mparse, run as _mrun
+        from .metadata import (describe as _mdesc, has_text_query as _mtext,
+                               parse as _mparse, run as _mrun)
         _mf = _mparse(query)
         if _mf:
             results["meta"] = _mrun(store, _mf, limit=40)
             trace["meta"] = {"filters": _mf, "explain": _mdesc(_mf),
                              "hits": len(results["meta"])}
+
+            # ⚠⚠️ AND IF THE FILTERS CONSUMED THE WHOLE QUERY, THE TEXT RESULTS ARE DROPPED.
+            #
+            # ⚠️ THIS IS THE BUG THE USER FOUND. "10gb files" parsed to a size filter, and the
+            # remaining word "files" was searched as TEXT — so files containing the word "files"
+            # came back for a question about size. The filter matched nothing, contributed nothing
+            # to the fusion, and the text search won by default.
+            #
+            # ⚠️ NOBODY WANTS DOCUMENTS CONTAINING THE WORD "files". They want files of that
+            # size. "10gb files" is a FILTER, not a search, and the two must not be fused as if
+            # the leftover were a query.
+            #
+            # ⚠️ THE OTHER DIRECTION STILL WORKS: "recent php files about authentication" leaves
+            # "files about authentication", which carries real words, so the text backends stay
+            # and both run. The difference is decided by has_text_query(), from the spans each
+            # filter actually matched — not by a guess about which words look like noise.
+            if not _mtext(_mf):
+                trace["meta"]["pure_filter"] = True
+                trace.setdefault("dropped", []).append("text backends: filter consumed the query")
+                for _b in ("semantic", "keyword", "exact", "path"):
+                    results.pop(_b, None)
     except Exception as e:
         trace["meta"] = {"error": f"{type(e).__name__}: {e}"}
 

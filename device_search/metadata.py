@@ -58,18 +58,25 @@ def parse(query: str) -> dict:
     """
     q = query.lower()
     f: dict = {}
+    # ⚠️ EVERY MATCH'S SPAN IS RECORDED, so the leftover can be computed exactly rather than
+    # guessed. Whatever is left after the filters have taken their words is the TEXT QUERY — and
+    # if nothing meaningful is left, there is no text query and this is a pure filter.
+    _spans: list = []
 
     m = _SIZE_RX.search(q)
     if m:
+        _spans.append(m.span())
         f["min_bytes"] = int(float(m.group(1)) * _SIZE_UNITS.get((m.group(2) or "").lower(), 1))
         f["_min"] = m.group(0).strip()
     m = _SIZE_UNDER_RX.search(q)
     if m:
+        _spans.append(m.span())
         f["max_bytes"] = int(float(m.group(1)) * _SIZE_UNITS.get((m.group(2) or "").lower(), 1))
         f["_max"] = m.group(0).strip()
 
     m = _TIME_RX.search(q)
     if m:
+        _spans.append(m.span())
         now = time.time()
         if m.group(2):
             n, unit = int(m.group(2)), m.group(3).lower().rstrip("s")
@@ -114,6 +121,7 @@ def parse(query: str) -> dict:
     if "min_bytes" not in f and "max_bytes" not in f:
         m2 = re.search(r"\b(\d+(?:\.\d+)?)\s*(tb|gb|mb|kb)\b", q)
         if m2:
+            _spans.append(m2.span())
             f["min_bytes"] = int(float(m2.group(1))
                                  * _SIZE_UNITS.get(m2.group(2).lower(), 1))
             f["_min"] = m2.group(0).strip()
@@ -121,12 +129,39 @@ def parse(query: str) -> dict:
             # GB needs to see which was used rather than guess.
             f["_from_bare_unit"] = True
 
+    # ⚠⚠️ RECORD WHAT WAS CONSUMED, BECAUSE THE LEFTOVER DECIDES WHETHER THIS IS A FILTER OR A
+    # SEARCH — AND CONFLATING THE TWO IS WHY "10gb files" RETURNED FILES CONTAINING THE WORD
+    # "files".
+    #
+    # ⚠️ "recent php files about authentication" IS BOTH: a filter (recent, php) and a text query
+    # (authentication). Fusing them is right.
+    #
+    # ⚠️ "10gb files" IS ONLY A FILTER. After "10gb" is consumed, what is left is "files" — the
+    # NOUN OF THE FILTER, not a search term. Nobody wants documents containing the word "files";
+    # they want files of that size. Treating it as text meant the size filter matched nothing,
+    # contributed nothing to the fusion, and the text search won by default.
     m = _EXT_RX.search(query)
     if m:
+        _spans.append(m.span())
         f["ext"] = "." + m.group(2).lower()
         f["_ext"] = m.group(1)
 
+    # ⚠⚠️ THE LEFTOVER, COMPUTED FROM THE MATCHED SPANS RATHER THAN GUESSED. THIS IS THE FIX.
+    #
+    # ⚠️ "10gb files" leaves "files" — the NOUN OF THE FILTER, not a search term. Nobody wants
+    # documents containing the word "files"; they want files of that size.
+    #
+    # ⚠️ "recent php files about authentication" leaves "files about authentication", which DOES
+    # carry a text query, and fusing filter and text is right there.
+    _kept = list(q)
+    for _a, _b in _spans:
+        for _i in range(_a, min(_b, len(_kept))):
+            _kept[_i] = " "
+    f["_leftover"] = " ".join("".join(_kept).split())
     return f
+
+
+
 
 
 def describe(f: dict) -> str:
@@ -150,6 +185,26 @@ def human_bytes(n: int) -> str:
             v = n / div
             return f"{v:.0f} {unit}" if v >= 10 or div == 1 else f"{v:.1f} {unit}"
     return "0 B"
+
+
+# ⚠️ WORDS THAT CARRY NO SEARCH INTENT. If the leftover is only these, the query was a
+# FILTER and searching the text for them would return noise dressed as a result.
+_FILLER = {"file", "files", "folder", "folders", "document", "documents", "stuff",
+           "something", "anything", "the", "a", "an", "of", "in", "on", "with", "and",
+           "my", "me", "all", "any", "some", "list", "show", "find", "get", "give",
+           "what", "which", "are", "is", "that", "there", "over", "under", "than",
+           "bigger", "larger", "smaller", "less", "more", "between", "older", "newer"}
+
+
+def has_text_query(f: dict) -> bool:
+    """⚠️ True when the filters did not consume the whole query.
+
+    ⚠️ THIS IS THE DIFFERENCE BETWEEN A FILTER AND A SEARCH, and treating them as one is why
+    "10gb files" returned files containing the word "files": the size filter matched nothing,
+    the text search matched the noun, and the fusion let the noun win.
+    """
+    left = (f or {}).get("_leftover", "")
+    return any(w not in _FILLER and len(w) > 1 for w in left.split())
 
 
 def run(store, f: dict, limit: int = 40) -> list[tuple[int, float]]:
