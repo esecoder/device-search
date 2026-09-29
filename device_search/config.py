@@ -20,6 +20,26 @@ HOME = Path.home()
 #   1. SIZE — a home-directory index is hundreds of MB to a few GB. Never in git.
 #   2. PRIVACY — the index contains the TEXT of your files. If it lived in a repo you might
 #      commit it, and then it is published. `.gitignore` is a backstop, not the defence.
+# ⚠⚠️ THE INDEX FORMAT VERSION, AND THE ANSWER TO "WILL A USER HAVE TO RUN A COMMAND?"
+#
+# A change that adds something to the index — not to the code — cannot take effect until the
+# index is rebuilt. Directories are the first case: the code can look for folders all day, and
+# none exist in an index written before the crawler learned about them.
+#
+# ⚠️ ASKING THE USER TO RE-RUN A TERMINAL COMMAND IS NOT AN ANSWER. A person who installed an
+# app, clicked through setup and searched for a folder should never be told to open a terminal
+# to make their own files visible. **Nothing this app can do for itself should be homework for
+# the user.**
+#
+# ⚠️ SO THE INDEX RECORDS WHICH FORMAT BUILT IT, AND A MISMATCH IS A REASON TO REBUILD. The
+# daemon notices on its own, tells the interface why, and runs the rebuild in the background
+# while search keeps working — exactly as it already does for an interrupted index.
+#
+# BUMP THIS WHENEVER A CHANGE MEANS THE NEXT CRAWL PRODUCES A DIFFERENT INDEX.
+#   1  files only
+#   2  + directories, so a folder can be found by name
+INDEX_FORMAT = 2
+
 INDEX_DIR = HOME / ".device-search"
 DB_PATH = INDEX_DIR / "index.db"
 VEC_PATH = INDEX_DIR / "vectors.npy"

@@ -42,7 +42,15 @@
       <div id="banner-bar"><div id="banner-fill"></div></div>
     </div>
 
-    <div id="status"></div>
+    <!-- ⚠⚠️ THE STATUS LINE IS A ROW, AND THE RE-RANK BUTTON LIVES AT ITS RIGHT-HAND END.
+         It belongs beside "routed as ..." because it is an action ON those results — a
+         footer link said nothing about what it would act on, and it was visible even with
+         nothing on screen to re-rank. -->
+    <div id="statusrow">
+      <div id="status"></div>
+      <span id="rerank" title="reorder these results with a slower, more accurate model"
+            style="display:none">re-rank <kbd>⌘⇧R</kbd></span>
+    </div>
 
     <div id="results"></div>
 
@@ -53,10 +61,6 @@
       <!-- ⚠⚠ ONE DOOR, CALLED WHAT IT IS. There were two footer links — "folders" and "AI" —
            which asked the user to know which of two places held the thing they wanted. Both
            live behind this now. -->
-      <!-- ⚠️ A BUTTON, BECAUSE RE-RANKING TAKES ABOUT FIVE SECONDS. It reads every candidate
-           with the model, one at a time, so it cannot run on every keystroke — which is why
-           it is here and not automatic. -->
-      <span id="rerank" title="reorder these results with a slower, more accurate model">re-rank</span>
       <span id="settings" title="folders and AI (⌘,)">Settings</span>
       <!-- ⚠️ THE AI STATE, VISIBLE WITHOUT BEING OPENED. It appears only when a model is
            connected, and clicking it opens Settings on the model step — so the answer to "is

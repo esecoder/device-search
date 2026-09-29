@@ -528,6 +528,20 @@ class Engine:
                                 "child_alive": (self._repair_proc is not None
                                                 and self._repair_proc.poll() is None)}}
 
+    def outdated_reason(self) -> str:
+        """⚠️ "" when the index is current, otherwise WHY it is not — in the user's words.
+
+        This is the answer to "would a user have to run a command". They should not: the daemon
+        can tell that its own index is missing something, and the only thing it needs from the
+        user is permission to spend their CPU, which it already has.
+        """
+        try:
+            from .config import INDEX_FORMAT
+            need, why = self.store.needs_rebuild_for(INDEX_FORMAT)
+            return why if need else ""
+        except Exception:
+            return ""
+
     def maybe_repair(self) -> dict:
         """Spawn a repair run if the vectors have drifted. ⚠️ Called on a timer, never inline.
 
@@ -565,9 +579,21 @@ class Engine:
                               + (f" — last attempt: {self._repair_note}"
                                  if self._repair_failures else "")}
         st = self.index_status()
-        if not st["stale"].get("stale"):
+        # ⚠⚠️ "NOT STALE" IS NOT THE SAME AS "UP TO DATE", AND CONFLATING THEM IS THE WHOLE BUG.
+        #
+        # `stale` answers "have the files changed since the last index". It says nothing about
+        # whether the index CONTAINS EVERYTHING THIS VERSION KNOWS HOW TO EXTRACT. ⚠️ An index with
+        # no directories in it is perfectly not-stale and still cannot find a single folder.
+        #
+        # ⚠️ SO A FORMAT MISMATCH IS ALSO A REASON TO REBUILD, and the user is told why rather
+        # than having their CPU spent silently. This is the answer to "would a user have to run a
+        # command": no — the daemon notices on its own and rebuilds in the background while search
+        # keeps working.
+        outdated = self.outdated_reason()
+        if not st["stale"].get("stale") and not outdated:
             self._repair_note = "up to date"
             return {"started": False, "reason": "up to date"}
+        self._repair_note = outdated or self._repair_note
 
         log_path = DB_PATH.parent / "daemon.log"
         try:
@@ -706,6 +732,11 @@ class Handler(BaseHTTPRequestHandler):
                              # know whether to draw a banner would double the polling for one
                              # boolean.
                              "stale": st["stale"],
+                # ⚠️ THE INDEX IS OUT OF DATE FOR A REASON THE USER DID NOT CAUSE, and the app
+                # says so and fixes it. ⚠️ It is reported separately from `stale`, because
+                # "files changed since you last indexed" and "this index is missing a whole
+                # category of thing" call for different words.
+                "outdated_reason": ENGINE.outdated_reason(),
                              "embedding_percent": st["embedding"]["percent"],
                              "indexing": st["indexing"],
                              # ⚠️ The ETA and rate come from the process DOING the work. The

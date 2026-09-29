@@ -139,6 +139,16 @@ def cmd_index(args) -> int:
         store.add_many(batch)
         indexed += len(batch)
 
+    # ⚠⚠️ RECORD WHAT THIS INDEX WAS BUILT WITH, THE MOMENT THE CRAWL IS COMPLETE.
+    #
+    # ⚠️ AFTER THE BATCHES, NOT BEFORE. Writing the version first would mark an index as current
+    # before it contained the thing the version promises — so an interrupted crawl would leave a
+    # v2 index with no directories in it, and nothing would ever rebuild it, because the record
+    # already said it was fine.
+    from .config import INDEX_FORMAT
+    store.set_meta("index_format", INDEX_FORMAT)
+    store.conn.commit()
+
     stats = getattr(walk, "stats", None)
     print()
     if stats:

@@ -389,6 +389,29 @@ class Store:
         self.conn.commit()
 
     @_serialised
+    # ⚠⚠️ THE INDEX KNOWS WHICH FORMAT BUILT IT, AND SAYS SO WHEN ASKED.
+    #
+    # ⚠️ AN ABSENT RECORD IS NOT A MATCHING ONE. A index written before this existed has no
+    # entry at all, and treating "no record" as "up to date" is how the stale-index bug appears
+    # on every machine that has been running the app for a while — which is all of them.
+    def index_format(self) -> int:
+        try:
+            return int(self.get_meta("index_format", 0) or 0)
+        except Exception:
+            return 0
+
+    def needs_rebuild_for(self, current: int) -> tuple:
+        """(bool, reason). ⚠️ The reason is returned, not just the verdict — because the user is
+        told WHY the app decided to spend their CPU on something they did not ask for."""
+        have = self.index_format()
+        if have == current:
+            return False, ""
+        if have == 0:
+            return True, ("this index was built before folder search existed — adding "
+                          "folders so you can find them by name")
+        return True, (f"this index was built by an older version (format {have}, "
+                      f"now {current})")
+
     def get_meta(self, key: str, default=None):
         row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
