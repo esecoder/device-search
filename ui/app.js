@@ -23,6 +23,18 @@ let answer = null;
 // and a second opinion in the interface is a second source of truth.
 let isQuestion = false;
 let askReason = "";
+// ⚠⚠️ THE FILTER'S VERDICT, CARRIED IN STATE RATHER THAN READ FROM THE RESPONSE IN render().
+//
+// render() HAS NO `r`. It takes nothing and reads module state. The empty-filter block was
+// inserted into render() while referencing `r` from run(), so it threw ReferenceError on
+// every search and NOTHING WAS DRAWN AT ALL — no results, no message, no error. Reported by
+// the user as "no search result list shows no matter what searched".
+//
+// ⚠️ A REFERENCE ERROR INSIDE A RENDER DOES NOT DEGRADE, IT BLANKS. And because the throw
+// happened after the response arrived and before anything was drawn, every layer above it
+// looked healthy: the daemon returned 10 results, the request succeeded, the console showed
+// nothing a user would look at.
+let metaInfo = null;
 // ⚠️ SET BY THE BUTTON, CONSUMED BY THE NEXT QUERY. See the note in run().
 let wantsRerank = false;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
 let sel = 0;
@@ -309,6 +321,7 @@ async function run(q) {
   // one is a list the user opens and checks, the other is a sentence that must be trusted or
   // verified. Merging them into one array would render them identically.
   answer = r.answer || null;
+  metaInfo = r.meta || null;
   isQuestion = r.kind === "question";
   // ⚠️ RE-RANKING CANNOT ADD A RESULT, ONLY REORDER ONE. Saying "0 moved" is not a failure — it
   // means the first pass was already right, and a user who clicked and saw the same list
@@ -369,6 +382,32 @@ async function run(q) {
 function render() {
   const box = $("results");
   box.textContent = "";
+  // ⚠⚠️ THE WHOLE BODY RUNS INSIDE A GUARD, AND THIS IS THE POINT OF THE GUARD.
+  //
+  // A search returned 10 results from the daemon, the request succeeded, and the user saw an
+  // EMPTY LIST WITH NO ERROR. ⚠️ A ReferenceError inside render() blanks the interface and looks
+  // exactly like "there are no results" — the failure and the empty state are the same pixels,
+  // which is the same class of bug as the silent crawl and the self-erasing message.
+  //
+  // ⚠️ A RENDER THAT CANNOT COMPLETE MUST SAY SO. Swallowing the error would hide it; drawing
+  // nothing while claiming success is what it was already doing.
+  try {
+    renderInner();
+  } catch (e) {
+    box.textContent = "";
+    const d = document.createElement("div");
+    d.className = "answer bad";
+    d.textContent = `The result list could not be drawn: ${e && e.message ? e.message : e}`;
+    box.appendChild(d);
+    // ⚠️ AND THE DETAIL GOES WHERE A DEVELOPER WILL SEE IT. The panel says what broke; the
+    // console says where. A message the user cannot act on is still better than a blank list.
+    console.error("render() failed:", e);
+  }
+}
+
+function renderInner() {
+  const box = $("results");
+  box.textContent = "";
 
   // ⚠⚠️ THE RE-RANK BUTTON'S VISIBILITY IS DECIDED HERE AND NOWHERE ELSE.
   //
@@ -399,12 +438,12 @@ function render() {
   // The user searched "10gb files", saw nothing, and could not tell whether the app had failed
   // or whether they genuinely have no files that large. ⚠️ An empty list is only an answer when
   // the app says WHAT it looked for.
-  if (r.meta && r.meta.empty_is_the_answer) {
+  if (metaInfo && metaInfo.empty_is_the_answer) {
     const d = document.createElement("div");
     d.className = "answer note";
     const t = document.createElement("div");
     t.className = "answer-text";
-    t.textContent = `Nothing matches ${r.meta.explain || "that filter"}. That is the answer, `
+    t.textContent = `Nothing matches ${metaInfo.explain || "that filter"}. That is the answer, `
                   + `not an error — there is no file on this Mac that satisfies it.`;
     d.appendChild(t);
     box.appendChild(d);
