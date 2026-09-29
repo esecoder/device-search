@@ -98,25 +98,22 @@ async function boot() {
   // ⚠️ THE TOGGLE ONLY EXISTS WHEN IT CAN DO SOMETHING. A switch whose only possible
   // outcome is an error is worse than no switch: it teaches the user that the feature is
   // broken rather than that it is not set up.
-  const refreshAsk = async () => {
-    const b = $("askbtn");
-    if (!b) return;
+  // ⚠️ THE PILL REFLECTS THE MODEL, AND IT IS ASKED RATHER THAN REMEMBERED. One source of
+  // truth — /api/llm — because a cached copy is what let the folder list disagree with itself.
+  const refreshAI = async () => {
+    const pill = $("aipill");
+    if (!pill) return;
     try {
       const lr = await api("/api/llm");
-      b.style.display = lr.ok && lr.configured ? "" : "none";
-    } catch (e) { b.style.display = "none"; }
+      const on = lr.ok && lr.configured;
+      pill.style.display = on ? "" : "none";
+      pill.title = on ? `using ${lr.model || "your model"} — click to change` : "";
+    } catch (e) { pill.style.display = "none"; }
   };
-  refreshAsk();
+  refreshAI();
   // ⚠️ AND WHENEVER THE MODEL PANEL CLOSES. Connecting a model must make the answer toggle
   // appear immediately; waiting for a relaunch reads as the connection having failed.
-  window.addEventListener("ds:model-changed", refreshAsk);
-  if ($("askbtn")) {
-    $("askbtn").onclick = () => {
-      $("askbtn").classList.toggle("on");
-      const q = $("q").value.trim();
-      if (q) run(q);      // ⚠️ re-run, so the toggle does something visible immediately
-    };
-  }
+  window.addEventListener("ds:model-changed", refreshAI);
 }
 
 // ⚠️ ONE STATE OBJECT, TWO RENDERINGS. An in-progress index and a stale vector set are
@@ -288,8 +285,12 @@ function onType() {
 async function run(q) {
   // ⚠️ ask=1 ONLY WHEN THE TOGGLE IS ON. It costs an API call and uploads snippets, so it
   // must be an explicit choice every time rather than a mode the user forgot they enabled.
-  const askOn = $("askbtn") && $("askbtn").classList.contains("on");
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${askOn ? "&ask=1" : ""}`);
+  // ⚠⚠️ NO TOGGLE. Ask whenever a model is connected and let the SERVER decide whether the
+  // query is a question — "how does the autoloader work" is one, "RetryMiddleware" is not, and
+  // asking the user to classify their own input before typing it is the opposite of doing the
+  // least work. Results come back either way, so a wrong answer is checkable in a glance.
+  const aiReady = AI.state().configured;
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
   // one is a list the user opens and checks, the other is a sentence that must be trusted or
@@ -458,10 +459,14 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "," && (e.metaKey || e.ctrlKey)) { e.preventDefault(); Setup.open(); return; }
   // ⚠️ ⌘. FOR THE MODEL PANEL. ⌘, is folders; the two are different decisions and get
   // different keys rather than one panel that does both.
-  if (e.key === "." && (e.metaKey || e.ctrlKey)) { e.preventDefault(); AI.open(); return; }
+  // ⚠️ ⌘. GOES STRAIGHT TO THE MODEL STEP — the shortcut you press when you already know
+  // what you want to change.
+  if (e.key === "." && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault(); Setup.open("ai"); return;
+  }
   if (e.key === "Escape") {
     e.preventDefault();
-    if (AI.isOpen()) { AI.close(); return; }
+    if (Setup.isOpen()) { Setup.close(); return; }
     if (Setup.isOpen()) { Setup.close(); return; }
     // ⚠️ ESCAPE CLEARS FIRST, THEN HIDES. One keystroke that both erases the search and makes
     // the window disappear gives the user no way to edit a query they are halfway through.
@@ -483,7 +488,9 @@ if (window.__TAURI__?.event) {
 // ⚠️ THE SETTINGS AFFORDANCE, because a first-run wizard that cannot be reopened makes "add
 // another folder" impossible without deleting the index.
 $("settings").addEventListener("click", () => Setup.open());
-if ($("aiopen")) $("aiopen").addEventListener("click", () => AI.open());
+// ⚠️ THE PILL IS A DOOR, NOT A LABEL. Clicking it opens Settings on the model step, so
+// "is this using my key?" is one click to check and one click to change.
+if ($("aipill")) $("aipill").addEventListener("click", () => Setup.open("ai"));
 
 // ⚠️ Clear when hidden. A search box that reopens showing the previous query makes the user
 // select-and-delete every time; Spotlight starts empty.

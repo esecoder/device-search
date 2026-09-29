@@ -329,7 +329,19 @@ class Engine:
         # `answer` absent and the results untouched. Searching must never break because the
         # optional half is unavailable.
         answer = None
-        if ask and cands:
+        # ⚠⚠️ THE SERVER DECIDES WHETHER TO ANSWER, NOT THE USER.
+        #
+        # The interface used to have an "answer" toggle the user had to find and turn on. ⚠️ That
+        # is work for something the app can tell from the query: "how does the autoloader work"
+        # is a question, "RetryMiddleware" is not. Asking the user to classify their own input
+        # before typing it is the opposite of doing the least work.
+        #
+        # ⚠️ AND IT IS SAFE BECAUSE THE ANSWER IS NOT THE ONLY OUTPUT. The result list is
+        # returned either way, every claim carries a citation, and the answer renders above its
+        # own evidence. A wrong answer is checkable in one glance.
+        kind_now = trace.get("plan", {}).get("kind")
+        wants_answer = ask and (kind_now == "question" or ask == "force")
+        if wants_answer and cands:
             try:
                 from .answer import ask as ask_model, build_context
                 def _text(c):
@@ -358,6 +370,13 @@ class Engine:
         home = str(Path.home())
         return {
             "answer": answer,
+            # ⚠⚠️ THE REASON IS RETURNED, NOT KEPT IN THE TRACE.
+            #
+            # `answer` was forwarded and `answer_error` was not, so a failed generation came back
+            # as `answer: null` with no explanation — which is indistinguishable from "the model
+            # was never asked". The user sees a question produce no answer and has no way to find
+            # out whether that is a missing key, a bad model name, or a network problem.
+            "answer_error": trace.get("answer_error", ""),
             "query": query,
             "took_ms": int((time.time() - t0) * 1000),
             "kind": trace["plan"]["kind"],
