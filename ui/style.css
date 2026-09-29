@@ -275,16 +275,37 @@ kbd {
 
 /* ⚠️ AN EXPLANATION, NOT AN ERROR. It is the app accounting for itself rather than failing:
    neutral styling, because "I cannot count folders" is a limit and not a fault. */
-.answer.note { background: rgba(255,255,255,0.05); border-left-color: rgba(255,255,255,0.25); }
-.answer.note .answer-text { color: var(--dim); font-size: 12px; }
+/* ⚠⚠️ VISIBLE, NOT SUBTLE. The first version was grey text on grey — and the user reported not
+   noticing it, which is the correct response to a message styled to be ignorable.
+   ⚠️ It is an OPPORTUNITY, not a warning: nothing is broken, a feature is one click away. So
+   it gets the accent colour and a button, and nothing that reads as an error. */
+.answer.note {
+  background: rgba(10, 132, 255, 0.16);
+  border-left: 3px solid #0a84ff;
+}
+.answer.note .answer-text { color: #cfe6ff; font-size: 12.5px; }
+.answer-cta {
+  margin-top: 8px; font-size: 12px; font-weight: 600; padding: 5px 12px;
+  border-radius: 6px; cursor: pointer; border: none;
+  background: #0a84ff; color: #fff;
+}
+.answer-cta:hover { background: #3395ff; }
 
 /* ⚠️ THE STATUS ROW: the trace on the left, the action on the right. The button aligns to
    the right edge so it does not shift when the trace text changes length. */
 #statusrow { display: flex; align-items: center; gap: 10px; }
 #statusrow #status { flex: 1; }
+/* ⚠⚠️ THE RE-RANK BUTTON WAS GREY-ON-GREY AND THE USER COULD NOT FIND IT. A control nobody
+   notices is a control that does not exist — the feature was built and unreachable, which is
+   the same failure as the AI panel being terminal-only. */
 #rerank {
-  flex: 0 0 auto; font-size: 11px; color: var(--dim); cursor: pointer;
-  padding: 1px 6px; border-radius: 5px; border: 1px solid var(--sep);
+  flex: 0 0 auto; font-size: 11px; font-weight: 600; cursor: pointer;
+  padding: 3px 9px; border-radius: 6px;
+  color: #9fd0ff; background: rgba(10, 132, 255, 0.15);
+  border: 1px solid rgba(10, 132, 255, 0.45);
 }
-#rerank:hover { color: var(--fg); background: rgba(255,255,255,0.07); }
-#rerank kbd { font-size: 10px; opacity: 0.65; margin-left: 3px; }
+#rerank:hover { color: #fff; background: rgba(10, 132, 255, 0.32); }
+#rerank kbd {
+  font-size: 10px; opacity: 0.8; margin-left: 4px;
+  background: rgba(255,255,255,0.12); padding: 0 3px; border-radius: 3px;
+}

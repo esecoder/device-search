@@ -324,8 +324,12 @@ async function run(q) {
     if (r.answer_error) {
       askReason = `Could not get an answer: ${r.answer_error}`;
     } else if (!aiReady) {
-      askReason = "This looks like a question. Connect a model in Settings and I can answer "
-                + "it — the results below are what I found.";
+      // ⚠️ "AI", NOT "A MODEL". "Model" is the vocabulary of the thing you are building, not
+      // the thing the user bought. They connected an AI; the setting is called AI; the footer
+      // says AI. ⚠️ A message that names the feature differently from the button that turns it
+      // on makes the user look for something that does not exist under that name.
+      askReason = "This looks like a question — connect AI and it will answer instead of "
+                + "just listing files.";
     } else {
       // ⚠️ THE MOST COMMON CASE, AND THE ONE THAT LOOKED BROKEN. A question like "how many
       // folders are in Desktop?" asks for a COUNT, and no passage in any file states a count —
@@ -397,6 +401,19 @@ function render() {
     t.className = "answer-text";
     t.textContent = askReason;
     d.appendChild(t);
+    // ⚠⚠️ AND A BUTTON, BECAUSE THE MESSAGE NAMES A FIX THE USER CANNOT REACH FROM HERE.
+    //
+    // "Connect AI" is an instruction. An instruction the user has to translate into "which
+    // footer link, which tab" before they can act on it is work the app should have done.
+    // ⚠️ It opens Settings DIRECTLY ON THE AI STEP, because that is where the fix is and
+    // landing on folders would make them find it again.
+    if (!aiReady) {
+      const b = document.createElement("button");
+      b.className = "answer-cta";
+      b.textContent = "Connect AI";
+      b.onclick = () => Setup.open("ai");
+      d.appendChild(b);
+    }
     box.appendChild(d);
   }
 
