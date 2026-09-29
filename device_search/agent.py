@@ -424,6 +424,61 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     _weights = {"meta": 6.0} if trace.get("meta", {}).get("pure_filter") else {"meta": 2.5}
     _weights["path"] = 4.0
     fused = rrf(results, weights=_weights)
+
+    # ⚠⚠️ AND THEN INTERLEAVE, BECAUSE A WEIGHT THAT PUTS THE RIGHT RESULT FIRST ALSO LETS IT OWN
+    # THE WHOLE PAGE.
+    #
+    # ⚠️ MEASURED, AND THE USER REPORTED IT TWICE WITHOUT KNOWING IT WAS ONE THING: "screenshot"
+    # returned EVERY result tagged `path`, and "1mb files" returned every result tagged `meta`.
+    # Both were the weight doing its job too well — meta at 6.0 lifted all 40 filtered files
+    # above every text match, and path at 4.0 lifted every name match above every content match.
+    #
+    # ⚠️ THE TAGS WERE CORRECT THE WHOLE TIME. The distribution was not. Someone searching
+    # "screenshot" may also want the file that mentions screenshots in its content, and someone
+    # searching "1mb files" may also want the file called "1mb-notes.txt" — and neither existed
+    # in the top 25 because a single backend had taken all of it.
+    #
+    # ⚠️ THE OWNER OF THE LIST IS THE BACKEND WITH THE HIGHEST WEIGHT, so it goes first — once —
+    # and then one from each other backend that has anything left, and so on. The weighted order
+    # is preserved WITHIN each backend, so the best metadata result still leads.
+    #
+    # ⚠️ RESULTS FOUND BY SEVERAL BACKENDS ARE KEPT WHERE THEY ARE. Agreement is real evidence,
+    # and round-robining them away would trade one distortion for another.
+    _by_backend: dict = {}
+    for _b, _hits in results.items():
+        if not _hits:
+            continue
+        for _r, _h in enumerate(_hits):
+            _id, _path, _wx = (_h[0], _h[1], _h[2]) if len(_h) == 3 else (_h[0], None, _h[1])
+            _by_backend.setdefault(_b, []).append(_id if _id is not None else _path)
+
+    _seen: set = set()
+    _interleaved: list = []
+    _order = sorted(_by_backend, key=lambda b: -_weights.get(b, 1.0))
+    _cursors = {b: 0 for b in _order}
+    while len(_interleaved) < len(fused):
+        _progress = False
+        for _b in _order:
+            _lst, _i = _by_backend[_b], _cursors[_b]
+            while _i < len(_lst) and _lst[_i] in _seen:
+                _i += 1
+            _cursors[_b] = _i
+            if _i < len(_lst):
+                _seen.add(_lst[_i])
+                _interleaved.append(_lst[_i])
+                _cursors[_b] = _i + 1
+                _progress = True
+        if not _progress:
+            break
+    # ⚠️ ANYTHING THE ROUND-ROBIN DID NOT REACH — results that only exist in the fused list,
+    # such as a doc_id the backend lists do not carry — is appended in weighted order rather
+    # than dropped. A blend that silently loses rows is worse than a lopsided one.
+    for _k, _info, _sc in fused:
+        if _k not in _seen:
+            _interleaved.append(_k)
+            _seen.add(_k)
+    _rank = {k: i for i, k in enumerate(_interleaved)}
+    fused = sorted(fused, key=lambda t: _rank.get(t[0], 10 ** 9))
     cands: list[Candidate] = []
     # ⚠⚠️ AND THE CUTOFF IS MUCH LARGER THAN top_k * 3, FOR THE SAME REASON.
     # 30 slots for the output of four backends means the fusion decides by VOLUME rather than by

@@ -309,3 +309,30 @@ kbd {
   font-size: 10px; opacity: 0.8; margin-left: 4px;
   background: rgba(255,255,255,0.12); padding: 0 3px; border-radius: 3px;
 }
+
+/* ⚠⚠️ THE SELECTED ROW MUST FILL THE FULL WIDTH **WHEN SCROLLED SIDEWAYS**.
+   The highlight was sized to the container, so a long path pushed it off to the left and the
+   blue bar stopped halfway across. ⚠️ The row has to be as wide as its CONTENT and at least as
+   wide as the box: `min-width: 100%` with `width: max-content` is what does both. */
+#results .row {
+  box-sizing: border-box;
+  min-width: 100%;
+  width: max-content;
+}
+/* ⚠️ THE SNIPPET IS NOT ALLOWED TO WIDEN THE ROW. Without this a long path stretches the row
+   and the highlight runs past the right edge of the visible area instead of stopping at it. */
+#results .row .name, #results .row .snip { max-width: 100%; }
+/* ⚠️ AND THE RE-RANK BUTTON NEEDS ROOM FROM THE EDGE. It sat flush against the window
+   border, which reads as clipped rather than placed. */
+#rerank { margin-right: 10px; }
+#statusrow { padding-right: 2px; }
+
+/* ⚠⚠️ THE WORKING INDICATOR. A search that takes two seconds with no feedback reads as
+   broken, and the user presses enter again — which is how a slow search becomes a busy one.
+   ⚠️ It sits in the status row where the trace will appear, so nothing moves when it resolves. */
+#busy {
+  flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.22); border-top-color: #0a84ff;
+  animation: ds-spin 0.7s linear infinite;
+}
+@keyframes ds-spin { to { transform: rotate(360deg); } }
