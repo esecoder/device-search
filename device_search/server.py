@@ -405,6 +405,9 @@ class Engine:
             # was never asked". The user sees a question produce no answer and has no way to find
             # out whether that is a missing key, a bad model name, or a network problem.
             "answer_error": trace.get("answer_error", ""),
+            # ⚠️ AN EMPTY FILTER RESULT IS AN ANSWER, AND IT HAS TO BE SAID OUT LOUD. Without this
+            # the user sees an empty list and cannot tell it from "the search is broken".
+            "meta": trace.get("meta", {}),
             "query": query,
             "took_ms": int((time.time() - t0) * 1000),
             "kind": trace["plan"]["kind"],

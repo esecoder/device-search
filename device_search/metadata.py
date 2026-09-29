@@ -207,7 +207,7 @@ def has_text_query(f: dict) -> bool:
     return any(w not in _FILLER and len(w) > 1 for w in left.split())
 
 
-def run(store, f: dict, limit: int = 40) -> list[tuple[int, float]]:
+def run(store, f: dict, limit: int = 40) -> list[tuple]:
     """Execute the filters. ⚠️ Straight SQL — no ranking, because there is nothing to rank:
     every row either satisfies the filter or does not."""
     where, args = [], []
@@ -231,7 +231,19 @@ def run(store, f: dict, limit: int = 40) -> list[tuple[int, float]]:
     sql = f"SELECT id FROM documents WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?"
     args.append(limit)
     rows = store.conn.execute(sql, args).fetchall()
-    out = [(r[0], 1.0) for r in rows]
+    # ⚠⚠️ A 3-TUPLE CARRYING BOTH KINDS, BECAUSE ONE LIST CANNOT HOLD ONE SHAPE.
+    #
+    # It returned (doc_id, score) for indexed files and (path, score) for skipped ones — the same
+    # arity meaning two different things. ⚠️ The consumer called store.by_id() on a path string, got
+    # None, and discarded EVERY result. Measured: 40 hits for "5mb files", 0 reaching the user.
+    #
+    # ⚠️ AND THE SKIPPED ONES ARE THE WHOLE POINT. "files over 100 MB" is the archetypal metadata
+    # query and every file it should return was excluded from `documents` by the size limit — so
+    # the results that matter most are exactly the ones with no doc_id.
+    #
+    # ⚠️ doc_id=None FOR A SKIPPED FILE IS A MEANINGFUL VALUE, NOT A HOLE: the caller knows there
+    # is no row to look up and builds the result from the path instead.
+    out = [(r[0], None, 1.0) for r in rows]
 
     # ⚠️⚠️ THE SKIPPED FILES MUST BE INCLUDED, AND THIS IS NOT AN EDGE CASE — IT IS THE MAIN CASE.
     #
@@ -259,7 +271,7 @@ def run(store, f: dict, limit: int = 40) -> list[tuple[int, float]]:
         if where2:
             sql2 = f"SELECT path FROM skipped WHERE {' AND '.join(where2)}"
             for (path,) in store.conn.execute(sql2, args2_extra).fetchall():
-                out.append((path, 1.0))
+                out.append((None, path, 1.0))
     except Exception:
         pass
     return out[:limit]

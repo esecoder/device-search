@@ -112,16 +112,34 @@ def classify(query: str) -> dict:
 # =============================================================================
 # 3. MERGE — Reciprocal Rank Fusion
 # =============================================================================
-def rrf(rank_lists: dict[str, list[tuple[int, float]]], k: int = 60) -> list[tuple[int, float]]:
+def rrf(rank_lists: dict, k: int = 60, weights: dict | None = None) -> list[tuple]:
     """⚠️ RRF, NOT SCORE SUMMATION, AND THE REASON IS CONCRETE: BM25 scores are unbounded and
     cosine similarities live in [-1, 1]. Adding them lets one backend's scale silently decide
     the ranking. RRF throws the scores away and uses only the ORDER, which is the one thing the
     backends agree on. Same k=60 as the RAG track, for the same reason."""
-    fused: dict[int, float] = {}
+    # ⚠️ `weights` LETS A BACKEND SAY "MY ORDER MATTERS MORE" WITHOUT A SECOND FUSION PATH.
+    # ⚠️ A metadata filter is a truth condition, not a similarity: every row either matches or
+    # does not, so its first entry is a certainty where a semantic top-1 is a guess. Weighting
+    # lifts it above the noise without deleting the noise, which is the difference between
+    # ranking something first and pretending it is the only thing.
+    w = weights or {}
+    fused: dict = {}
+    meta: dict = {}
     for _name, hits in rank_lists.items():
-        for rank, (doc_id, _score) in enumerate(hits):
-            fused[doc_id] = fused.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
-    return sorted(fused.items(), key=lambda kv: -kv[1])
+        _w = float(w.get(_name, 1.0))
+        for rank, h in enumerate(hits):
+            # ⚠️ BOTH SHAPES ARRIVE HERE. Text backends yield (doc_id, score); metadata now yields
+            # (doc_id, path, score) because a skipped file HAS no doc_id. The key is the doc_id
+            # when there is one and the path when there is not.
+            if len(h) == 3:
+                _id, _path, _score = h
+            else:
+                _id, _score = h
+                _path = None
+            key = _id if _id is not None else _path
+            fused[key] = fused.get(key, 0.0) + _w / (k + rank + 1)
+            meta.setdefault(key, {"doc_id": _id, "path": _path})
+    return [(k2, meta[k2], v) for k2, v in sorted(fused.items(), key=lambda kv: -kv[1])]
 
 
 # =============================================================================
@@ -359,17 +377,64 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
             # "files about authentication", which carries real words, so the text backends stay
             # and both run. The difference is decided by has_text_query(), from the spans each
             # filter actually matched — not by a guess about which words look like noise.
+            # ⚠⚠️ NOTHING IS DROPPED. THE FILTER'S ANSWER IS RANKED FIRST, AND THE REST STILL
+            # COMES BACK — which is what the user asked for and what is right.
+            #
+            # ⚠️ The first version DELETED the text results when the filter consumed the query.
+            # That over-corrects: someone searching "10gb files" may still want the file called
+            # "10gb-notes.txt", and silently removing results is its own kind of lie — the same
+            # failure as returning noise, in the opposite direction.
+            #
+            # ⚠️ THE REAL PROBLEM WAS ORDER, NOT PRESENCE. A filter is not a ranked list — every row
+            # either satisfies it or does not — so it should not compete on equal terms with a
+            # similarity score. It gets a WEIGHT instead, which lifts it without deleting anything.
             if not _mtext(_mf):
                 trace["meta"]["pure_filter"] = True
-                trace.setdefault("dropped", []).append("text backends: filter consumed the query")
-                for _b in ("semantic", "keyword", "exact", "path"):
-                    results.pop(_b, None)
+                # ⚠⚠️ A PURE FILTER THAT MATCHED NOTHING MUST NOT FALL BACK TO TEXT.
+                #
+                # ⚠️ "10gb files" has no file over 10 GB. The leftover word is "files", and
+                # searching for it returns PhoneNumberMetadata_GB.php — noise dressed as an
+                # answer to a question about size. The user sees results and assumes they are
+                # relevant, which is worse than seeing none.
+                #
+                # ⚠️ AN EMPTY FILTER RESULT IS A REAL ANSWER: there are no files that big. The
+                # caller is told why so it can say so, instead of being handed the word "files".
+                if not results.get("meta"):
+                    for _b in ("semantic", "keyword", "exact", "path"):
+                        results.pop(_b, None)
+                    trace["meta"]["empty_is_the_answer"] = True
     except Exception as e:
         trace["meta"] = {"error": f"{type(e).__name__}: {e}"}
 
-    fused = rrf(results)
+    # ⚠️ THE FILTER IS WEIGHTED, NOT PREFERRED BY DELETION. 6.0 lifts a matched filter above the
+    # similarity lists while leaving every one of them in the fusion.
+    _weights = {"meta": 6.0} if trace.get("meta", {}).get("pure_filter") else {"meta": 2.5}
+    fused = rrf(results, weights=_weights)
     cands: list[Candidate] = []
-    for doc_id, score in fused[:top_k * 3]:
+    for _key, _info, score in fused[:top_k * 3]:
+        doc_id, path = _info["doc_id"], _info["path"]
+        # ⚠⚠️ A RESULT WITH NO ROW IS NOT A RESULT TO DISCARD — IT IS A SKIPPED FILE.
+        #
+        # ⚠️ These are the files the size limit kept OUT of `documents`, and they are the entire
+        # answer to "files over 100 MB". Discarding them because store.by_id() returns None is
+        # what made every metadata query silently empty.
+        if doc_id is None:
+            from .metadata import human_bytes
+            _p = Path(path) if path else None
+            lang = (_p.suffix.lstrip(".").lower() if _p else "") or "file"
+            try:
+                _st = _p.stat() if _p and _p.exists() else None
+                n_lines = 0
+                _why = "not indexed (too large or binary)"
+            except OSError:
+                _st, n_lines, _why = None, 0, "not indexed"
+            # ⚠️ doc_id -1 MARKS "NOT IN THE INDEX" — a skipped file, which is what a size
+            # query returns, NOT a directory. Directories have real ids because they are indexed.
+            cands.append(Candidate(
+                -1, path or "", lang, n_lines, score=score,
+                snippet=f"{human_bytes(int(_st.st_size)) if _st else ''} — {_why}".strip(" —"),
+                sources=["meta"], lexical=True))
+            continue
         row = store.by_id(doc_id)
         if not row:
             continue
