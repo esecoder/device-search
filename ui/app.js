@@ -349,6 +349,14 @@ async function run(q) {
   if (r.broadened) parts.push("broadened after an empty first pass");
   if (r.llm && r.llm.blocked) parts.push(`⚠️ ${r.llm.blocked} snippet(s) blocked by the secret interlock`);
   setStatus("", parts.join(" · "));
+  // ⚠⚠️ SHOWN ONLY WHEN THERE IS SOMETHING TO RE-RANK, AND BESIDE WHAT IT ACTS ON.
+  //
+  // It was a footer link: always visible, and silent about what it would reorder. ⚠️ A button
+  // that does nothing on an empty result list teaches the user it does nothing.
+  //
+  // ⚠️ AND IT IS RIGHT-ALIGNED TO THE TRACE, because it is an action ON those results — the
+  // trace says how they were found, this says how to order them better.
+  if ($("rerank")) $("rerank").style.display = results.length ? "" : "none";
   render();
   $("q").focus();
 }
@@ -357,6 +365,13 @@ async function run(q) {
 function render() {
   const box = $("results");
   box.textContent = "";
+
+  // ⚠⚠️ THE RE-RANK BUTTON'S VISIBILITY IS DECIDED HERE AND NOWHERE ELSE.
+  //
+  // It was set in the success path of run(), which means every OTHER way the list can become
+  // empty — an error, a cleared box, a failed request — would leave it on screen offering to
+  // reorder nothing. ⚠️ One place that draws, one place that decides.
+  if ($("rerank")) $("rerank").style.display = results.length ? "" : "none";
 
   // ⚠️⚠️ THE ANSWER RENDERS ABOVE THE LIST, AND THIS IS THE WHOLE POINT OF ANSWERING.
   //
@@ -553,6 +568,15 @@ $("settings").addEventListener("click", () => Setup.open());
 // ⚠️ THE PILL IS A DOOR, NOT A LABEL. Clicking it opens Settings on the model step, so
 // "is this using my key?" is one click to check and one click to change.
 if ($("aipill")) $("aipill").addEventListener("click", () => Setup.open("ai"));
+// ⚠️ ⌘⇧R, BECAUSE A BUTTON YOU CLICK AFTER EVERY SEARCH IS STILL A TRIP TO THE MOUSE.
+// The shortcut is where a user who uses this often will end up.
+window.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "r") {
+    e.preventDefault();
+    const q = $("q").value.trim();
+    if (q && results.length) { wantsRerank = true; run(q); }
+  }
+});
 if ($("rerank")) $("rerank").addEventListener("click", () => {
   const q = $("q").value.trim();
   if (!q) return;
