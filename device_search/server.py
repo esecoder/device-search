@@ -149,9 +149,9 @@ def save_llm_settings(d: dict) -> None:
 # option for someone who does not want their files leaving the machine, and a key field would
 # contradict the only reason to choose it.
 PROVIDERS = [
-    {"id": "ollama", "label": "Ollama (on this Mac)", "base_url": "http://localhost:11434/v1",
+    {"id": "ollama", "label": "Ollama (on this computer)", "base_url": "http://localhost:11434/v1",
      "model": "", "needs_key": False, "local": True, "probe": "http://localhost:11434"},
-    {"id": "lmstudio", "label": "LM Studio (on this Mac)", "base_url": "http://localhost:1234/v1",
+    {"id": "lmstudio", "label": "LM Studio (on this computer)", "base_url": "http://localhost:1234/v1",
      "model": "", "needs_key": False, "local": True, "probe": "http://localhost:1234"},
     {"id": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1",
      "model": "gpt-4o-mini", "needs_key": True, "local": False, "probe": ""},
