@@ -115,6 +115,13 @@ class Store:
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(documents)")}
         if "method" not in cols:
             self.conn.execute("ALTER TABLE documents ADD COLUMN method TEXT DEFAULT 'utf8'")
+        # ⚠⚠️ A MIGRATION IS REQUIRED FOR A NEW COLUMN, AND THIS IS THE SAME TRAP AS `method`.
+        # `CREATE TABLE IF NOT EXISTS` does NOT add a column to a table that already exists —
+        # so a new column works perfectly on a fresh database and fails on every real one.
+        try:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN is_dir INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         self.conn.commit()
         # ⚠️ Caches, invalidated on write. Rebuilding an inverted index is O(corpus) and would
         # dominate every query if it were not cached.
@@ -139,13 +146,14 @@ class Store:
         """Bulk insert. ⚠️ `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
         a file that has not changed is simply overwritten with identical content."""
         rows = [(d.path, d.mtime, d.size, d.lang, d.n_lines, d.text,
-                 getattr(d, "method", "utf8")) for d in docs]
+                 getattr(d, "method", "utf8"), 1 if getattr(d, "is_dir", False) else 0)
+                for d in docs]
         self.conn.executemany(
-            "INSERT INTO documents(path, mtime, size, lang, n_lines, text, method) "
-            "VALUES (?,?,?,?,?,?,?) "
+            "INSERT INTO documents(path, mtime, size, lang, n_lines, text, method, is_dir) "
+            "VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, "
             "lang=excluded.lang, n_lines=excluded.n_lines, text=excluded.text, "
-            "method=excluded.method",
+            "method=excluded.method, is_dir=excluded.is_dir",
             rows)
         self.conn.commit()
         self._invalidate()
@@ -530,16 +538,26 @@ class Store:
         for term in terms:
             esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             rows = self.conn.execute(
-                "SELECT id, path FROM documents WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
+                "SELECT id, path, COALESCE(is_dir,0) FROM documents "
+                "WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
                 (f"%{esc}%", limit * 4)).fetchall()
-            for doc_id, path in rows:
+            for doc_id, path, dflag in rows:
                 base = Path(path).name.lower()
                 t = term.lower()
                 # ⚠️ Matches in the BASENAME outrank matches anywhere in the path, so
                 # `config.py` beats `…/config-helper/src/…/Thing.java`. A bare extension match
                 # (".php") scores lowest — it is true of thousands of files and identifies none.
+                # ⚠⚠️ A DIRECTORY WHOSE NAME IS THE QUERY IS THE ANSWER, NOT A CANDIDATE.
+                #
+                # Searching "screenshot" and getting files that mention screenshots, while the
+                # folder actually called that sits fourth, is the wrong answer presented
+                # confidently. A folder named exactly what was typed outranks everything.
+                #
+                # ⚠️ READ FROM THE ROW SO IT CANNOT DRIFT from what is stored — the earlier
+                # folder bugs all came from a second source of truth.
+                is_dir = bool(dflag)
                 if base == t or base.rsplit(".", 1)[0] == t:
-                    sc = 4.0
+                    sc = 12.0 if is_dir else 6.0
                 elif base.startswith(t):
                     sc = 3.0
                 elif t in base:

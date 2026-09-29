@@ -272,3 +272,8 @@ kbd {
   color: #30d158; cursor: pointer; font-weight: 600;
 }
 #aipill:hover { text-decoration: underline; }
+
+/* ⚠️ AN EXPLANATION, NOT AN ERROR. It is the app accounting for itself rather than failing:
+   neutral styling, because "I cannot count folders" is a limit and not a fault. */
+.answer.note { background: rgba(255,255,255,0.05); border-left-color: rgba(255,255,255,0.25); }
+.answer.note .answer-text { color: var(--dim); font-size: 12px; }

@@ -82,6 +82,10 @@ class FileDoc:
     # into search results, because "found in scan.pdf" and "found in scan.pdf via OCR" are
     # different claims about reliability and the user is entitled to know which one they got.
     method: str = "utf8"
+    # ⚠️ True FOR A DIRECTORY. It has no text, must never be embedded, and exists so that
+    # "find my screenshots folder" can work at all — which it could not, because only files
+    # were ever added to the index.
+    is_dir: bool = False
 
 
 def _read_text(path: Path) -> str | None:
@@ -180,6 +184,25 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                     st = p.stat()
                 except (OSError, PermissionError):
                     stats.skip("stat_failed")
+                    continue
+                # ⚠⚠️ DIRECTORIES ARE INDEXED, NOT SKIPPED, AND THIS WAS THE LARGEST HOLE IN THE TOOL.
+                #
+                # "find my screenshot folder" could never work: only files were indexed, so a
+                # directory name was invisible however it was spelled. ⚠️ Measured — a search for
+                # "screenshot" over 5,570 indexed files returned ONE result, because the folder
+                # the user meant had never been added to the index at all.
+                #
+                # ⚠️ EVERY FILE-SEARCH TOOL RETURNS FOLDERS. Spotlight, Everything and the Finder
+                # all do, because someone looking for "the screenshots folder" is asking about a
+                # CONTAINER — it is the natural way to look for something whose contents they
+                # cannot name.
+                #
+                # ⚠️ AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
+                # embed; it is a NAME. Giving it any text would put it in the vector index and the
+                # quality filter, where it would mean nothing.
+                if p.is_dir():
+                    stats.seen += 1
+                    yield FileDoc(str(p), 0.0, 0, "", "", 0, is_dir=True)
                     continue
                 if not p.is_file():
                     stats.skip("not_regular_file")

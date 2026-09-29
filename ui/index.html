@@ -53,6 +53,10 @@
       <!-- ⚠⚠ ONE DOOR, CALLED WHAT IT IS. There were two footer links — "folders" and "AI" —
            which asked the user to know which of two places held the thing they wanted. Both
            live behind this now. -->
+      <!-- ⚠️ A BUTTON, BECAUSE RE-RANKING TAKES ABOUT FIVE SECONDS. It reads every candidate
+           with the model, one at a time, so it cannot run on every keystroke — which is why
+           it is here and not automatic. -->
+      <span id="rerank" title="reorder these results with a slower, more accurate model">re-rank</span>
       <span id="settings" title="folders and AI (⌘,)">Settings</span>
       <!-- ⚠️ THE AI STATE, VISIBLE WITHOUT BEING OPENED. It appears only when a model is
            connected, and clicking it opens Settings on the model step — so the answer to "is
