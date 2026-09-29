@@ -325,6 +325,10 @@ async function run(q) {
   const rr = wantsRerank ? "&rerank=1" : "";
   wantsRerank = false;
   if (rr) setStatus("", "re-ranking…");
+  // ⚠⚠️ SHOW THAT WORK IS HAPPENING, FROM THE MOMENT THE KEYSTROKE LANDS.
+  // ⚠️ A search that takes two seconds with no feedback reads as broken, and the user presses
+  // enter again — which is how a slow search becomes a busy one.
+  if ($("busy")) $("busy").style.display = "";
   const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
@@ -351,8 +355,7 @@ async function run(q) {
       // the thing the user bought. They connected an AI; the setting is called AI; the footer
       // says AI. ⚠️ A message that names the feature differently from the button that turns it
       // on makes the user look for something that does not exist under that name.
-      askReason = "This looks like a question — connect AI and it will answer instead of "
-                + "just listing files.";
+      askReason = "This looks like a question — connect AI to answer better"
     } else {
       // ⚠️ THE MOST COMMON CASE, AND THE ONE THAT LOOKED BROKEN. A question like "how many
       // folders are in Desktop?" asks for a COUNT, and no passage in any file states a count —
@@ -375,6 +378,7 @@ async function run(q) {
   const parts = [`${r.took_ms}ms`, `routed as ${r.kind}`];
   if (r.broadened) parts.push("broadened after an empty first pass");
   if (r.llm && r.llm.blocked) parts.push(`⚠️ ${r.llm.blocked} snippet(s) blocked by the secret interlock`);
+  if ($("busy")) $("busy").style.display = "none";
   setStatus("", parts.join(" · "));
   // ⚠⚠️ SHOWN ONLY WHEN THERE IS SOMETHING TO RE-RANK, AND BESIDE WHAT IT ACTS ON.
   //
@@ -418,6 +422,11 @@ function render() {
 function renderInner() {
   const box = $("results");
   box.textContent = "";
+
+  // ⚠️ THE SPINNER IS CLEARED HERE, NOT ONLY ON THE SUCCESS PATH. render() runs on every
+  // outcome — results, an error, an empty filter — so this is the one place that cannot miss a
+  // branch. ⚠️ A spinner that never stops is worse than none: it says "working" forever.
+  if ($("busy")) $("busy").style.display = "none";
 
   // ⚠⚠️ THE RE-RANK BUTTON'S VISIBILITY IS DECIDED HERE AND NOWHERE ELSE.
   //

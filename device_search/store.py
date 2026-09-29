@@ -588,7 +588,21 @@ class Store:
                 elif t.startswith(".") :
                     sc = 0.3
                 else:
-                    sc = 1.0
+                    # ⚠⚠️ THE TERM IS NOT IN THIS ITEM'S NAME AT ALL — AN ANCESTOR MATCHED, AND AN
+                    # ANCESTOR MATCH IS NOT A RESULT.
+                    #
+                    # ⚠️ REPORTED TWICE: "screenshot" returned everything under
+                    # ~/Documents/Screenshots, because that file contains the word in its PATH
+                    # while its own NAME is something else entirely.
+                    #
+                    # ⚠️ IT SCORED 1.0, WHICH IS ABOVE ZERO AND THEREFORE A RESULT. Searching for a
+                    # folder returned the folder AND every file inside it, burying the folder
+                    # that was actually asked for under its own contents.
+                    #
+                    # ⚠️ SOMEONE WHO SEARCHES A FOLDER NAME WANTS THE FOLDER. If they want what is
+                    # inside they can open it — one click, no guessing. Guessing wrong here is
+                    # worse, because an ancestor match looks exactly like a real one.
+                    continue
                 seen[doc_id] = max(seen.get(doc_id, 0.0), sc)
         out = sorted(seen.items(), key=lambda kv: -kv[1])
         return out[:limit]
