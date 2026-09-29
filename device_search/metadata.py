@@ -153,6 +153,20 @@ def parse(query: str) -> dict:
     #
     # ⚠️ "recent php files about authentication" leaves "files about authentication", which DOES
     # carry a text query, and fusing filter and text is right there.
+    # ⚠⚠️ AND IF NOTHING WAS FILTERED, RETURN {} — NOT A DICT HOLDING ONLY THE DIAGNOSTIC.
+    #
+    # ⚠️ `_leftover` IS NOTES ABOUT THE QUERY, NOT A FILTER. Writing it unconditionally made the
+    # result ALWAYS truthy, so `if _mf:` in agent.py became always true: metadata "ran" for every
+    # search, returned nothing (it has no WHERE clause), and contributed a phantom entry to the
+    # trace. The contract of this function is "{} when nothing metadata-ish is present", and the
+    # docstring says so — a diagnostic key broke it silently.
+    #
+    # ⚠️ THE TELL WAS `parse("screenshot") == {"_leftover": "screenshot"}`. A filter parser that
+    # never returns "no filter" cannot be asked whether a query is a filter.
+    _real = [k for k in f if not k.startswith("_")]
+    if not _real:
+        return {}
+
     _kept = list(q)
     for _a, _b in _spans:
         for _i in range(_a, min(_b, len(_kept))):
