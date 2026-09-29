@@ -1,142 +1,842 @@
 [
  {
-  "doc_id": 2122,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/composer/installed.json",
-  "phrase": "\"description\": \"One class library to parse multipart content with encoding and charset support.",
-  "query": "Where can I find a tool for handling online form uploads?",
+  "doc_id": 4809,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/ScaffoldView.php",
+  "phrase": "* ScaffoldView provides specific view file loading features for scaffolded views.",
+  "query": "What code handles template rendering and asset retrieval?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 107,
+  "path": "/Users/eseudom/Documents/new ideas 11-26-2019.txt",
+  "phrase": "Where people contribute money to fund new businesses and support old ones.",
+  "query": "How does collective financing let strangers back startups or established companies?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5250,
+  "path": "/Users/eseudom/Downloads/docs/Fireflies-Careers-Page_files/anchor.html",
+  "phrase": "ar=2&k=6Lfx0SoUAAAAABsmxQrh74rGRzw56n0foAz43LTc&co=aHR0cHM6Ly9maXJlZmxpZXMuZnJlc2h0ZWFtLmNvbTo0NDM.",
+  "query": "Where can I find online conference transcript with shared internet page?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2498,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/psr/cache/src/CacheItemInterface.php",
+  "phrase": "* CacheItemInterface defines an interface for interacting with objects inside a cache.",
+  "query": "Which script controls temporary saved web content?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 188,
+  "path": "/Users/eseudom/Documents/netgroup.txt",
+  "phrase": "1 for our users(no ads here) to coordinate activities, manage and collect payment.",
+  "query": "Where is group scheduling tool with fee tracking?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2579,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/monolog/monolog/src/Monolog/Handler/DynamoDbHandler.php",
+  "phrase": "if (defined('Aws\\Sdk::VERSION') && version_compare(Sdk::VERSION, '3.",
+  "query": "Which script compares library release number?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1967,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-storage/src/Bucket.php",
+  "phrase": "* $key = base64_encode(openssl_random_pseudo_bytes(32)); // Make sure to remember your key.",
+  "query": "Which script creates a secret string for encryption?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 4833,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Log/CakeLog.php",
+  "phrase": "* When configuring loggers, you can set which levels a logger will handle.",
+  "query": "Where is documentation about tuning event severity thresholds?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 2059,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Testing/System/SystemTestCase.php",
+  "phrase": "* Set \"using emulator\" flag for test cases with specified fully-qualified name prefix.",
+  "query": "What code toggles virtual machine option when titles begin a certain way?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2304,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-php/src/Firebase/Project/ProjectId.php",
+  "phrase": "// If the regex above is invalid, preg_replace() will return false.",
+  "query": "Where can I find PHP script testing bad pattern before swapping text?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 284,
+  "path": "/Users/eseudom/Documents/Walkthrough.txt",
+  "phrase": "The ApplyBee browser extension helps users auto-fill job application forms on ATS (Applicant Tracking System) websites.",
+  "query": "What software populates hiring documents across company recruitment portals?",
+  "overlap": 0.125
+ },
+ {
+  "doc_id": 5257,
+  "path": "/Users/eseudom/Downloads/Applybee2 Slides from Skywork/Applybee_+AI-Powered+Job+Application+Assistant/page_8.html",
+  "phrase": "<p class=\"text-gray-700\">Powered by NLP for resume parsing, predictive algorithms for job matching, and generative models for cover letters.",
+  "query": "Which webpage source describes artificial intelligence helping employers screen applicants?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4819,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/Helper/TextHelper.php",
+  "phrase": "* Text manipulations: Highlight, excerpt, truncate, strip of links, convert email addresses to mailto: links.",
+  "query": "Which utility edits writing, shortens long passages, removes URLs, and makes electronic messages clickable?",
+  "overlap": 0.083
+ },
+ {
+  "doc_id": 2655,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/symfony/polyfill-intl-normalizer/Normalizer.php",
+  "phrase": "* Normalizer is a PHP fallback implementation of the Normalizer class provided by the intl extension.",
+  "query": "Where can I find code converting unicode characters without additional libraries?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 1803,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/guzzlehttp/psr7/src/functions.php",
+  "phrase": "* @deprecated mimetype_from_filename will be removed in guzzlehttp/psr7:2.",
+  "query": "Which file contains a notice about an outdated utility being retired?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 5349,
+  "path": "/Users/eseudom/Downloads/compressed/canzafx/nanohttpd-master/core/src/test/java/org/nanohttpd/junit/protocols/http/integration/ShutdownTest.java",
+  "phrase": "// Keep-alive seems to be on by default, but just in case that changes.",
+  "query": "Where can I find settings for maintaining continuous socket links?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2685,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/riverline/multipart-parser/README.md",
+  "phrase": "``Riverline\\MultiPartParse`` is a one class library to parse multipart document ( multipart email, multipart form, etc .",
+  "query": "Where can I locate software for processing mixed-content electronic mail?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 917,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/PresignUrlMiddleware.php",
+  "phrase": "* @internal Adds computed values to service operations that need presigned url.",
+  "query": "Which file creates secure links for cloud storage requests?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2129,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-tokens/README.md",
+  "phrase": "$token = $generator->createCustomToken('uid', ['first_claim' => 'first_value' /* .",
+  "query": "Where is code that makes login credential with extra fields?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 67,
+  "path": "/Users/eseudom/Documents/enforger.txt",
+  "phrase": "build a mobile (and later web) app development helper to enable very rapid application development for an experienced developer (mostly me).",
+  "query": "Where is my fast coding assistant that makes software?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 252,
+  "path": "/Users/eseudom/Documents/OpenAI Notes.txt",
+  "phrase": "\"content\": \"I don't need to interact with the image to determine the relative sizes of the circles.",
+  "query": "Which document explains comparing round shapes visually without measuring?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 330,
+  "path": "/Users/eseudom/Documents/HushLine/app/build/generated/source/kapt/debug/org/scidsg/hushline/android/database/SettingsDao_Impl.java",
+  "phrase": "return \"INSERT OR REPLACE INTO `settings` (`id`,`key`,`value`) VALUES (nullif(?",
+  "query": "Which file stores application configuration records inside a database?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 4643,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Error/ExceptionRendererTest.php",
+  "phrase": "* Mocks out the response on the ExceptionRenderer object so headers aren't modified.",
+  "query": "Which test replaces web answer to keep metadata unchanged?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 4693,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Configure/ConfigReaderInterface.php",
+  "phrase": "* Read method is used for reading configuration information from sources.",
+  "query": "Which document explains how settings are loaded by software?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 5035,
+  "path": "/Users/eseudom/Downloads/2025-11-26.log",
+  "phrase": "2025-11-26 11:06:08 error: Error fetching Google search results: Request contains an invalid argument.",
+  "query": "Which file logs unsuccessful web lookup problem?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1941,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/crc32/src/CRCTrait.php",
+  "phrase": "* @param  boolean  $raw_output  When set to TRUE, outputs raw binary data.",
+  "query": "Where can I find code generating cryptographic digests from strings?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4560,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Controller/Component/PaginatorComponentTest.php",
+  "phrase": "$this->assertEquals(array(), $Controller->PaginatorControllerPost->lastQueries[1]['order'], 'no order should be set.",
+  "query": "Which test verifies pagination defaults to an empty sorting criterion?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 1539,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Route53/Route53Client.php",
+  "phrase": "* This client is used to interact with the **Amazon Route 53** service.",
+  "query": "Where can I find module handling domain name system queries?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 242,
+  "path": "/Users/eseudom/Documents/KYPO-do-setup.txt",
+  "phrase": "mazing project to a cloud platform (DigitialOcean) and I have to ask if it is advisable and what guides and advice would you give me on this.",
+  "query": "Where are my hosting migration recommendation notes?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 626,
+  "path": "/Users/eseudom/Documents/HushLine/app/build/intermediates/source_set_path_map/debug/file-map.txt",
+  "phrase": "ackageDebugResources-48 /Users/eseudom/AndroidStudioProjects/HushLine/app/build/intermediates/incremental/debug/packageDebugResources/merged.",
+  "query": "Where are compiled mobile program assets combined during development?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4844,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Routing/Route/CakeRoute.php",
+  "phrase": "* @return array Returns a string regular expression of the compiled route.",
+  "query": "Where can I find code that builds URL patterns from paths?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 1883,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/auth/CHANGELOG.md",
+  "phrase": "* [feat] Add getProjectId to credentials types where project IDs can be determined.",
+  "query": "Which script links login details with client numbers?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 4649,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Console/ShellDispatcherTest.php",
+  "phrase": "'working' => str_replace('\\\\', DS, dirname(CAKE_CORE_INCLUDE_PATH) .",
+  "query": "Where is configuration file defining base folder location?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 919,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/HashingStream.php",
+  "phrase": "* Stream decorator that calculates a rolling hash of the stream as it is read.",
+  "query": "Where can I find code computing sliding checksum during file access?",
+  "overlap": 0.125
+ },
+ {
+  "doc_id": 2283,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-php/src/Firebase/DynamicLink/CreateDynamicLink.php",
+  "phrase": "* URL-encoded, use either HTTP or HTTPS, and cannot be another Dynamic Link.",
+  "query": "Which file stores web addresses for browser shortcuts?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4931,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Utility/Set.php",
+  "phrase": "* This function can be thought of as a hybrid between PHP's array_merge and array_merge_recursive.",
+  "query": "Where is WordPress code that combines settings with defaults?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5053,
+  "path": "/Users/eseudom/Downloads/In-Context Learning and Prompt Templates for Advanced AI.ipynb",
+  "phrase": "g into the world of prompt engineering, where each command you craft has the power to guide intelligent LLM systems toward specific outcomes.",
+  "query": "How can I create clearer requests for language models?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4903,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Console/Command/ConsoleShell.php",
+  "phrase": "return $this->err(__d('cake_console', \"There was an error loading the routes config.",
+  "query": "Which script displays a notice when settings cannot be read?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 5269,
+  "path": "/Users/eseudom/Downloads/compressed/Xender Web_files/js",
+  "phrase": "function(){},pa=function(a){return\"function\"===typeof a},h=function(a){return\"string\"===typeof a},qa=function(a){return\"number\"===typeof a&&!",
+  "query": "Where is the script checking data types before processing?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 2722,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/superbalist/flysystem-google-storage/src/GoogleStorageAdapter.php",
+  "phrase": "* Note: The file must have `AdapterInterface::VISIBILITY_PUBLIC` visibility.",
+  "query": "Where can I find source exposing permission value for pluggable connectors?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1925,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/crc32/README.md",
+  "phrase": "install the pecl extension) hardware accelerated versions of CRC32C (Castagnoli).",
+  "query": "Which local document discusses speedier checksum routines for storage integrity?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 987,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/S3/PostObject.php",
+  "phrase": "* @param string|array      $jsonPolicy JSON encoded POST policy document.",
+  "query": "Where is the file that validates upload requests?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 3442,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/giggsey/libphonenumber-for-php/src/prefixmapper/PrefixTimeZonesMap.php",
+  "phrase": "* Split {@code timezonesString} into all the time zones that are part of it.",
+  "query": "Which script separates a text value listing geographic areas?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 820,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/LICENSE.md",
+  "phrase": "\"You\" (or \"Your\") shall mean an individual or Legal Entity exercising permissions granted by this License.",
+  "query": "Where can I find software agreement terms about usage rights?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 4564,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Controller/Component/RequestHandlerComponentTest.php",
+  "phrase": "* test that a mapped Accept-type header will set $this->ext correctly.",
+  "query": "Which script verifies browser content negotiation updates an extension property?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 2237,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-php/src/Firebase/Auth/SendActionLink.php",
+  "phrase": "* Only to be used when the API endpoint expects the ID Token of the given user.",
+  "query": "Which document describes sending caller authentication evidence?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1040,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Health/HealthClient.php",
+  "phrase": "* This client is used to interact with the **AWS Health APIs and Notifications** service.",
+  "query": "Which file processes cloud incident alerts?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5395,
+  "path": "/Users/eseudom/Downloads/compressed/canzafx/nanohttpd-master/webserver/src/test/java/org/nanohttpd/junit/webserver/TestCorsHttpServer.java",
+  "phrase": "assertEquals(\"Cors should have added a header: Access-Control-Allow-Origin: *\", \"*\", response.",
+  "query": "Which file checks web browser cross domain sharing rules?",
   "overlap": 0.0
  },
  {
   "doc_id": 5444,
   "path": "/Users/eseudom/Downloads/compressed/Sign-in to post bridge_files/js",
   "phrase": "t\",[\"map\",\"values\",[\"list\",[\"map\",\"type\",\"event_param\",\"event_param\",[\"map\",\"param_name\",\"page_path\"]],[\"map\",\"type\",\"const\",\"const_value\",\"?",
-  "query": "Where is the analytics configuration file?",
-  "overlap": 0.0
+  "query": "Where can I find settings that control visitor measurement on websites?",
+  "overlap": 0.167
  },
  {
-  "doc_id": 5199,
-  "path": "/Users/eseudom/Downloads/Applybee Slides from Skyworks/Applybee+SaaS_+Product+Review+Brand+Awareness+&+Investment+Opportunity/page_9.html",
-  "phrase": "<p class=\"text-lg text-gray-700\">Applybee seeks investment to accelerate growth and solidify market position.",
-  "query": "Which file discusses obtaining funds for corporate expansion?",
-  "overlap": 0.333
- },
- {
-  "doc_id": 4908,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Console/Command/Task/ProjectTask.php",
-  "phrase": "$prompt = __d('cake_console', \"What is the path to the project you want to bake?",
-  "query": "Where can I find code generating script requesting folder location?",
-  "overlap": 0.286
- },
- {
-  "doc_id": 279,
-  "path": "/Users/eseudom/Documents/kypo-kolla-openstack-terminal-out2.txt",
-  "phrase": "(kolla-venv) ese@africert-kypo-openstack-1:~$ sudo rm /var/tmp/ansible.",
-  "query": "Where is my terminal command history stored?",
-  "overlap": 0.25
- },
- {
-  "doc_id": 1058,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/DynamoDb/LockingSessionConnection.php",
-  "phrase": "// set and item returned (via ReturnValues) in a one, atomic operation.",
-  "query": "Which file updates content while retrieving it?",
-  "overlap": 0.2
- },
- {
-  "doc_id": 1940,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/crc32/src/Builtin.php",
-  "phrase": "* Returns true if this $polynomial is supported by the builtin PHP hash function.",
-  "query": "Which file contains code validating algebra expression compatibility?",
-  "overlap": 0.143
- },
- {
-  "doc_id": 5253,
-  "path": "/Users/eseudom/Downloads/Applybee2 Slides from Skywork/Applybee_+AI-Powered+Job+Application+Assistant/page_10.html",
-  "phrase": "<p class=\"text-gray-600\">Applybee disrupts the job search market with AI-powered solutions that enhance efficiency for job seekers.",
-  "query": "Which local file explains software helping people locate employment faster?",
-  "overlap": 0.0
- },
- {
-  "doc_id": 2102,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Exception/AbortedException.php",
-  "phrase": "* Return the delay in seconds and nanos before retrying the failed request.",
-  "query": "Which file contains logic pausing after an unsuccessful remote operation?",
+  "doc_id": 4234,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Core/App.php",
+  "phrase": "* App is responsible for path management, class location and class loading.",
+  "query": "Which file handles route setup, module discovery, dynamic import?",
   "overlap": 0.125
  },
  {
-  "doc_id": 1139,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/ApplicationDiscoveryService/ApplicationDiscoveryServiceClient.php",
-  "phrase": "* This client is used to interact with the **AWS Application Discovery Service** service.",
-  "query": "Which file lets me query data center asset inventory?",
+  "doc_id": 6,
+  "path": "/Users/eseudom/Documents/OONI interview questions.txt",
+  "phrase": "I was curious about the website not responding when not using Riseup VPN or any VPN?",
+  "query": "What file holds discussion regarding webpage failing absent virtual private network?",
   "overlap": 0.0
  },
  {
-  "doc_id": 1803,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/guzzlehttp/psr7/src/functions.php",
-  "phrase": "* @deprecated mimetype_from_filename will be removed in guzzlehttp/psr7:2.",
-  "query": "Where is code that finds content type using extension?",
+  "doc_id": 4672,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Console/Command/Task/ExtractTaskTest.php",
+  "phrase": "$pattern = '/msgid \"To change the content of this page, create: APP\\/views\\/pages\\/home\\.",
+  "query": "Which file scans templates for translatable phrases?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 1019,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Signature/SignatureProvider.php",
+  "phrase": "* Resolves and signature provider and ensures a non-null return value.",
+  "query": "Which file locates cryptographic key objects, confirms outputs exist?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 1014,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Sns/SnsClient.php",
+  "phrase": "* This client is used to interact with the **Amazon Simple Notification Service (Amazon SNS)**.",
+  "query": "Where can I find code that sends messages through cloud messaging platform?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 210,
+  "path": "/Users/eseudom/Documents/Tioo flows.txt",
+  "phrase": "JSON data is sent to a module that converts this into components on the frontend.",
+  "query": "Which file transforms serialized payloads toward visible display building blocks?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4756,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Controller/Component/SecurityComponent.php",
+  "phrase": "* The duration from when a CSRF token is created that it will expire on.",
+  "query": "Where can I change how long security code remains valid before timeout?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 113,
+  "path": "/Users/eseudom/Documents/CheaperGPT dev notes.txt",
+  "phrase": "FkYyIsImlhdCI6MTcxNDE1NDYxMS44MDExNzEsIm5iZiI6MTcxNDE1NDYxMS44MDExNzMsImV4cCI6MjAyOTY4NzQxMS43NzYxMjgsInN1YiI6IjIzMDU3NjMiLCJzY29wZXMiOltdfQ.",
+  "query": "where is my saved authentication token file",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 988,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/S3/BatchDelete.php",
+  "phrase": "* Creates a BatchDelete object from an iterator that yields results.",
+  "query": "How do I remove many records using data streamed by query?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 2576,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/monolog/monolog/src/Monolog/Handler/DeduplicationHandler.php",
+  "phrase": "file_put_contents($this->deduplicationStore, $record['datetime']->getTimestamp() .",
+  "query": "Where is the script that saves repeated items to disk?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4642,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/I18n/I18nTest.php",
+  "phrase": "$this->assertEquals('Dom 1 Foo', $domains['dom1']['cache_test_po']['LC_MESSAGES']['dom1.",
+  "query": "Which file checks translated text for website language?",
+  "overlap": 0.333
+ },
+ {
+  "doc_id": 271,
+  "path": "/Users/eseudom/Documents/offrampa-init-sys-prompt.txt",
+  "phrase": "\\\"description\\\": \\\"Action identified in the message (codenames from system prompt).",
+  "query": "Where can I find configuration for translating chat commands into shorthand labels?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 1517,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/CodeCommit/CodeCommitClient.php",
+  "phrase": "* This client is used to interact with the **AWS CodeCommit** service.",
+  "query": "Which library handles remote repository operations?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 39,
+  "path": "/Users/eseudom/Documents/paycustody.txt",
+  "phrase": "Order is placed and confirmed after reviewing delivery fee and viewing product/service images and video.",
+  "query": "How does buyer proceed when shipping charge appears alongside item photos?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 5535,
+  "path": "/Users/eseudom/Downloads/compressed/tenant-review/components/ui/sidebar.tsx",
+  "phrase": "\"group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.",
+  "query": "Where did I save custom styling for shrinking navigation menu?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4627,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/View/Helper/TextHelperTest.php",
+  "phrase": "$Text = new TextHelperTestObject($this->View, array('engine' => 'TestPlugin.",
+  "query": "Where can I find code creating an instance with configuration values?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 483,
+  "path": "/Users/eseudom/Documents/HushLine/app/build/intermediates/merged_res_blame_folder/debug/out/multi-v2/values-v29.json",
+  "phrase": "\"source\": \"/Users/eseudom/AndroidStudioProjects/HushLine/app/src/main/res/values-v29/themes.",
+  "query": "Which document sets visual styles for recent mobile operating system releases?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2280,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-php/src/Firebase/DynamicLink/AndroidInfo.php",
+  "phrase": "* The versionCode of the minimum version of your app that can open the link.",
+  "query": "Which file holds smallest program release able to handle internet address?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4763,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Controller/Component/AclComponent.php",
+  "phrase": "* Uses a strategy pattern to allow custom ACL implementations to be used with the same component interface.",
+  "query": "Where is code swapping permission logic behind one common object?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 4526,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Cache/Engine/ApcEngineTest.php",
+  "phrase": "$hasSupport, 'No apc_dec()/apcu_dec() function, cannot test decrement().",
+  "query": "Where is code checking cache decrease ability and skipping when missing?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 5134,
+  "path": "/Users/eseudom/Downloads/Simplified Sign-Up Design/src/components/VerificationModal.tsx",
+  "phrase": "To use this feature and start transacting, you need to complete the account verification process.",
+  "query": "Where can I find a document explaining how customers confirm identity before buying?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2089,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Batch/BatchDaemon.php",
+  "phrase": "throw new \\RuntimeException('SystemV IPC extensions are missing.",
+  "query": "Where can I find script checking shared memory support?",
   "overlap": 0.167
+ },
+ {
+  "doc_id": 930,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/ResultPaginator.php",
+  "phrase": "* Runs a paginator asynchronously and uses a callback to handle results.",
+  "query": "What file processes pages in background then alerts when finished?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2028,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/LongRunning/LROTrait.php",
+  "phrase": "* This trait should be used by a user-facing client which implements LRO.",
+  "query": "Where can I find code defining interface for application handling long running operations?",
+  "overlap": 0.333
+ },
+ {
+  "doc_id": 5066,
+  "path": "/Users/eseudom/Downloads/Design Briefcase Logo/src/App.tsx",
+  "phrase": "<svg width=\"300\" height=\"300\" viewBox=\"0 0 300 300\" fill=\"none\" xmlns=\"http://www.",
+  "query": "Where on my computer is a scalable vector drawing saved?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 509,
+  "path": "/Users/eseudom/Documents/HushLine/app/build/intermediates/merged_res_blame_folder/debug/out/multi-v2/values-w600dp-v13.json",
+  "phrase": "\"source\": \"/Users/eseudom/AndroidStudioProjects/HushLine/app/src/main/res/values-w600dp/dimens.",
+  "query": "Which file holds wide-screen spacing measurements for tablets?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4555,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Controller/ComponentTest.php",
+  "phrase": "$this->assertEquals(array('Apple'), $result, 'Too many components enabled.",
+  "query": "Where is my automated test verifying only one feature runs?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 269,
+  "path": "/Users/eseudom/Documents/CHATGPT-4 Notes.txt",
+  "phrase": "Prompt: In your most knowledgeable analysis, what AI product would people be willing to pay the most for?",
+  "query": "Where did I save file discussing artificial intelligence offerings purchasers spend largest sums on?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 169,
+  "path": "/Users/eseudom/Documents/Work Notes.txt",
+  "phrase": "an object with an array buffer of bytes for UUID in JSON object string instead of the string I specified in the typescript object definition.",
+  "query": "How can anyone locate document storing identifier as binary sequence rather than readable value?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 77,
+  "path": "/Users/eseudom/Documents/Dev scribbles 1 with BalanceChat stuff.txt",
+  "phrase": "Let's ponder on like 99% of things people would want to do with the bot in the context of X.",
+  "query": "Where are my chat assistant use case planning notes?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 924,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Sdk.php",
+  "phrase": "* @see Aws\\AwsClient::__construct for a list of available options for args.",
+  "query": "Which file holds parameter descriptions regarding library initialization choices?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5023,
+  "path": "/Users/eseudom/Downloads/simple_llm.py",
+  "phrase": "MAX_NEW_TOKENS: 700, # The maximum number of tokens that the model can generate in a single run.",
+  "query": "Which settings control how many words an artificial intelligence produces at once?",
+  "overlap": 0.0
  },
  {
   "doc_id": 90,
   "path": "/Users/eseudom/Documents/Notes on AutoJobber and SupportLine.txt",
   "phrase": "saging apps, email for handling simple and repetitive inquiries with previously added organisational knowledge base and history of responses.",
-  "query": "Where can I find guide about chatbots answering common customer questions using stored replies",
-  "overlap": 0.273
- },
- {
-  "doc_id": 4848,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/I18n/Multibyte.php",
-  "phrase": "* @return int|bool The portion of $haystack, or false if $needle is not found.",
-  "query": "Where can I locate script that extracts substring from another text?",
-  "overlap": 0.167
- },
- {
-  "doc_id": 112,
-  "path": "/Users/eseudom/Documents/Bellboy project.txt",
-  "phrase": "User accounts should be clearly defined and not interchangeable to minimize complexity and repeatition as it will incure more costs.",
-  "query": "Where is file explaining distinct profiles avoid duplication lower expenses?",
-  "overlap": 0.0
- },
- {
-  "doc_id": 4809,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/ScaffoldView.php",
-  "phrase": "* ScaffoldView provides specific view file loading features for scaffolded views.",
-  "query": "Where can I find code retrieving reusable page templates?",
-  "overlap": 0.0
- },
- {
-  "doc_id": 4811,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/View/JsonView.php",
-  "phrase": "* that should be serialized to JSON and used as the response for the request.",
-  "query": "Where can I find code converting data into web reply format?",
+  "query": "Which document stores automated answers to frequent client requests?",
   "overlap": 0.143
  },
  {
-  "doc_id": 1922,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/auth/src/Credentials/InsecureCredentials.php",
-  "phrase": "* Provides a set of credentials that will always return an empty access token.",
-  "query": "Where can I find fake login details generating blank authorization key?",
+  "doc_id": 1887,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/auth/src/SignBlobInterface.php",
+  "phrase": "* Sign a string using the method which is best for a given credentials type.",
+  "query": "Where can I find code that digitally endorses text with login details?",
   "overlap": 0.0
  },
  {
-  "doc_id": 2449,
-  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/league/flysystem/src/NotSupportedException.php",
-  "phrase": "$message = \"The FTP system type '$systemType' is currently not supported.",
-  "query": "Where can I find script handling file transfer protocol incompatibility notifications?",
-  "overlap": 0.125
+  "doc_id": 1015,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/Sns/Message.php",
+  "phrase": "throw new \\RuntimeException('SNS message type header not provided.",
+  "query": "Which script validates incoming payload before processing?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1865,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/guzzlehttp/guzzle/src/Cookie/SetCookie.php",
+  "phrase": "// The name of the cookie (first kvp) must exist and include an equal sign.",
+  "query": "Which file contains browser key value pair validation rules?",
+  "overlap": 0.143
+ },
+ {
+  "doc_id": 3116,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/giggsey/libphonenumber-for-php/src/ShortNumberInfo.php",
+  "phrase": "* Returns a list with teh region codes that match the specific country calling code.",
+  "query": "Which script groups international phone numbers by geographic area?",
+  "overlap": 0.286
  },
  {
   "doc_id": 4851,
   "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Error/ExceptionRenderer.php",
   "phrase": "* and it is a type that ExceptionHandler does not know about it will be treated as a 500 error.",
-  "query": "Where might one locate documentation explaining unrecognized fault fallback behavior?",
+  "query": "Where can I locate code handling unrecognized classes leading to server failure?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 248,
+  "path": "/Users/eseudom/Documents/Riverline.txt",
+  "phrase": "File operations should be done with very limited dependence on the file sharer.",
+  "query": "Which document explains handling archives independently from whoever supplies them?",
   "overlap": 0.0
+ },
+ {
+  "doc_id": 4949,
+  "path": "/Users/eseudom/Documents/NetBeansProjects/CallApp/nbproject/project.properties",
+  "phrase": "others=MIDlet-Vendor: Ese Udom\\nMIDlet-Name: CallApp\\nMIDlet-Version: 1.",
+  "query": "Where is the file describing mobile software publisher and build details?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 4848,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/I18n/Multibyte.php",
+  "phrase": "* @return int|bool The portion of $haystack, or false if $needle is not found.",
+  "query": "Where can I locate code that searches text and gives matching part?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 1009,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/WorkDocs/WorkDocsClient.php",
+  "phrase": "* This client is used to interact with the **Amazon WorkDocs** service.",
+  "query": "Which file handles cloud document storage on my computer?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1089,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/ElasticsearchService/ElasticsearchServiceClient.php",
+  "phrase": "* This client is used to interact with the **Amazon Elasticsearch Service** service.",
+  "query": "Which local package reaches distant cloud analytics platform?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4624,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/View/Helper/TimeHelperTest.php",
+  "phrase": "$Time = new TimeHelperTestObject($this->View, array('engine' => 'TestPlugin.",
+  "query": "Where can I find initialization details for a custom component?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 259,
+  "path": "/Users/eseudom/Documents/applybee deployment note.txt",
+  "phrase": "dev/dbazure/download/playwright/builds/chromium/1169/chromium-headless-shell-linux.",
+  "query": "Where is the browser binary that runs without a visible window?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 2469,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/league/flysystem/src/Adapter/Ftp.php",
+  "phrase": "throw new InvalidRootException('Root is invalid or does not exist: ' .",
+  "query": "Where can I find code that raises an error when directory missing",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4908,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Console/Command/Task/ProjectTask.php",
+  "phrase": "$prompt = __d('cake_console', \"What is the path to the project you want to bake?",
+  "query": "Which script asks for folder location before generating code scaffolding?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 5451,
+  "path": "/Users/eseudom/Downloads/compressed/Sign-in to post bridge_files/saved_resource.html",
+  "phrase": "0\" data-gr-ext-installed=\"\"><iframe height=\"0\" width=\"0\" src=\"https://www.",
+  "query": "Which document contains a concealed web browser pane?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1971,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-storage/src/Connection/Rest.php",
+  "phrase": "// not documented, but the feature is called crc32c, so let's accept that as input anyways.",
+  "query": "Which source file handles checksum parameter parsing?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 4769,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Controller/Component/Auth/ActionsAuthorize.php",
+  "phrase": "* If AclComponent is not already loaded it will be loaded using the Controller's ComponentCollection.",
+  "query": "Which file manages access rights for my framework?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 2209,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-php/src/Firebase/Database/RuleSet.php",
+  "phrase": "* This level of access means anyone can read or write to your database.",
+  "query": "Which file explains unrestricted permissions letting everybody modify stored data?",
+  "overlap": 0.111
+ },
+ {
+  "doc_id": 4235,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Core/CakePlugin.php",
+  "phrase": "* It also can retrieve plugin paths and load their bootstrap and routes files.",
+  "query": "Which routine discovers add-ons, initializes setup, maps web endpoints?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 5211,
+  "path": "/Users/eseudom/Downloads/docs/applybee.cvs1.json",
+  "phrase": "lysis_summary\": \"The CV demonstrates strong technical experience but needs structural improvements and better quantification of achievements.",
+  "query": "Where is my resume critique saved?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4757,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Controller/Component/AuthComponent.php",
+  "phrase": "* Binds access control with user authentication and session management.",
+  "query": "Which file links permission checks to login tracking?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 923,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/AwsClient.php",
+  "phrase": "* Get an array of client constructor arguments used by the client.",
+  "query": "Which script keeps list containing instance initialization data?",
+  "overlap": 0.286
+ },
+ {
+  "doc_id": 2523,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/psr/log/Psr/Log/Test/LoggerInterfaceTest.php",
+  "phrase": "* Provides a base test class for ensuring compliance with the LoggerInterface.",
+  "query": "Which source file verifies logging components satisfy shared contract?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4694,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Configure/PhpReader.php",
+  "phrase": "* the initialized path, plugin keys will be located using CakePlugin::path().",
+  "query": "Which file controls where add-ons reside after system startup?",
+  "overlap": 0.167
+ },
+ {
+  "doc_id": 5425,
+  "path": "/Users/eseudom/Downloads/compressed/canzafx/nanohttpd-master/nanolets/src/main/java/org/nanohttpd/router/RouterNanoHTTPD.java",
+  "phrase": "return \"<html><body><h3>Error 404: the requested page doesn't exist.",
+  "query": "Where is code that displays website not found message?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 1621,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Controller/AppController.php",
+  "phrase": "return pack(\"H*\", sha1((str_pad($key, 64, chr(0x00)) ^ (str_repeat(chr(0x5c), 64))) .",
+  "query": "Which PHP script creates secure message authentication codes?",
+  "overlap": 0.333
+ },
+ {
+  "doc_id": 2530,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/psr/simple-cache/src/CacheInterface.php",
+  "phrase": "* @param string $key     The unique key of this item in the cache.",
+  "query": "Where is code that stores values temporarily by identifier?",
+  "overlap": 0.2
  },
  {
   "doc_id": 2090,
   "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/cloud-core/src/Batch/BatchJob.php",
   "phrase": "// Fire SIGALRM after 1 second to unblock the blocking call.",
-  "query": "Which file contains code scheduling timer signal waking waiting process?",
-  "overlap": 0.111
+  "query": "Which program sends timer alert for releasing stuck process?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 123,
+  "path": "/Users/eseudom/Documents/Calyx Datura code snippets.txt",
+  "phrase": "I saw your post about looking for an android developer interested in working with AOSP.",
+  "query": "Which document discusses hiring engineer regarding open mobile platform?",
+  "overlap": 0.25
+ },
+ {
+  "doc_id": 232,
+  "path": "/Users/eseudom/Documents/Applybee dev and marketing notes.txt",
+  "phrase": "Okay so recap everything you have done so far concerning file naming and upload.",
+  "query": "Where can I find text reviewing completed work about digital asset labels plus sending?",
+  "overlap": 0.182
+ },
+ {
+  "doc_id": 4800,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Model/Datasource/Database/Postgres.php",
+  "phrase": "* @param bool $reset true for resetting the sequence, false to leave it as is.",
+  "query": "Where can I find code that clears an ordered list?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4919,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Console/Command/Task/ModelTask.php",
+  "phrase": "$prompt = __d('cake_console', \"The table %s doesn't exist or could not be automatically detected\\ncontinue anyway?",
+  "query": "Which script asks whether to proceed when database relation is absent?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4634,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Routing/DispatcherTest.php",
+  "phrase": "', $Dispatcher->controller->params['pass'][0], 'Period was chopped off.",
+  "query": "Where is the script that removes trailing dot from web address?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 999,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/S3/S3UriParser.php",
+  "phrase": "* - region: Set to a string if a non-class endpoint is used or null.",
+  "query": "Which file explains assigning location text for network targets?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 4984,
+  "path": "/Users/eseudom/Desktop/Isatong-training-bash-history.txt",
+  "phrase": "sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\ -keyout /etc/ssl/private/nginx-selfsigned.",
+  "query": "Which script creates a secure certificate for a web server?",
+  "overlap": 0.2
+ },
+ {
+  "doc_id": 4668,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/lib/Cake/Test/Case/Console/Command/Task/ModelTaskTest.php",
+  "phrase": "* Test that listAll scans the database connection and lists all the tables in it.",
+  "query": "Which script verifies every stored relation gets enumerated?",
+  "overlap": 0.0
+ },
+ {
+  "doc_id": 1891,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/auth/src/CredentialsLoader.php",
+  "phrase": "* @param array $httpClientOptions (optional) Array of request options to apply.",
+  "query": "Which source file controls outgoing network calls with adjustable settings?",
+  "overlap": 0.125
+ },
+ {
+  "doc_id": 2143,
+  "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/kreait/firebase-tokens/src/JWT/Action/FetchGooglePublicKeys.php",
+  "phrase": "* Use this method only if Google has changed the default URL and the library hasn't been updated yet.",
+  "query": "How to patch software component when search engine web address shifts?",
+  "overlap": 0.0
  }
 ]

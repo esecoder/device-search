@@ -16,7 +16,8 @@ const invoke = window.__TAURI__?.core?.invoke;
 
 let TOKEN = null;
 let PORT = 8734;
-let results = [];       // flattened, in display order
+let results = [];
+let answer = null;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
 let sel = 0;
 let timer = null;
 
@@ -93,6 +94,26 @@ async function boot() {
                      `Details are in ~/.device-search/daemon.log`);
   }
   $("q").focus();
+
+  // ⚠️ THE TOGGLE ONLY EXISTS WHEN IT CAN DO SOMETHING. A switch whose only possible
+  // outcome is an error is worse than no switch: it teaches the user that the feature is
+  // broken rather than that it is not set up.
+  const refreshAsk = async () => {
+    const b = $("askbtn");
+    if (!b) return;
+    try {
+      const lr = await api("/api/llm");
+      b.style.display = lr.ok && lr.configured ? "" : "none";
+    } catch (e) { b.style.display = "none"; }
+  };
+  refreshAsk();
+  if ($("askbtn")) {
+    $("askbtn").onclick = () => {
+      $("askbtn").classList.toggle("on");
+      const q = $("q").value.trim();
+      if (q) run(q);      // ⚠️ re-run, so the toggle does something visible immediately
+    };
+  }
 }
 
 // ⚠️ ONE STATE OBJECT, TWO RENDERINGS. An in-progress index and a stale vector set are
@@ -262,8 +283,15 @@ function onType() {
 }
 
 async function run(q) {
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25`);
+  // ⚠️ ask=1 ONLY WHEN THE TOGGLE IS ON. It costs an API call and uploads snippets, so it
+  // must be an explicit choice every time rather than a mode the user forgot they enabled.
+  const askOn = $("askbtn") && $("askbtn").classList.contains("on");
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${askOn ? "&ask=1" : ""}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
+  // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
+  // one is a list the user opens and checks, the other is a sentence that must be trusted or
+  // verified. Merging them into one array would render them identically.
+  answer = r.answer || null;
   // ⚠️ Ignore a response that arrived for a query the user has already moved past. Without
   // this, a slow response overwrites a fast one and the list shows results for an older query.
   if ($("q").value.trim() !== q) return;
@@ -284,6 +312,46 @@ async function run(q) {
 function render() {
   const box = $("results");
   box.textContent = "";
+
+  // ⚠️⚠️ THE ANSWER RENDERS ABOVE THE LIST, AND THIS IS THE WHOLE POINT OF ANSWERING.
+  //
+  // It is what was asked for; the list is the evidence for it. ⚠️ AND THE EVIDENCE IS SHOWN
+  // WITH IT — an answer without its sources is an assertion, and a user has no way to tell a
+  // grounded answer from an invented one. The citations are clickable and the matching files
+  // are in the list directly underneath, so checking the claim takes one glance.
+  if (answer && answer.text) {
+    const d = document.createElement("div");
+    d.className = "answer" + (answer.uncited || (answer.invented || []).length ? " shaky" : "");
+    const t = document.createElement("div");
+    t.className = "answer-text";
+    t.textContent = answer.text;
+    d.appendChild(t);
+    // ⚠️ EVERY DEGRADED STATE IS LABELLED. An answer that cites a source nobody sent, or
+    // cites nothing at all, still LOOKS like a sourced answer — and that is the failure mode
+    // that makes a generated answer worse than no answer.
+    if ((answer.invented || []).length) {
+      d.classList.add("bad");
+      const w = document.createElement("div");
+      w.className = "answer-flag";
+      w.textContent = "⚠️ this answer cites sources that were never sent — treat it as unverified";
+      d.appendChild(w);
+    } else if (answer.uncited) {
+      const w = document.createElement("div");
+      w.className = "answer-flag";
+      w.textContent = "⚠️ no citations — this is the model's wording, not evidence";
+      d.appendChild(w);
+    }
+    for (const c of answer.citations || []) {
+      const a = document.createElement("span");
+      a.className = "answer-cite";
+      a.textContent = `[${c.n}] ${c.path.split("/").pop()}`;
+      a.title = c.path;
+      a.onclick = () => openPath(c.path);
+      d.appendChild(a);
+    }
+    box.appendChild(d);
+  }
+
   if (!results.length) return;
 
   let lastGroup = null;

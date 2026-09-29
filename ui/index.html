@@ -24,6 +24,13 @@
       </svg>
       <input id="q" type="text" autocomplete="off" spellcheck="false"
              placeholder="Search or ask a question for anything on this device… " />
+      <!-- ⚠⚠ THE ANSWER TOGGLE, WHICH IS WHAT MAKES THE FEATURE REACHABLE AT ALL.
+           The LLM path existed on the command line and nowhere in the interface, so a user
+           could not turn it on, could not see that it was off, and had no reason to know it
+           was there. ⚠️ IT IS HIDDEN UNTIL A KEY IS SAVED — offering a switch whose only
+           outcome is an error is worse than not offering it. -->
+      <button id="askbtn" title="answer the question (uses your connected model)"
+              style="display:none">answer</button>
       <kbd id="esc">esc</kbd>
     </div>
 

@@ -163,6 +163,19 @@ kbd {
 .setup-list.disabled { opacity: 0.4; pointer-events: none; }
 .setup-row.whole { margin-top: 6px; border-top: 1px solid var(--sep); padding-top: 12px; }
 
+/* ⚠️ THE AI SECTION. Visually separate from the folders, because it is a different kind of
+   decision: folders change what is searched, this changes what LEAVES the machine. */
+.setup-ai { margin-top: 14px; border-top: 1px solid var(--sep); padding-top: 12px; }
+.setup-ai-head { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.setup-ai-row { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: center;
+                margin-bottom: 6px; font-size: 12px; color: var(--dim); }
+.setup-ai-row input {
+  background: rgba(255,255,255,0.06); border: 1px solid var(--sep); border-radius: 6px;
+  padding: 6px 8px; color: var(--fg); font-size: 12px; font-family: inherit; width: 100%;
+}
+.setup-ai-foot { display: flex; gap: 8px; margin-top: 10px; }
+.setup-ai-foot button { font-size: 12px; padding: 5px 10px; }
+
 /* ⚠️ THE MESSAGE SLOT INSIDE THE PANEL. The banner is UNDER the overlay, so anything the user
    must read while the panel is open has to be drawn on the panel itself. */
 .setup-msg { font-size: 12px; line-height: 1.45; min-height: 0; }
@@ -195,3 +208,28 @@ kbd {
 #indexinfo { margin-left: auto; }
 #settings { cursor: pointer; text-decoration: underline dotted; }
 #settings:hover { color: var(--fg); }
+
+/* ⚠⚠ THE ANSWER. Visually distinct from the result rows, because it is a different KIND of
+   output: a sentence the user will believe, sitting above a list they can check. Styling it
+   like a result row would invite the same trust for both. */
+.answer {
+  margin: 4px 12px 10px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(10, 132, 255, 0.12); border-left: 2px solid #0a84ff;
+}
+.answer.shaky { background: rgba(255, 159, 10, 0.10); border-left-color: #ff9f0a; }
+.answer.bad { background: rgba(255, 69, 58, 0.12); border-left-color: #ff453a; }
+.answer-text { font-size: 13px; line-height: 1.5; }
+.answer-flag { font-size: 11px; margin-top: 6px; color: #ffc46b; }
+.answer.bad .answer-flag { color: #ff8a80; }
+.answer-cite {
+  display: inline-block; margin: 7px 6px 0 0; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; color: #9fd0ff; background: rgba(255,255,255,0.07); cursor: pointer;
+}
+.answer-cite:hover { background: rgba(255,255,255,0.15); }
+/* ⚠️ The answer toggle is off by default and must LOOK off — it uploads snippets, and a
+   switch whose state is ambiguous is one people leave on by accident. */
+#askbtn {
+  font-size: 11px; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+  background: transparent; border: 1px solid var(--sep); color: var(--dim);
+}
+#askbtn.on { background: #0a84ff; border-color: #0a84ff; color: #fff; }
