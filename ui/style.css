@@ -233,3 +233,25 @@ kbd {
   background: transparent; border: 1px solid var(--sep); color: var(--dim);
 }
 #askbtn.on { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+
+/* ⚠⚠ THE MODEL PANEL HAS ITS OWN OVERLAY, SIZED LIKE THE FOLDER ONE BUT VISUALLY DISTINCT.
+   Same layout primitives, different purpose — and it must not look like a step inside the
+   folder chooser, which is what it was. */
+#ai-overlay {
+  display: none; position: absolute; inset: 0; z-index: 21;
+  background: rgba(0, 0, 0, 0.45); border-radius: 14px;
+}
+#ai-overlay.show { display: block; }
+#ai {
+  position: absolute; inset: 30px 0 0 0; padding: 18px; overflow-y: auto;
+  background: var(--bg); border-radius: 12px;
+}
+.setup-ai-row select {
+  background: rgba(255,255,255,0.06); border: 1px solid var(--sep); border-radius: 6px;
+  padding: 6px 8px; color: var(--fg); font-size: 12px; font-family: inherit; width: 100%;
+}
+/* ⚠️ AN UNAVAILABLE PROVIDER IS DIMMED BUT STILL VISIBLE. Hiding it would leave a user who
+   HAS Ollama wondering why it is not offered; showing it dimmed with "not running" tells
+   them the app looked and did not find it, which is a different and more useful fact. */
+.setup-row.ai-prov.unavailable { opacity: 0.5; }
+.setup-ai-form { margin: 12px 0 0; }

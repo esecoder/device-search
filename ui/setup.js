@@ -56,10 +56,6 @@ const Setup = (() => {
   // AND render() DRAWS IT. A direct DOM write in an event handler survives exactly until the
   // next render — and every handler here ends with a render.
   let typedOpen = false;
-  // ⚠️ THE MODEL SETTINGS, LOADED ONCE AND EDITED IN PLACE. `hint` is the last four characters
-  // of the saved key — the API never returns the key itself, so the form cannot be
-  // prefilled with it and must not try.
-  let llm = { configured: false, hint: "", base_url: "", model: "" };
 
   const el = (id) => document.getElementById(id);
   const base = (p) => String(p).replace(/\/+$/, "").split("/").pop() || p;
@@ -106,13 +102,6 @@ const Setup = (() => {
       roots.suggested.filter((s) => s.exists).forEach((s) => chosen.add(s.path));
       roots.configured.forEach((p) => chosen.add(p));
     }
-    // ⚠️ THE MODEL SETTINGS ARE FETCHED ALONGSIDE THE FOLDERS. A failure here must not blank
-    // the folder list, so it is fetched independently and swallowed on error.
-    try {
-      const lr = await api("/api/llm");
-      if (lr.ok) llm = { configured: !!lr.configured, hint: lr.hint || "",
-                         base_url: lr.base_url || "", model: lr.model || "" };
-    } catch (e) { /* the AI section simply shows as unconfigured */ }
 
     render();
   }
@@ -310,96 +299,6 @@ const Setup = (() => {
       }
     };
     host.appendChild(whole);
-
-    // ⚠⚠ THE MODEL SETTINGS, WHICH DID NOT EXIST IN THE INTERFACE AT ALL.
-    //
-    // The whole LLM path — answering and re-ranking — was reachable only from a terminal, because
-    // the daemon is spawned with NO ENVIRONMENT and cannot see a key set in a shell profile. So
-    // the feature existed and the app could not use it.
-    //
-    // ⚠️ THE KEY IS WRITE-ONLY IN THIS FORM. It shows the last four characters of whatever is
-    // saved and never the key. A settings screen that displays a secret turns every screenshot
-    // and every devtools session into a leak.
-    const ai = document.createElement("div");
-    ai.className = "setup-ai";
-
-    const aiHead = document.createElement("div");
-    aiHead.className = "setup-ai-head";
-    aiHead.textContent = llm.configured
-      ? `AI: connected (key …${llm.hint}) — can answer questions`
-      : "AI: not connected — search works, answering questions does not";
-    ai.appendChild(aiHead);
-
-    const aiNote = document.createElement("div");
-    aiNote.className = "setup-sub";
-    // ⚠️ WHAT IT SENDS IS STATED WHERE THE KEY IS ENTERED, not buried in documentation. This is
-    // a tool whose entire premise is that files stay on the machine, and a key box with no
-    // explanation is a request for trust rather than a reason for it.
-    aiNote.textContent = "Optional. When you ask a question, the matching snippets are sent "
-                       + "to this model. Anything matching a key or password pattern is "
-                       + "withheld automatically.";
-    ai.appendChild(aiNote);
-
-    const mkField = (label, id, value, ph, type) => {
-      const row = document.createElement("label");
-      row.className = "setup-ai-row";
-      const t = document.createElement("span");
-      t.textContent = label;
-      const i2 = document.createElement("input");
-      i2.id = id; i2.type = type || "text"; i2.value = value || "";
-      i2.placeholder = ph || ""; i2.spellcheck = false;
-      row.append(t, i2);
-      return row;
-    };
-    ai.appendChild(mkField("API key", "llm-key", "",
-                          llm.configured ? `saved …${llm.hint} — leave blank to keep`
-                                         : "sk-…", "password"));
-    ai.appendChild(mkField("Endpoint", "llm-base", llm.base_url, "https://api.openai.com/v1"));
-    ai.appendChild(mkField("Model", "llm-model", llm.model, "gpt-4o-mini"));
-
-    const aiFoot = document.createElement("div");
-    aiFoot.className = "setup-ai-foot";
-    const testBtn = document.createElement("button");
-    testBtn.textContent = "Test connection";
-    const saveBtn = document.createElement("button");
-    saveBtn.className = "primary";
-    saveBtn.textContent = llm.configured ? "Update" : "Connect";
-    const forgetBtn = document.createElement("button");
-    forgetBtn.textContent = "Remove key";
-    forgetBtn.style.display = llm.configured ? "" : "none";
-
-    testBtn.onclick = async () => {
-      testBtn.disabled = true; testBtn.textContent = "Testing…";
-      // ⚠️ SAVE BEFORE TESTING. Testing an unsaved key reports on the OLD one, which is the
-      // most confusing possible outcome: the form looks right and the test fails.
-      await saveBtn.onclick();
-      const r = await api("/api/llm/test");
-      testBtn.disabled = false; testBtn.textContent = "Test connection";
-      note(r.ok ? `Connection works (${r.model}).` : `Connection failed: ${r.reason}`,
-           r.ok ? "" : "warn");
-    };
-    saveBtn.onclick = async () => {
-      const key = (el("llm-key") || {}).value || "";
-      const base = (el("llm-base") || {}).value || "";
-      const model = (el("llm-model") || {}).value || "";
-      const r = await api("/api/llm", { method: "POST",
-                                        body: { api_key: key.trim(), base_url: base.trim(),
-                                                model: model.trim() } });
-      if (!r.ok) { note(`Could not save the key: ${r.error}`, "err"); return; }
-      note("Saved.", "");
-      await refresh();
-    };
-    forgetBtn.onclick = async () => {
-      // ⚠️ A REMOVE BUTTON, BECAUSE A SECRET WITH NO WAY OUT IS ONE PEOPLE REGRET SAVING.
-      await api("/api/llm", { method: "POST",
-                              body: { api_key: "-", base_url: "", model: "" } });
-      llm = { configured: false, hint: "", base_url: "", model: "" };
-      note("Key removed.", "");
-      await refresh();
-    };
-    aiFoot.append(testBtn, saveBtn, forgetBtn);
-    ai.appendChild(aiFoot);
-    host.appendChild(ai);
 
     const foot = document.createElement("div");
     foot.className = "setup-foot";
