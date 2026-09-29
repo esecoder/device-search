@@ -40,7 +40,15 @@ const ROOT = path.resolve(__dirname, "..");
 const UI = path.join(ROOT, "ui");
 const BUILD = path.join(ROOT, "src-tauri/target/release/build");
 
-const WATCH = ["index.html", "app.js", "setup.js", "style.css"];
+// ⚠⚠️ EVERY FILE THE APP LOADS, AND THIS LIST HAS TO BE UPDATED WHEN ONE IS ADDED.
+//
+// ai.js was left out when it was created, so the checker reported "all embedded" while
+// silently not looking at the file that renders the AI step — the newest and most
+// changed part of the interface. **A checker with an incomplete list reports SUCCESS for
+// the files it knows about, which is indistinguishable from reporting success for all of
+// them.** The whole point of this script is to catch a stale binary, and it would have
+// missed the most likely one.
+const WATCH = ["index.html", "app.js", "setup.js", "ai.js", "style.css"];
 
 function embeddedTexts() {
   const out = [];
