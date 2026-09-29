@@ -175,6 +175,28 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 keep.append(name)
             dirnames[:] = keep
 
+            # ⚠⚠️ DIRECTORIES ARE YIELDED HERE, FROM `dirnames` — NOT FROM `filenames`.
+            #
+            # The first attempt put this in the `for fname in filenames` loop below, where
+            # `p.is_dir()` CAN NEVER BE TRUE, because `filenames` contains only files. ⚠️ So the
+            # branch was unreachable, no folder was ever indexed, and "screenshot" stayed
+            # unanswerable while the code looked correct and the test passed.
+            #
+            # ⚠️ `os.walk` HANDS YOU THE TWO LISTS SEPARATELY AND THAT IS THE WHOLE POINT — a
+            # directory is in `dirnames`, and looking for one among `filenames` finds nothing,
+            # forever, silently.
+            #
+            # ⚠️ AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
+            # embed; it is a NAME. Giving it any text would put it in the vector index and the
+            # quality filter, where it would mean nothing.
+            for name in dirnames:
+                sub_path = d / name
+                stats.seen += 1
+                # ⚠️ 0.0 as the mtime IS DELIBERATE: a directory's mtime changes whenever a
+                # file is added or removed inside it, so using the real one would mark every
+                # parent directory changed on every incremental pass.
+                yield FileDoc(str(sub_path), 0.0, 0, "", "", 0, is_dir=True)
+
             for fname in filenames:
                 stats.seen += 1
                 if stats.seen % progress_every == 0:
@@ -200,10 +222,6 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 # ⚠️ AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
                 # embed; it is a NAME. Giving it any text would put it in the vector index and the
                 # quality filter, where it would mean nothing.
-                if p.is_dir():
-                    stats.seen += 1
-                    yield FileDoc(str(p), 0.0, 0, "", "", 0, is_dir=True)
-                    continue
                 if not p.is_file():
                     stats.skip("not_regular_file")
                     continue
@@ -221,7 +239,21 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                     # ⚠️ `too_large` AND `binary_ext` CARRY THE PATH. The first is the one the
                     # user most needs to know about: the file is real, searchable in principle,
                     # and invisible. The second is how you find out that a 200 MB binary exists.
-                    stats.skip(reason, str(p), sz)
+                    # ⚠⚠️ `sz` WAS NEVER DEFINED. IT CRASHED THE WHOLE CRAWL, EVERY TIME.
+                    #
+                    # The stat result is `st`. This line referred to `sz`, a name that appears
+                    # nowhere else in the file — so the FIRST file that was too large or had a
+                    # binary extension raised NameError and killed the walk.
+                    #
+                    # ⚠️ AND IT WAS INVISIBLE FROM THE INTERFACE. The daemon's automatic rebuild did
+                    # fire, immediately, exactly as designed — and it died on the first skipped
+                    # file, with the traceback going to daemon.log and nothing reaching the user.
+                    # The index stayed at format 0 and folders stayed unsearchable, while the app
+                    # looked healthy.
+                    #
+                    # ⚠️ A BACKGROUND JOB THAT FAILS SILENTLY IS WORSE THAN ONE THAT DOES NOT RUN,
+                    # because the app believes it succeeded.
+                    stats.skip(reason, str(p), st.st_size)
                     continue
                 ext = p.suffix.lower()
                 if ext in MEDIA_EXTS:
