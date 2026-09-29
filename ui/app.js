@@ -394,6 +394,21 @@ function render() {
   //     the model refused    -> ask something the files can answer
   //     the request failed   -> the reason
   //     a question it cannot answer, like a COUNT, is the most common case of all
+  // ⚠⚠️ "NO RESULTS" AND "NOTHING MATCHES THAT FILTER" ARE DIFFERENT FACTS.
+  //
+  // The user searched "10gb files", saw nothing, and could not tell whether the app had failed
+  // or whether they genuinely have no files that large. ⚠️ An empty list is only an answer when
+  // the app says WHAT it looked for.
+  if (r.meta && r.meta.empty_is_the_answer) {
+    const d = document.createElement("div");
+    d.className = "answer note";
+    const t = document.createElement("div");
+    t.className = "answer-text";
+    t.textContent = `Nothing matches ${r.meta.explain || "that filter"}. That is the answer, `
+                  + `not an error — there is no file on this Mac that satisfies it.`;
+    d.appendChild(t);
+    box.appendChild(d);
+  }
   if (isQuestion && !(answer && answer.text)) {
     const d = document.createElement("div");
     d.className = "answer note";
