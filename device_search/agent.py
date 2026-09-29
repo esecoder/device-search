@@ -408,10 +408,28 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
 
     # ⚠️ THE FILTER IS WEIGHTED, NOT PREFERRED BY DELETION. 6.0 lifts a matched filter above the
     # similarity lists while leaving every one of them in the fusion.
+    # ⚠⚠️ A NAME MATCH IS EVIDENCE, NOT A SIMILARITY, AND IT WAS BEING OUTVOTED BY VOLUME.
+    #
+    # ⚠️ MEASURED: path_search found the Screenshots folders with the HIGHEST raw score in the
+    # whole pipeline (3.0 against keyword's floor), and NOT ONE reached the user. RRF discards
+    # scores and counts lists, so a doc found by `path` alone scored 1/(60+0+1) = 0.0164 while a
+    # doc found by `keyword` AND `exact` scored 0.033.
+    #
+    # ⚠️ FOUR BACKENDS × 40 HITS = 160 DOCUMENTS FOR 30 SLOTS. The folder you named ranks below
+    # the cutoff and is cut, by documents that merely CONTAIN the word.
+    #
+    # ⚠️ SOMEONE WHO TYPES "screenshot" AND HAS A FOLDER CALLED "Screenshots" HAS ALREADY TOLD YOU
+    # THE ANSWER. A name matching a query is close to a truth condition; a similarity score is a
+    # guess. So `path` is weighted like the filter is.
     _weights = {"meta": 6.0} if trace.get("meta", {}).get("pure_filter") else {"meta": 2.5}
+    _weights["path"] = 4.0
     fused = rrf(results, weights=_weights)
     cands: list[Candidate] = []
-    for _key, _info, score in fused[:top_k * 3]:
+    # ⚠⚠️ AND THE CUTOFF IS MUCH LARGER THAN top_k * 3, FOR THE SAME REASON.
+    # 30 slots for the output of four backends means the fusion decides by VOLUME rather than by
+    # agreement: any list that returns more rows crowds out the others. ⚠️ The fused ranking is
+    # already weight-aware, so there is nothing to protect by truncating early.
+    for _key, _info, score in fused[:max(top_k * 20, 200)]:
         doc_id, path = _info["doc_id"], _info["path"]
         # ⚠⚠️ A RESULT WITH NO ROW IS NOT A RESULT TO DISCARD — IT IS A SKIPPED FILE.
         #
