@@ -24,13 +24,6 @@
       </svg>
       <input id="q" type="text" autocomplete="off" spellcheck="false"
              placeholder="Search or ask a question for anything on this device… " />
-      <!-- ⚠⚠ THE ANSWER TOGGLE, WHICH IS WHAT MAKES THE FEATURE REACHABLE AT ALL.
-           The LLM path existed on the command line and nowhere in the interface, so a user
-           could not turn it on, could not see that it was off, and had no reason to know it
-           was there. ⚠️ IT IS HIDDEN UNTIL A KEY IS SAVED — offering a switch whose only
-           outcome is an error is worse than not offering it. -->
-      <button id="askbtn" title="answer the question (uses your connected model)"
-              style="display:none">answer</button>
       <kbd id="esc">esc</kbd>
     </div>
 
@@ -57,10 +50,15 @@
       <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       <span><kbd>⌘↵</kbd> reveal</span>
-      <span id="settings" title="choose folders (⌘,)">folders</span>
-      <!-- ⚠️ A FOOTER LINK, NOT A SETUP STEP. Connecting a model is something you come back
-           to, not something you do once before the app works. -->
-      <span id="aiopen" title="connect a model (⌘.)">AI</span>
+      <!-- ⚠⚠ ONE DOOR, CALLED WHAT IT IS. There were two footer links — "folders" and "AI" —
+           which asked the user to know which of two places held the thing they wanted. Both
+           live behind this now. -->
+      <span id="settings" title="folders and AI (⌘,)">Settings</span>
+      <!-- ⚠️ THE AI STATE, VISIBLE WITHOUT BEING OPENED. It appears only when a model is
+           connected, and clicking it opens Settings on the model step — so the answer to "is
+           this using my API key?" is one glance and one click, not a menu hunt. -->
+      <span id="aipill" title="your model is connected — click to change it"
+            style="display:none">● AI</span>
       <span id="activity"></span>
       <span id="indexinfo"></span>
     </div>
@@ -77,7 +75,7 @@
      question about the disk; "which model?" is a question about what leaves the machine.
      Sharing one panel made connecting an API look like a routine step on the way to picking
      folders. -->
-<div id="ai-overlay"><div id="ai"></div></div>
+
 
 <!-- ⚠️ setup.js loads FIRST: app.js calls Setup.open() during boot. -->
 <script src="setup.js"></script>

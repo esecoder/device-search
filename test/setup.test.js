@@ -99,6 +99,11 @@ function makeEnv(opts = {}) {
   window.setBanner = (cls, msg) => notes.push({ cls, msg });
   window.startPolling = () => {};
   window.Polling = { start: () => {} };
+  // ⚠️ AI IS STUBBED because the panel now renders it as a step. The tests are about the
+  // folder step, and reaching into the model step would make them fail for reasons unrelated
+  // to what they check.
+  window.AI = { renderInto: () => {}, announce: () => {},
+                state: () => ({ configured: false, model: "" }), reload: () => {} };
 
   // ⚠️ see the header: the explicit export is what makes this loadable at all
   window.eval(SETUP_JS + "\n;window.Setup = Setup;");

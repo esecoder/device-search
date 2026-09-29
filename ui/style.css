@@ -255,3 +255,20 @@ kbd {
    them the app looked and did not find it, which is a different and more useful fact. */
 .setup-row.ai-prov.unavailable { opacity: 0.5; }
 .setup-ai-form { margin: 12px 0 0; }
+
+/* ⚠⚠ THE STEP TABS. Two decisions, one panel. The tab is what keeps them visibly distinct —
+   merging their controls into one list is what made connecting an API look like a checkbox
+   next to Documents. */
+.setup-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.setup-tab {
+  font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+  background: transparent; border: 1px solid var(--sep); color: var(--dim);
+}
+.setup-tab.on { background: rgba(255,255,255,0.10); color: var(--fg); border-color: transparent; }
+
+/* ⚠️ THE AI PILL. Visible only when a model is connected, because a status light that is
+   always on tells you nothing. Clicking it is the shortest path to changing it. */
+#aipill {
+  color: #30d158; cursor: pointer; font-weight: 600;
+}
+#aipill:hover { text-decoration: underline; }

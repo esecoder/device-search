@@ -28,6 +28,18 @@ const Setup = (() => {
   // ⚠️ THE WHOLE-DEVICE CHOICE, CARRIED THROUGH TO THE API. `POST /api/roots` takes a mode,
   // and the backend has always understood "everything" — this is only the interface catching up.
   let wholeDevice = false;
+  // ⚠⚠ TWO STEPS IN ONE PANEL, WHICH IS THE THING THAT WAS ASKED FOR AND THE THING THAT WAS
+  // WRONG TWICE BEFORE.
+  //
+  //   1. it was in the folder list   — a privacy decision styled like a checkbox next to
+  //                                    Documents, which teaches the user to click past it
+  //   2. it was its own panel        — correct separation, but a second place to look, a second
+  //                                    shortcut to remember, and a connection that setup never
+  //                                    mentioned
+  //
+  // ⚠️ A STEP GETS BOTH. The two decisions stay visually distinct — different screens, different
+  // heading, different words — while living in one panel the user already knows how to open.
+  let step = "folders";
   // ⚠️⚠️ THE MESSAGE IS STATE, NOT A DOM WRITE, AND THIS IS THE THIRD TIME TODAY.
   //
   // note() wrote straight into #setup-msg. But render() begins with `host.textContent = ""`,
@@ -111,10 +123,35 @@ const Setup = (() => {
     if (!host) return;
     host.textContent = "";
 
+    // ⚠️ THE STEP HEADER. Two labels, the active one marked, and the AI step labelled
+    // "optional" so nobody thinks it is a requirement to finish setup.
+    const tabs = document.createElement("div");
+    tabs.className = "setup-tabs";
+    for (const [id, label] of [["folders", "Folders"], ["ai", "AI (optional)"]]) {
+      const t = document.createElement("button");
+      t.className = "setup-tab" + (step === id ? " on" : "");
+      t.textContent = label;
+      t.onclick = () => { step = id; render(); };
+      tabs.appendChild(t);
+    }
+    host.appendChild(tabs);
+
     const h = document.createElement("div");
     h.className = "setup-title";
-    h.textContent = "What should be searchable?";
+    h.textContent = step === "ai" ? "Connect a model to ask questions"
+                                  : "What should be searchable?";
     host.appendChild(h);
+
+    // ⚠️ THE MODEL STEP IS ITS OWN RENDERER, DRAWN INTO THIS PANEL. Splitting it this way keeps
+    // one place that decides what is on screen (this function) and lets the AI step own its own
+    // form without the folder code knowing anything about it.
+    if (step === "ai") {
+      const box = document.createElement("div");
+      box.id = "ai-step";
+      host.appendChild(box);
+      AI.renderInto(box);
+      return;
+    }
 
     const sub = document.createElement("div");
     sub.className = "setup-sub";
@@ -305,12 +342,18 @@ const Setup = (() => {
     const go = document.createElement("button");
     go.className = "primary";
     go.textContent = busy ? "Starting…" : "Index these folders";
+    // ⚠️ AND THE NEXT STEP IS OFFERED HERE rather than only in a footer link, because the
+    // moment a user has chosen folders is the moment they are most likely to accept or decline
+    // connecting a model. Asking later means asking someone who has moved on.
+    const next = document.createElement("button");
+    next.textContent = "Next: connect AI →";
+    next.onclick = () => { step = "ai"; render(); };
     go.disabled = busy || (!wholeDevice && chosen.size === 0);
     go.onclick = start;
     const skip = document.createElement("button");
     skip.textContent = "Not now";
     skip.onclick = () => close();
-    foot.append(go, skip);
+    foot.append(go, next, skip);
     host.appendChild(foot);
   }
 

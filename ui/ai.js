@@ -67,8 +67,13 @@ const AI = (() => {
     render(current ? current.id : "custom");
   }
 
+  // ⚠⚠ IT RENDERS INTO WHATEVER CONTAINER IT IS GIVEN, SO IT CAN BE A STEP.
+  // It used to own an overlay and a footer link. The right way to merge it into Settings is not
+  // to put its controls in the same list as the folders — that is what was wrong the first time
+  // — but to make the model a STEP drawn into a container the panel controls.
+  let host_el = null;
   function render(selectedId) {
-    const host = el("ai");
+    const host = host_el || el("ai");
     if (!host) return;
     host.textContent = "";
 
@@ -206,12 +211,10 @@ const AI = (() => {
       await api("/api/llm", { method: "POST",
                               body: { api_key: "-", base_url: "", model: "" } });
       saved = { base_url: "", model: "", configured: false };
+      announce();
       await load();
     };
-    const skip = document.createElement("button");
-    skip.textContent = "Close";
-    skip.onclick = () => close();
-    foot.append(go, off, skip);
+    foot.append(go, off);
     host.appendChild(foot);
   }
 
@@ -244,9 +247,10 @@ const AI = (() => {
     busy = false;
     if (test.ok) {
       saved = { base_url: body.base_url, model: body.model, configured: true };
-      const q = el("q");
-      if (q) q.focus();
-      close();
+      announce();
+      // ⚠️ STAYS ON SCREEN ON SUCCESS. It is a step inside Settings now, and closing it would
+      // drop the user back into the app with no confirmation of what just happened.
+      render(p.id);
       return;
     }
     // ⚠️ THE FAILURE STAYS ON SCREEN WITH THE REASON. Closing the panel and writing the error
@@ -255,24 +259,23 @@ const AI = (() => {
          + (test.detail ? ` (${String(test.detail).slice(0, 90)})` : ""), "err");
     render(p.id);
   }
+    // ⚠️ A STEP, NOT A PANEL. No overlay, no shortcut, no footer link of its own — Settings
+    // owns those, and this is one of its two steps. It renders into whatever container it is
+    // given and reports what it found.
+    function renderInto(host) {
+      host_el = host;
+      return load();
+    }
 
-  function open() {
-    el("ai-overlay").classList.add("show");
-    load();
-  }
-  function close() {
-    el("ai-overlay").classList.remove("show");
-    note("");
-    // ⚠️ THE SEARCH BOX IS TOLD TO RE-CHECK. The "answer" toggle is hidden until a key is
-    // saved, and without this it would only appear on the next launch — so connecting a model
-    // would look like it had not worked, which is the exact confusion this panel exists to
-    // remove. An event rather than a direct call, so ai.js does not need to know how app.js is
-    // organised.
-    window.dispatchEvent(new CustomEvent("ds:model-changed"));
-    const q = el("q");
-    if (q) q.focus();
-  }
-  const isOpen = () => el("ai-overlay")?.classList.contains("show");
+    // ⚠️ AND IT ANNOUNCES CHANGES. The main screen shows an "AI enabled" state that has to
+    // appear the moment a model is connected; waiting for a relaunch reads as a failure.
+    function announce() {
+      window.dispatchEvent(new CustomEvent("ds:model-changed"));
+    }
 
-  return { open, close, isOpen, reload: load };
+    // ⚠️ `configured` IS EXPOSED so the main screen can show its AI state without fetching
+    // the settings again. Two sources of truth for one fact is what broke the folder list.
+    const state = () => ({ configured: saved.configured, model: saved.model });
+
+    return { renderInto, announce, state, reload: load };
 })();
