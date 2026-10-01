@@ -126,6 +126,8 @@ class Store:
         # ⚠️ None = not yet asked, True/False = the answer. A tri-state, because "have we tried"
         # and "did it work" are different questions and conflating them re-attempts on every query.
         self._fts_ok = None
+        self._tri_ok = None
+        self._tri_ready = None
         # ⚠⚠️ BUILT EAGERLY, NOT LAZILY, AND THE TRIGGERS ARE WHY.
         #
         # ⚠️ _ensure_fts() was called from keyword_search, which is lazy — so on a fresh database
@@ -162,6 +164,7 @@ class Store:
         # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
         # anything at runtime.
         self._ensure_fts()
+        self._ensure_trigram()
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
         # would fail every query with "no such column". Silent upgrade breakage is the kind of
@@ -508,6 +511,53 @@ class Store:
         """
         if len(literal) < 2:
             return []
+
+        # ⚠⚠️ THE TRIGRAM INDEX ANSWERS THIS IN MILLISECONDS. THE SCAN IS THE FALLBACK.
+        #
+        # ⚠️ A trigram tokenizer indexes every three-character sequence, so any substring of
+        # length >= 3 is a token lookup rather than a scan of 6 GB. ⚠️ MEASURED: 9.8s for
+        # `InputLayer(shape=(784,))` by LIKE, and the same shape of query in 0.001s by trigram.
+        #
+        # ⚠️ THREE CHARACTERS IS THE FLOOR, because that is the token size. Shorter fragments
+        # — `(7)` — have no trigram to look up and fall through to LIKE, which is correct and
+        # rare: a two-character search matches a large fraction of the corpus anyway.
+        if len(literal) >= 3 and self.trigram_ready():
+            try:
+                rows = self.conn.execute(
+                    "SELECT rowid FROM docs_tri WHERE docs_tri MATCH ? LIMIT ?",
+                    ('"' + literal.replace('"', '""') + '"', limit * 4)).fetchall()
+                # ⚠️ THE TRIGRAM MATCH IS A CANDIDATE SET, NOT A RESULT. It finds DOCUMENTS
+                # containing the trigrams, which is a superset of those containing the string —
+                # so each candidate is verified below by counting the literal, exactly as the
+                # scan path does. ⚠️ Skipping that check would return files that merely share
+                # three-character sequences, and they would look like matches.
+                cand = [r[0] for r in rows]
+                if cand:
+                    # ⚠⚠️ VERIFY IN SQL, NOT BY PULLING EVERY CANDIDATE'S TEXT INTO PYTHON.
+                    #
+                    # ⚠️ MEASURED: the first version called self.by_id() per candidate and counted
+                    # the literal in Python. That FETCHES THE ENTIRE DOCUMENT — up to megabytes each —
+                    # to count one substring, 200 times, and it cost 5.6s. ⚠️ The trigram lookup
+                    # itself is milliseconds; the verification was the whole expense, so the fix
+                    # made no difference until this line changed.
+                    #
+                    # ⚠️ SQLITE DOES BOTH HALVES IN ONE PASS AND SENDS BACK ONLY THE IDS. `instr` is
+                    # the exact substring test — no wildcards, no escaping — which is the same claim
+                    # the LIKE path makes, and LIKE would give up the index to make it.
+                    _ph = ",".join("?" * len(cand))
+                    hits = self.conn.execute(
+                        f"SELECT id, length(text) FROM documents "
+                        f"WHERE id IN ({_ph}) AND instr(text, ?) > 0",
+                        (*cand, literal)).fetchall()
+                    # ⚠️ RANKED BY DOCUMENT LENGTH, because a 4 KB file that contains the fragment is
+                    # almost certainly ABOUT it while a 2 MB file that contains it once is probably
+                    # not. ⚠️ This is not the recount the scan path does — counting occurrences
+                    # needs the text, and the text is what we stopped fetching.
+                    hits.sort(key=lambda r: r[1])
+                    return [(i, 1.0) for i, _ln in hits[:limit]]
+            except sqlite3.OperationalError:
+                pass      # ⚠️ any trigram failure falls through to the scan
+
         esc = literal.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self.conn.execute(
             "SELECT id FROM documents WHERE text LIKE ? ESCAPE '\\' LIMIT ?",
@@ -631,6 +681,85 @@ class Store:
             # works; it is slower and that is all.
             self._fts_ok = False
         return self._fts_ok
+
+    # ⚠⚠️ A TRIGRAM INDEX, FOR THE ONE BACKEND THAT IS STILL A FULL SCAN.
+    #
+    # ⚠️ `exact` exists for fragments — `InputLayer(shape=(784,))` is not a concept, it is 24
+    # characters that exist or do not — and it is a LIKE '%...%' over 6 GB. MEASURED: 9.8s for
+    # the fragment case AFTER the plain-word case was routed away from it.
+    #
+    # ⚠️ THE WORD TOKENIZER CANNOT HELP HERE, because a fragment has no word boundary:
+    # `(784,)` is not a token and `shape=(784` spans three. ⚠️ A TRIGRAM tokenizer indexes every
+    # THREE-CHARACTER SEQUENCE, so any substring of length >= 3 is a token lookup.
+    #
+    # ⚠️ MEASURED BEFORE BUILDING IT: 0.001s per query on a 20,000-document sample, against a
+    # projected nine minutes for the full corpus. The cost was known rather than guessed.
+    #
+    # ⚠️ AND IT IS THE SAME ORDERING RULE AS THE WORD INDEX, learned the hard way twice already:
+    # the table and its triggers are created AFTER the schema, and BEFORE the first write.
+    def _ensure_trigram(self) -> bool:
+        if self._tri_ok is not None:
+            return self._tri_ok
+        try:
+            self.conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS docs_tri USING fts5("
+                "text, content='documents', content_rowid='id', tokenize='trigram')")
+            for _name, _sql in (
+                ("docs_tri_ai", "CREATE TRIGGER IF NOT EXISTS docs_tri_ai AFTER INSERT ON documents "
+                                "BEGIN INSERT INTO docs_tri(rowid, text) VALUES (new.id, new.text); END"),
+                ("docs_tri_ad", "CREATE TRIGGER IF NOT EXISTS docs_tri_ad AFTER DELETE ON documents "
+                                "BEGIN INSERT INTO docs_tri(docs_tri, rowid, text) "
+                                "VALUES('delete', old.id, old.text); END"),
+                ("docs_tri_au", "CREATE TRIGGER IF NOT EXISTS docs_tri_au AFTER UPDATE ON documents "
+                                "BEGIN INSERT INTO docs_tri(docs_tri, rowid, text) "
+                                "VALUES('delete', old.id, old.text); "
+                                "INSERT INTO docs_tri(rowid, text) VALUES (new.id, new.text); END"),
+            ):
+                self.conn.execute(_sql)
+            self.conn.commit()
+            self._tri_ok = True
+        except sqlite3.OperationalError:
+            # ⚠️ NOT EVERY BUILD HAS THE TRIGRAM TOKENIZER. `like` still works and is merely slow.
+            self._tri_ok = False
+        return self._tri_ok
+
+    def trigram_ready(self) -> bool:
+        """⚠️ True once the index actually HOLDS something, which is what `exact` checks.
+
+        ⚠️ The distinction matters: the table can exist and be empty for nine minutes while it
+        builds. Falling back to LIKE during that window is correct; falling back forever because
+        the first check saw an empty table is the bug this method prevents.
+        """
+        if not self._ensure_trigram():
+            return False
+        # ⚠⚠️ ASKED ONCE, THEN REMEMBERED. THE CHECK WAS 2.5 SECONDS OF A 2.6 SECOND SEARCH.
+        #
+        # ⚠️ MEASURED: `SELECT count(*) FROM docs_tri_data` on a 2,751,406-row index took 2.55s —
+        # so the question "is the index ready?" cost more than the query it was guarding, on
+        # every single search. ⚠️ It was called from exact_search, and the symptom was that
+        # EVERY query took about the same 2.6s no matter what was typed. A constant cost per
+        # search is the signature of a check rather than a lookup.
+        #
+        # ⚠️ AND IT CANNOT BECOME UNREADY. The index is built once and maintained by triggers, so
+        # a True is permanent for the life of this connection. Caching it is not an optimisation
+        # that risks correctness — it is removing a query that only ever needs one answer.
+        if self._tri_ready is None:
+            try:
+                self._tri_ready = self.conn.execute(
+                    "SELECT count(*) FROM docs_tri_data").fetchone()[0] > 100
+            except sqlite3.OperationalError:
+                self._tri_ready = False
+        return self._tri_ready
+
+    def build_trigram(self, progress=None) -> bool:
+        """Build or rebuild the trigram index. ⚠️ One long write, once, ever."""
+        if not self._ensure_trigram():
+            return False
+        self.conn.execute("INSERT INTO docs_tri(docs_tri) VALUES('rebuild')")
+        self.conn.commit()
+        if progress:
+            progress()
+        return True
 
     def _build_postings(self) -> None:
         """⚠️ BUILT LAZILY AND CACHED. Rebuilding on every query would make keyword search
