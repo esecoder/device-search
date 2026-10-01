@@ -330,9 +330,22 @@ kbd {
 /* ⚠⚠️ THE WORKING INDICATOR. A search that takes two seconds with no feedback reads as
    broken, and the user presses enter again — which is how a slow search becomes a busy one.
    ⚠️ It sits in the status row where the trace will appear, so nothing moves when it resolves. */
-#busy {
-  flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.22); border-top-color: #0a84ff;
+/* ⚠️ THE OVERLAY: centred, translucent, and OVER the old list rather than replacing it. */
+#busy-overlay {
+  display: none; position: absolute; inset: 0; z-index: 5;
+  align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.28); border-radius: 12px;
+}
+#busy-overlay.on { display: flex; }
+#busy-overlay .spin {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.25); border-top-color: #0a84ff;
   animation: ds-spin 0.7s linear infinite;
 }
+/* ⚠️ THE SHOW-MORE ROW. Neutral, because it is navigation rather than a result. */
+.more {
+  padding: 9px 14px; font-size: 12px; color: var(--dim); cursor: pointer;
+  text-align: center; border-top: 1px solid var(--sep);
+}
+.more:hover { color: var(--fg); background: rgba(255,255,255,0.05); }
 @keyframes ds-spin { to { transform: rotate(360deg); } }

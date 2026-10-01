@@ -798,7 +798,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not query.strip():
                     self._send(400, {"error": "empty query"})
                     return
-                k = min(int((q.get("k") or ["10"])[0]), 50)
+                # ⚠⚠️ NO CAP. This was the outermost truncation of the lot: even if every layer
+                # below had returned everything, nothing above 50 could reach the user. ⚠️ A
+                # server that decides how many results a person may see is the tool deciding it
+                # knows better than the question.
+                k = max(1, int((q.get("k") or ["50"])[0]))
                 llm = (q.get("llm") or ["0"])[0] == "1"
                 # ⚠️ `ask` TURNS A LIST INTO AN ANSWER. It costs an API call and uploads snippets
                 # (minus anything matching a secret pattern), so it is never the default — and it

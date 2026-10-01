@@ -35,6 +35,11 @@ let askReason = "";
 // looked healthy: the daemon returned 10 results, the request succeeded, the console showed
 // nothing a user would look at.
 let metaInfo = null;
+// ⚠⚠️ HOW MANY ARE DRAWN VS HOW MANY CAME BACK. Everything is RETURNED; this is how much is
+// on screen, and it grows on request. ⚠️ The first version asked the server for 25 and the rest
+// did not exist — the user could not reach them even by scrolling.
+const PAGE = 40;
+let shown = PAGE;
 // ⚠⚠️ WHETHER A MODEL IS CONNECTED, IN STATE RATHER THAN A run() LOCAL.
 //
 // It was declared inside run() and read inside render(), so every question-shaped search threw
@@ -328,7 +333,7 @@ async function run(q) {
   // ⚠⚠️ SHOW THAT WORK IS HAPPENING, FROM THE MOMENT THE KEYSTROKE LANDS.
   // ⚠️ A search that takes two seconds with no feedback reads as broken, and the user presses
   // enter again — which is how a slow search becomes a busy one.
-  if ($("busy")) $("busy").style.display = "";
+  if ($("busy-overlay")) $("busy-overlay").classList.add("on");
   const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
@@ -372,13 +377,14 @@ async function run(q) {
   if ($("q").value.trim() !== q) return;
 
   results = r.results.map((x) => ({ ...x, group: x.lexical ? "match" : "meaning" }));
+  shown = PAGE;      // ⚠️ a new query starts at the top of its own results
   sel = results.findIndex((x) => x.lexical);
   if (sel < 0) sel = 0;
 
   const parts = [`${r.took_ms}ms`, `routed as ${r.kind}`];
   if (r.broadened) parts.push("broadened after an empty first pass");
   if (r.llm && r.llm.blocked) parts.push(`⚠️ ${r.llm.blocked} snippet(s) blocked by the secret interlock`);
-  if ($("busy")) $("busy").style.display = "none";
+  if ($("busy-overlay")) $("busy-overlay").classList.remove("on");
   setStatus("", parts.join(" · "));
   // ⚠⚠️ SHOWN ONLY WHEN THERE IS SOMETHING TO RE-RANK, AND BESIDE WHAT IT ACTS ON.
   //
@@ -426,7 +432,7 @@ function renderInner() {
   // ⚠️ THE SPINNER IS CLEARED HERE, NOT ONLY ON THE SUCCESS PATH. render() runs on every
   // outcome — results, an error, an empty filter — so this is the one place that cannot miss a
   // branch. ⚠️ A spinner that never stops is worse than none: it says "working" forever.
-  if ($("busy")) $("busy").style.display = "none";
+  if ($("busy-overlay")) $("busy-overlay").classList.remove("on");
 
   // ⚠⚠️ THE RE-RANK BUTTON'S VISIBILITY IS DECIDED HERE AND NOWHERE ELSE.
   //
@@ -533,9 +539,14 @@ function renderInner() {
 
   if (!results.length) return;
 
+  // ⚠⚠️ A PAGE, NOT A TRUNCATION. The user asked to see every result and to have pagination
+  // rather than a cut — and both halves matter. ⚠️ Drawing 5,000 rows at once would freeze the
+  // window, which is a WORSE way of hiding them than a cutoff, because it looks like a hang.
+  const _page = results.slice(0, shown);
+
   let lastGroup = null;
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
+  for (let i = 0; i < _page.length; i++) {
+    const r = _page[i];
     if (r.group !== lastGroup) {
       lastGroup = r.group;
       const h = document.createElement("div");
@@ -589,6 +600,18 @@ function renderInner() {
     row.append(type, mid, via);
     row.onclick = () => { sel = i; render(); open(false); };
     box.appendChild(row);
+
+  // ⚠⚠️ AND THE REST ARE ONE CLICK AWAY, WITH THE NUMBER STATED. A silent stop at 40 is
+  // indistinguishable from "there are only 40" — ⚠️ which is why this says how many are left
+  // rather than just offering to load more.
+  if (results.length > shown) {
+    const more = document.createElement("div");
+    more.className = "more";
+    more.textContent = `Show ${Math.min(PAGE, results.length - shown)} more `
+                     + `(${results.length - shown} of ${results.length} not shown)`;
+    more.onclick = () => { shown += PAGE; render(); };
+    box.appendChild(more);
+  }
   }
 }
 

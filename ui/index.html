@@ -47,11 +47,16 @@
          footer link said nothing about what it would act on, and it was visible even with
          nothing on screen to re-rank. -->
     <div id="statusrow">
-      <span id="busy" style="display:none"></span>
       <div id="status"></div>
       <span id="rerank" title="reorder these results with a slower, more accurate model"
             style="display:none">re-rank <kbd>⌘⇧R</kbd></span>
     </div>
+
+    <!-- ⚠⚠️ THE SPINNER IS AN OVERLAY, NOT A DOT IN THE STATUS ROW.
+         The user could not see it. ⚠️ It sits over the PREVIOUS results at low opacity, which
+         says "these are still here, and something is happening to them" — rather than a
+         blank window that reads as a hang. -->
+    <div id="busy-overlay"><div class="spin"></div></div>
 
     <div id="results"></div>
 
