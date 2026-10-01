@@ -106,7 +106,32 @@ class Store:
         # that needs guarding and a half-constructed object must not be reachable.
         self._lock = threading.RLock()
         # ⚠️ check_same_thread=False IS ONLY SAFE WITH THE LOCK ABOVE. See the module note.
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        # ⚠⚠️ WAL AND A LONG BUSY TIMEOUT, BECAUSE AN INDEX RUN HOLDS THE WRITE LOCK FOR MINUTES.
+        #
+        # ⚠️ MEASURED: with the defaults — journal_mode=delete, busy timeout 5s — the DAEMON COULD
+        # NOT START while a crawl was running. `executescript(SCHEMA)` below needs an exclusive
+        # lock, gave up after five seconds, raised `database is locked`, and the process exited.
+        #
+        # ⚠️ AND IT FAILED SILENTLY FROM THE USER'S SIDE: no daemon means no search and no green AI
+        # indicator, which is how this was reported — as the AI pill having disappeared. The pill
+        # was fine. Nothing was answering.
+        #
+        # ⚠️ WAL IS THE ACTUAL FIX, not just a bigger timeout: it lets a READER and a WRITER work
+        # at the same time, so the daemon can serve searches while the indexer is writing. Without
+        # it, no timeout is long enough — a home-directory crawl holds that lock for an hour.
+        #
+        # ⚠️ AND A LONG TIMEOUT COVERS THE REMAINING CASE, where the schema script itself needs to
+        # write while a crawl is mid-batch. Better to wait a few seconds than to refuse to start.
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30)
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            # ⚠️ AND A SHORT WAIT FOR THE WRITER rather than an instant failure, so a search during
+            # a batch blocks for a moment instead of erroring.
+            self.conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError:
+            # ⚠️ A DATABASE THAT CANNOT SWITCH TO WAL IS STILL USABLE. Refusing to start over a
+            # performance setting would turn a slow search into no search.
+            pass
         self.conn.executescript(SCHEMA)
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
