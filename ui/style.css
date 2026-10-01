@@ -349,3 +349,20 @@ kbd {
 }
 .more:hover { color: var(--fg); background: rgba(255,255,255,0.05); }
 @keyframes ds-spin { to { transform: rotate(360deg); } }
+
+/* ⚠⚠️ THE INDETERMINATE BAR FOR A SCAN. Motion without a claim.
+   ⚠️ It says "working" and refuses to say "this much", because during a scan the second thing
+   is not knowable — and the last time the app claimed it, it showed 100% from a different run
+   and held it for the whole crawl.
+   ⚠️ A window with nothing moving, while a prompt is up and the disk is being walked, reads
+   as hung. This is the difference between "working" and "finished", which the user could not
+   previously tell apart. */
+#banner-bar.moving #banner-fill {
+  width: 30% !important;
+  animation: ds-slide 1.15s ease-in-out infinite;
+}
+@keyframes ds-slide {
+  0%   { margin-left: 0; }
+  50%  { margin-left: 70%; }
+  100% { margin-left: 0; }
+}

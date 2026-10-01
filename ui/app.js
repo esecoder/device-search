@@ -191,12 +191,34 @@ function applyIndexState(h) {
   const fill = $("banner-fill");
   const gauge = $("banner-bar");
 
+  // ⚠⚠️ THREE STATES, NOT TWO, AND THE THIRD IS THE ONE THE USER ASKED FOR.
+  //
+  //   pct == null        deliberately absent (not busy)          -> no bar
+  //   pct == "moving"    busy, but the total is NOT KNOWABLE     -> INDETERMINATE bar
+  //   pct is a number    the fraction is real                    -> measured bar
+  //
+  // ⚠️ A SCAN CANNOT HAVE A PERCENTAGE. The total is not knowable until the walk ends — that is
+  // what a scan IS — and the previous attempt to show one produced "100%" from a DIFFERENT RUN
+  // held for the whole crawl.
+  //
+  // ⚠️ BUT NO BAR AT ALL IS ALSO WRONG: a window that shows nothing moving, while a permission
+  // prompt is up and the disk is being walked, reads as hung. The user's report was that there
+  // was no way to tell whether indexing was finished.
+  //
+  // ⚠️ SO THE CRAWL GETS AN INDETERMINATE BAR — motion without a claim. It says "working"
+  // without saying "this much", which is exactly what is known. macOS uses the same treatment
+  // for the same reason.
   const show = (cls, msg, pct) => {
     bar.className = "show " + cls;
     text.textContent = msg;
     if (pct == null) {
-      gauge.classList.remove("show");
+      gauge.classList.remove("show", "moving");
+      fill.style.width = "0%";
+    } else if (pct === "moving") {
+      gauge.classList.add("show", "moving");
+      fill.style.width = "";
     } else {
+      gauge.classList.remove("moving");
       gauge.classList.add("show");
       fill.style.width = Math.max(1, Math.min(100, pct)) + "%";
     }
@@ -239,7 +261,9 @@ function applyIndexState(h) {
              + (live.note ? "" : "…")
            : `Reading meaning into your files — ${(pct || 0).toFixed(0)}%`
              + (live.elapsed_seconds != null ? `, ${fmtEta(live.elapsed_seconds)} so far` : ""),
-         pct);
+         // ⚠️ "moving" DURING A SCAN, THE NUMBER DURING EMBEDDING. Passing `pct` here — which
+         // is null while crawling — is why the bar was still absent after the first attempt.
+         crawling ? "moving" : pct);
 
     // ⚠️ The ETA sits in the FOOTER with the document count. Two numbers in one 12px line makes
     // both of them unreadable.
