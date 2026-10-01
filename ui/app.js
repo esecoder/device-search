@@ -144,7 +144,32 @@ async function boot() {
       pill.title = on ? `using ${lr.model || "your model"} — click to change` : "";
     } catch (e) { pill.style.display = "none"; }
   };
-  refreshAI();
+  // ⚠⚠️ AND IT MUST RETRY, BECAUSE AT PAGE LOAD THE DAEMON IS USUALLY NOT UP YET.
+  //
+  // ⚠️ This was called ONCE. The daemon takes tens of seconds to start — it loads the
+  // embedding model first — so the very first /api/llm almost always fails, the catch hides
+  // the pill, and NOTHING EVER ASKS AGAIN. The connection is fine; the check gave up.
+  //
+  // ⚠️ THE SAME BUG AS THE HEALTH CHECK THAT RAN AT t=0 AND NEVER AGAIN. A one-shot probe of
+  // a service that starts asynchronously reports "not there" as a permanent fact.
+  const retryAI = (n) => {
+    refreshAI().then(() => {
+      const pill = $("aipill");
+      // ⚠️ STOP WHEN IT IS SHOWING, OR AFTER ~20 ATTEMPTS. Retrying forever on a machine with
+      // no model configured would hammer an endpoint that is answering correctly.
+      if (pill && pill.style.display !== "none") return;
+      if (n > 0) setTimeout(() => retryAI(n - 1), 3000);
+    });
+  };
+  retryAI(20);
+  
+  // ⚠⚠️ AND EVERY TIME THE WINDOW REAPPEARS. This is a Spotlight-shaped window: it is hidden
+  // and shown constantly, and the daemon may have started, stopped or been restarted in
+  // between. ⚠️ A pill that is right once at launch and stale afterwards is worse than none,
+  // because the user reads it as the current state.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAI();
+  });
   // ⚠️ AND WHENEVER THE MODEL PANEL CLOSES. Connecting a model must make the answer toggle
   // appear immediately; waiting for a relaunch reads as the connection having failed.
   window.addEventListener("ds:model-changed", refreshAI);
