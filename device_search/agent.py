@@ -281,7 +281,45 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
                 # fusion could only ever see 40, so an answer at rank 41 did not exist. ⚠️ The user
                 # asked to see everything and to paginate rather than truncate - so the backends
                 # return what they have and the interface decides what to DRAW.
-                out[b] = store.exact_search(query, limit=PER_BACKEND)
+                # ⚠⚠️ THE EXACT BACKEND IS FOR FRAGMENTS. RUNNING IT ON EVERYTHING COST 4.4 SECONDS.
+                #
+                # ⚠️ MEASURED AT 859,569 DOCUMENTS: `exact` was 4.39s of a 6.1s search — a LIKE
+                # '%...%' over 6 GB of text. The docstring has always said so:
+                #
+                #     "LIKE '%...%' IS A FULL SCAN and that is accepted ... The alternative — a
+                #      suffix automaton or n-gram inverted index — is the correct engineering
+                #      answer at 100x this corpus and the wrong one for a first version."
+                #
+                # ⚠️ WE ARE NOW AT 100x THAT CORPUS. The docstring named the threshold and we
+                # crossed it. (Trigram FTS5 is the answer for the fragments; it is measured and
+                # queued, and it needs a nine-minute build.)
+                #
+                # ⚠️ BUT THE SCAN IS ONLY NEEDED FOR WHAT IT IS FOR. `exact` exists because
+                # `InputLayer(shape=(784,))` is not a concept — it is 24 characters that exist
+                # or do not. ⚠️ A QUERY OF ORDINARY WORDS IS ALREADY ANSWERED BY `keyword`, which
+                # now runs on FTS5 in milliseconds, so scanning 6 GB to re-find the same rows is
+                # paying the most expensive backend for the least information.
+                #
+                # ⚠️ SO IT RUNS WHEN THE QUERY LOOKS LIKE A FRAGMENT: punctuation, an
+                # extension, a quoted string, an identifier. "screenshot" does not and skips it;
+                # "InputLayer(shape=(784,))" and "db_acl.php" do and get it.
+                # ⚠⚠️ AND NOT FOR A FILENAME EITHER, WHICH IS THE OTHER COMMON CASE.
+                #
+                # ⚠️ MEASURED: "db_acl.php" took 7.35s, almost all of it `exact` scanning 6 GB for
+                # a string that `path_search` had already found in 0.73s. ⚠️ A query that names a
+                # file is answered by the name, and the extension is what says so.
+                #
+                # ⚠️ SO THE TEST IS "IS THIS A FRAGMENT", NOT "DOES IT CONTAIN PUNCTUATION". A
+                # filename contains a dot; a code fragment contains brackets, quotes, operators.
+                # The dot is the one piece of punctuation that means the answer is a path.
+                _is_name = bool(re.match(r"^[\w\-]+\.[A-Za-z0-9]{1,6}$", query.strip()))
+                _frag = (bool(re.search(r"[^\w\s.]", query)) and not _is_name)
+                if not _frag:
+                    # ⚠️ AN EMPTY LIST, NOT A MISSING KEY. The fusion iterates the backends that
+                    # ran; a missing key would make "exact" look like a backend that failed.
+                    out[b] = []
+                else:
+                    out[b] = store.exact_search(query, limit=PER_BACKEND)
             elif b == "path":
                 out[b] = store.path_search(query, limit=PER_BACKEND)
             elif b == "keyword":

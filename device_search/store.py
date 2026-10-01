@@ -126,6 +126,16 @@ class Store:
         # ⚠️ None = not yet asked, True/False = the answer. A tri-state, because "have we tried"
         # and "did it work" are different questions and conflating them re-attempts on every query.
         self._fts_ok = None
+        # ⚠⚠️ BUILT EAGERLY, NOT LAZILY, AND THE TRIGGERS ARE WHY.
+        #
+        # ⚠️ _ensure_fts() was called from keyword_search, which is lazy — so on a fresh database
+        # the table and its triggers did not exist yet when the first documents were inserted.
+        # MEASURED: a fresh index where the very first insert was already invisible to keyword
+        # search, because nothing was listening when it happened.
+        #
+        # ⚠️ LAZY IS FINE FOR A CACHE AND WRONG FOR ANYTHING THAT MUST OBSERVE EVENTS. A trigger
+        # only fires from the moment it exists, so setting one up at read time misses every write
+        # that came before.
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
             # ⚠️ AND A SHORT WAIT FOR THE WRITER rather than an instant failure, so a search during
@@ -136,6 +146,22 @@ class Store:
             # performance setting would turn a slow search into no search.
             pass
         self.conn.executescript(SCHEMA)
+        # ⚠⚠️ EAGERLY, AND AFTER THE SCHEMA — THE ORDER IS THE WHOLE POINT.
+        #
+        # ⚠️ Two mistakes in a row, both silent:
+        #   1. called from keyword_search, which is lazy — so the triggers did not exist when the
+        #      first documents were inserted, and a fresh index had its own first files invisible
+        #   2. then called EAGERLY but BEFORE this line — so `content='documents'` referenced a table
+        #      that did not exist yet, the CREATE failed, _fts_ok stayed False, and keyword search
+        #      fell back to the Python BM25 forever without saying so
+        #
+        # ⚠️ BOTH LOOKED LIKE SUCCESS. The first returned results, just not all of them; the
+        # second returned results, just slowly. Neither raised anything a caller would see.
+        #
+        # ⚠️ THE RULE: A TRIGGER MUST EXIST BEFORE THE FIRST WRITE, AND A TABLE MUST EXIST BEFORE
+        # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
+        # anything at runtime.
+        self._ensure_fts()
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
         # would fail every query with "no such column". Silent upgrade breakage is the kind of
@@ -569,6 +595,36 @@ class Store:
                 # this safe to add to an existing database that was written before the table.
                 self.conn.execute("INSERT INTO docs_fts(docs_fts) VALUES('rebuild')")
                 self.conn.commit()
+            # ⚠⚠️ TRIGGERS, BECAUSE AN EXTERNAL-CONTENT FTS TABLE DOES NOT MAINTAIN ITSELF.
+            #
+            # ⚠️ MEASURED: a document inserted after the index was built was INVISIBLE to keyword
+            # search — zero hits before a restart and zero hits after one. FTS5 with
+            # content='documents' stores no text of its own, so it has no way to know a row
+            # changed; the CONTENT table has to tell it.
+            #
+            # ⚠️ AND NOTHING ELSE WOULD HAVE CAUGHT THIS. The index builds, the counts match, the
+            # searches are instant, and every file added after that point is silently unsearchable
+            # by keyword — which looks exactly like the file not existing.
+            #
+            # ⚠️ THIS IS SQLITE'S OWN DOCUMENTED PATTERN for external-content FTS5: three triggers
+            # on the content table, one per operation. The 'delete' row the triggers insert is a
+            # command to the FTS index, not a row of data — it is how an external-content index is
+            # told to forget the old terms.
+            for _name, _sql in (
+                ("docs_fts_ai", "CREATE TRIGGER IF NOT EXISTS docs_fts_ai AFTER INSERT ON documents BEGIN "
+                                "INSERT INTO docs_fts(rowid, text) VALUES (new.id, new.text); END"),
+                ("docs_fts_ad", "CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON documents BEGIN "
+                                "INSERT INTO docs_fts(docs_fts, rowid, text) "
+                                "VALUES('delete', old.id, old.text); END"),
+                # ⚠️ THE UPDATE TRIGGER DELETES THEN RE-INSERTS, and the ORDER matters: a delete
+                # without the old text leaves stale terms behind that match forever.
+                ("docs_fts_au", "CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON documents BEGIN "
+                                "INSERT INTO docs_fts(docs_fts, rowid, text) "
+                                "VALUES('delete', old.id, old.text); "
+                                "INSERT INTO docs_fts(rowid, text) VALUES (new.id, new.text); END"),
+            ):
+                self.conn.execute(_sql)
+            self.conn.commit()
             self._fts_ok = True
         except sqlite3.OperationalError:
             # ⚠️ NOT COMPILED IN, OR AN OLD FILE THAT CANNOT TAKE THE TABLE. The Python path still
@@ -611,7 +667,20 @@ class Store:
         # caches, so the second query was 0.06s — but the first call happens on every daemon
         # restart, which is what the user experiences as the app being broken.
         if self._ensure_fts():
-            toks = [t for t in tokenize(query) if t.isalnum()]
+            # ⚠⚠️ `.isalnum()` DROPPED EVERY IDENTIFIER WITH AN UNDERSCORE OR A DOT IN IT.
+            #
+            # ⚠️ MEASURED: the FTS index matched `unique_token_xyz` and `db_acl.php` perfectly — a raw
+            # MATCH returned the row — and the search returned ZERO, because `"_".isalnum()` is
+            # False and the token was filtered out before it reached the query.
+            #
+            # ⚠️ THIS IS A FILE SEARCH TOOL. Underscores, dots and hyphens are in most filenames and
+            # most code identifiers, so the filter removed exactly the tokens the product exists to
+            # find — and it did it silently, by returning an empty result rather than an error.
+            #
+            # ⚠️ SO NOTHING IS FILTERED. The tokens are QUOTED below, which is what makes FTS5 treat
+            # them as literal strings, so a token containing punctuation cannot be parsed as
+            # syntax. Filtering was never needed; quoting is the mechanism.
+            toks = [t for t in tokenize(query) if t.strip()]
             if not toks:
                 return []
             # ⚠️ QUOTED AND OR-JOINED. FTS5 treats AND, OR, NOT, NEAR and * as operators, so a
