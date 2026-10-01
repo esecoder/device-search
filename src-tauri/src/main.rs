@@ -48,6 +48,25 @@ struct Daemon(Mutex<Option<Child>>);
 static DIALOG_OPEN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+// ⚠⚠️ AND WHETHER THE APP IS DOING WORK THE USER ASKED FOR.
+//
+// ⚠️ HIDE-ON-BLUR IS CORRECT FOR A SPOTLIGHT BOX AND WRONG FOR ONE THAT IS BUSY. macOS shows
+// permission prompts — Desktop, Documents, Downloads — as SYSTEM MODALS, so they take focus,
+// the window sees Focused(false), and it hides. The user is left staring at a prompt whose
+// parent window has vanished, with no way to tell whether the app crashed.
+//
+// ⚠️ A WINDOW THAT HIDES DURING AN OPERATION THE USER STARTED LOOKS LIKE A CRASH, and the
+// permission prompt it left behind looks like the cause. It is the app, not macOS.
+static BUSY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[tauri::command]
+fn set_busy(busy: bool) {
+    // ⚠️ THE INTERFACE DECIDES WHEN IT IS BUSY, because it is the only thing that knows:
+    // indexing, repairing, and a question being answered all look different from here.
+    BUSY.store(busy, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// ⚠️ WHERE THE PYTHON LIVES IS CONFIGURATION, NOT A CONSTANT. In development the venv is a
 /// sibling directory; in a packaged app it would be a bundled sidecar. Guessing one path is how
 /// an app works on the author's machine and nowhere else.
@@ -285,7 +304,15 @@ pub fn run() {
                     if let tauri::WindowEvent::Focused(false) = ev {
                         // ⚠️ UNLESS A DIALOG IS UP. Hiding the parent of a modal dialog closes the
                         // dialog too, so focus loss caused by our own picker must not hide anything.
-                        if !DIALOG_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+                        // ⚠⚠️ TWO REASONS NOT TO HIDE, AND THE SECOND WAS THE USER'S REPORT.
+                        //
+                        // ⚠️ A dialog of ours is up: hiding its parent closes the dialog.
+                        // ⚠️ AND THE APP IS BUSY: a system permission prompt takes focus, and hiding
+                        // behind it makes the app look like it crashed at the moment the user is
+                        // being asked to grant it access.
+                        let dlg = DIALOG_OPEN.load(std::sync::atomic::Ordering::SeqCst);
+                        let busy = BUSY.load(std::sync::atomic::Ordering::SeqCst);
+                        if !dlg && !busy {
                             let _ = w2.hide();
                         }
                     }
@@ -293,7 +320,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![read_token, daemon_port, open_path,
+        .invoke_handler(tauri::generate_handler![read_token, daemon_port, open_path, set_busy,
                                                hide_window, pick_folder])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

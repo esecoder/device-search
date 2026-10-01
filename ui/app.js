@@ -204,15 +204,43 @@ function applyIndexState(h) {
 
   const live = h.live || {};
   const working = h.indexing || live.running;
-  const pct = live.percent != null ? live.percent : (h.embedding_percent || 0);
+
+  // ⚠⚠️ TELL THE SHELL, SO IT DOES NOT HIDE WHILE PERMISSION IS BEING ASKED FOR.
+  // ⚠️ macOS shows the Desktop/Documents/Downloads prompts as SYSTEM MODALS, which take
+  // focus; hide-on-blur then makes the window vanish behind the prompt and the app looks
+  // like it crashed at the exact moment the user is granting it access.
+  try {
+    if (window.__TAURI__ && window.__TAURI__.core) {
+      window.__TAURI__.core.invoke("set_busy", { busy: !!working });
+    }
+  } catch (e) { /* outside the shell: nothing to tell */ }
+  // ⚠⚠️ NO FALLBACK TO A STALE PERCENTAGE. THIS LINE WAS THE “STUCK AT 100%” BUG.
+  //
+  // It read:  live.percent != null ? live.percent : (h.embedding_percent || 0)
+  //
+  // ⚠️ During a crawl the live percent is null — a scan has no knowable total — so it fell
+  // back to `embedding_percent`, the value the PREVIOUS completed run left on disk. That is
+  // 100. ⚠️ So the banner said “Updating your search index — 100%” for the entire time a
+  // home directory was being walked.
+  //
+  // ⚠️ A PERCENTAGE FROM A DIFFERENT RUN IS NOT A PERCENTAGE. If the live value is absent the
+  // honest thing is no bar, and a description of the phase instead.
+  const crawling = live.stage === "crawling";
+  const pct = crawling ? null : live.percent;
 
   if (working) {
     // ⚠️ "UPDATING", NOT "INDEXING". Indexing is our word; updating is what the user
     // experiences — their search catching up with their files.
     show("info",
-         pct > 0 ? `Updating your search index — ${pct.toFixed(0)}%`
-                 : "Updating your search index…",
+         crawling
+           ? `${live.note || "Looking through your files"}`
+             + (live.files_seen != null ? ` — ${live.files_seen.toLocaleString()} found` : "")
+             + (live.elapsed_seconds != null ? `, ${fmtEta(live.elapsed_seconds)} so far` : "")
+             + (live.note ? "" : "…")
+           : `Reading meaning into your files — ${(pct || 0).toFixed(0)}%`
+             + (live.elapsed_seconds != null ? `, ${fmtEta(live.elapsed_seconds)} so far` : ""),
          pct);
+
     // ⚠️ The ETA sits in the FOOTER with the document count. Two numbers in one 12px line makes
     // both of them unreadable.
     if (live.eta_seconds && $("activity")) {

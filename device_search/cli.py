@@ -128,13 +128,42 @@ def cmd_index(args) -> int:
     print(f"  index already knows about {len(known):,} files")
     docs = walk(roots, include_deps=include_deps, known=known)
     batch, total, indexed = [], 0, 0
+    _t0_crawl = time.time()
     for doc in docs:
         batch.append(doc)
+        total += 1
+
+        # ⚠⚠️ THE CRAWL MUST REPORT ITSELF. ITS SILENCE WAS THE ENTIRE “STUCK AT 100%” BUG.
+        #
+        # ⚠️ Nothing wrote status between “start” and “embedding”, so for the whole of a large
+        # scan the interface read the LAST value on disk — 100%, from the previous run that
+        # finished. The user watched a completed bar while their home directory was walked.
+        #
+        # ⚠️ A BAR AT 100% SAYS “FINISHED” IN THE ONE SITUATION WHERE THE APP IS WORKING HARDEST,
+        # and nothing tells the user whether it is still going or has hung.
+        #
+        # ⚠️ A SCAN CANNOT HAVE A PERCENTAGE. The total is not knowable until the walk ends —
+        # that is what a scan IS — and inventing one is how a bar ends up lying. So the crawl
+        # reports what it genuinely knows: how many it has found, how long it has been going,
+        # and which phase it is in. percent=None is deliberate and the interface reads it.
+        if total % 500 == 0:
+            write_status(INDEX_DIR, stage="crawling", finished=False,
+                         files_seen=total, documents_done=indexed,
+                         elapsed_seconds=int(time.time() - _t0_crawl),
+                         started=_t0_crawl, percent=None, eta_seconds=0)
         if len(batch) >= 500:
             store.add_many(batch)
             indexed += len(batch)
             batch = []
             print(f"    … {indexed:,} written", flush=True)
+    # ⚠️ AND WHEN THE WALK ENDS, SAY SO. Otherwise the bar holds the crawl’s last value
+    # while the store is pruned and the vector plan is built — same stale status, one phase on.
+    write_status(INDEX_DIR, stage="crawling", finished=False,
+                 files_seen=total, documents_done=indexed,
+                 elapsed_seconds=int(time.time() - _t0_crawl),
+                 started=_t0_crawl, percent=None, eta_seconds=0,
+                 note="scan complete — preparing to read meaning")
+
     if batch:
         store.add_many(batch)
         indexed += len(batch)
