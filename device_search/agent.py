@@ -112,6 +112,12 @@ def classify(query: str) -> dict:
 # =============================================================================
 # 3. MERGE — Reciprocal Rank Fusion
 # =============================================================================
+# ⚠️ HOW MANY EACH BACKEND MAY OFFER TO THE FUSION. Not a display limit — the interface
+# paginates — but the BM25 and vector scans are O(corpus) and an unbounded list per backend
+# would make every keystroke pay for results nobody scrolls to.
+PER_BACKEND = 400
+
+
 def rrf(rank_lists: dict, k: int = 60, weights: dict | None = None) -> list[tuple]:
     """⚠️ RRF, NOT SCORE SUMMATION, AND THE REASON IS CONCRETE: BM25 scores are unbounded and
     cosine similarities live in [-1, 1]. Adding them lets one backend's scale silently decide
@@ -271,11 +277,15 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
             ordered.append("semantic")
         for b in ordered:
             if b == "exact":
-                out[b] = store.exact_search(query, limit=40)
+                # ⚠️ THE LIMIT IS THE PAGE, NOT THE ANSWER. Asking for 40 per backend meant the
+                # fusion could only ever see 40, so an answer at rank 41 did not exist. ⚠️ The user
+                # asked to see everything and to paginate rather than truncate - so the backends
+                # return what they have and the interface decides what to DRAW.
+                out[b] = store.exact_search(query, limit=PER_BACKEND)
             elif b == "path":
-                out[b] = store.path_search(query, limit=40)
+                out[b] = store.path_search(query, limit=PER_BACKEND)
             elif b == "keyword":
-                out[b] = store.keyword_search(query, limit=40)
+                out[b] = store.keyword_search(query, limit=PER_BACKEND)
             elif b == "semantic":
                 if semantic is None:
                     continue
@@ -358,7 +368,7 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
                                parse as _mparse, run as _mrun)
         _mf = _mparse(query)
         if _mf:
-            results["meta"] = _mrun(store, _mf, limit=40)
+            results["meta"] = _mrun(store, _mf, limit=PER_BACKEND)
             trace["meta"] = {"filters": _mf, "explain": _mdesc(_mf),
                              "hits": len(results["meta"])}
 
@@ -452,11 +462,64 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
             _id, _path, _wx = (_h[0], _h[1], _h[2]) if len(_h) == 3 else (_h[0], None, _h[1])
             _by_backend.setdefault(_b, []).append(_id if _id is not None else _path)
 
+    # ⚠⚠️ ORDER BY WHAT WAS ASKED, THEN BLEND THE REST. THE ROUND-ROBIN WAS OVER-CORRECTING.
+    #
+    # ⚠️ The first version interleaved strictly, one from each backend in turn. That fixed "every
+    # result is tagged path" by defeating the ordering: a query about a FOLDER put a keyword
+    # match second, ahead of the second-best folder. ⚠️ The user's words: "include every matches
+    # but ordering should not sacrificed."
+    #
+    # ⚠️ SO THERE ARE TWO REGIONS, NOT ONE SEQUENCE:
+    #
+    #     1. THE PRIMARY BACKEND'S RESULTS, in their own order — a folder query leads with
+    #        folders, a size query leads with the sizes that matched.
+    #     2. THEN EVERYTHING ELSE, interleaved — still blended, because "the file that mentions
+    #        screenshots" belongs in the list, just not above the folder called Screenshots.
+    #
+    # ⚠️ WHAT DECIDES PRIMARY IS THE QUERY ITSELF, not a fixed preference: the filters if there
+    # are filters, the route if the words look like a name, and the text backends otherwise.
+    _kind = trace.get("plan", {}).get("kind")
+    _meta = trace.get("meta", {})
+    # ⚠⚠️ A STRONG NAME MATCH IS THE INTENT, WHATEVER THE ROUTER CALLED THE QUERY.
+    #
+    # ⚠️ The router classifies "screenshot" as `prose` — one word, no punctuation, nothing that
+    # says "filename" to a regex. So keyword took the lead and the user, who meant the FOLDER,
+    # got documents containing the word first.
+    #
+    # ⚠️ path_search already knows the difference: 12.0 for a folder named exactly the query, 6.0
+    # for a file, 3.0 for a name that starts with it, 2.0 for one that contains it. ⚠️ ANYTHING
+    # ABOVE A MERE CONTAINMENT MEANS THE USER NAMED A THING. That is better evidence than the
+    # route, because it comes from what is actually on disk.
+    _path_top = max((sc for _i, sc in results.get("path", [])), default=0.0)
+    if _meta.get("pure_filter"):
+        _primary = "meta"          # "1mb files" - the answer is the set that matched
+    elif _path_top >= 3.0:
+        _primary = "path"          # ⚠️ a real name match outranks any route guess
+    elif _kind == "filename":
+        _primary = "path"          # "where is config.py"
+    elif _kind == "code":
+        _primary = "exact"         # an identifier: exact symbol beats a fuzzy name
+    else:
+        _primary = "keyword"       # prose: the words are the evidence
+    # ⚠️ IF THE PRIMARY FOUND NOTHING, the next-strongest takes the lead rather than leaving
+    # the top of the list to whatever happens to be first in the dict.
+    if not _by_backend.get(_primary):
+        _primary = max(_by_backend, key=lambda b: _weights.get(b, 1.0)) if _by_backend else None
+    trace.setdefault("meta", {})["primary"] = _primary
+
     _seen: set = set()
     _interleaved: list = []
-    _order = sorted(_by_backend, key=lambda b: -_weights.get(b, 1.0))
+    # ⚠️ REGION 1: the primary backend, untouched.
+    for _id in _by_backend.get(_primary, []):
+        if _id not in _seen:
+            _seen.add(_id)
+            _interleaved.append(_id)
+    # ⚠️ REGION 2: everything else, interleaved by weight.
+    _order = sorted((b for b in _by_backend if b != _primary),
+                    key=lambda b: -_weights.get(b, 1.0))
     _cursors = {b: 0 for b in _order}
-    while len(_interleaved) < len(fused):
+    _total = sum(len(v) for v in _by_backend.values())
+    while len(_interleaved) < _total:
         _progress = False
         for _b in _order:
             _lst, _i = _by_backend[_b], _cursors[_b]
@@ -484,7 +547,10 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # 30 slots for the output of four backends means the fusion decides by VOLUME rather than by
     # agreement: any list that returns more rows crowds out the others. ⚠️ The fused ranking is
     # already weight-aware, so there is nothing to protect by truncating early.
-    for _key, _info, score in fused[:max(top_k * 20, 200)]:
+    # ⚠⚠️ AND NOTHING IS CUT HERE AT ALL. This slice was the last place a real result could
+    # disappear without the user being told, and "we found it but did not show it" is the one
+    # outcome a search tool must never produce silently.
+    for _key, _info, score in fused:
         doc_id, path = _info["doc_id"], _info["path"]
         # ⚠⚠️ A RESULT WITH NO ROW IS NOT A RESULT TO DISCARD — IT IS A SKIPPED FILE.
         #
