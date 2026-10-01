@@ -120,6 +120,38 @@ def read_status(index_dir: Path) -> dict:
     except Exception:
         return {"running": False, "reason": "unreadable status file"}
     pid = d.get("pid")
+
+    # ⚠⚠️ THE PID IS CHECKED EVEN WHEN THE FILE SAYS "FINISHED", AND THAT ORDER WAS THE BUG.
+    #
+    # ⚠️ It used to return here the moment `finished` was set, without ever asking the OS. But the
+    # file is written by WHICHEVER RUN WROTE LAST, and a second run can start while the first is
+    # still going. ⚠️ Reported: the status said "done, 100%" and named pid 95039, which was dead,
+    # while pid 30127 held the database lock for two hours and eleven minutes.
+    #
+    # ⚠️ SO "FINISHED" IS A CLAIM BY ONE PROCESS ABOUT A FILE THAT ANOTHER PROCESS MAY HAVE
+    # OVERWRITTEN. `os.kill(pid, 0)` is the only thing here that is evidence rather than assertion
+    # — it asks the operating system, which cannot be mistaken about whether a process exists.
+    #
+    # ⚠️ AND A LIVE PID THAT IS STILL WORKING WINS OVER A FLAG IN THE FILE. If the process named by
+    # the status is alive, something IS running, whatever the file says about it.
+    if pid:
+        try:
+            os.kill(pid, 0)
+            # ⚠️ ALIVE. Trust the process, not the file: `finished` may have been written by a
+            # different run, and the one holding the lock is this one.
+            d["running"] = True
+            if d.get("finished"):
+                d["reason"] = (f"pid {pid} is still running, though the status file was "
+                               f"written by a different run and says it finished")
+            return d
+        except (OSError, ProcessLookupError):
+            # ⚠️ THE PROCESS NAMED BY THE FILE IS GONE. A killed process cannot clean up after
+            # itself, so the file is not evidence that anything is happening.
+            d["running"] = False
+            if not d.get("finished"):
+                d["reason"] = f"the process that was indexing ({pid}) is gone"
+            return d
+
     if d.get("finished"):
         d["running"] = False
         return d

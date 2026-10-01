@@ -105,6 +105,29 @@ def cmd_setup(args) -> int:
 # =============================================================================
 def cmd_index(args) -> int:
     ensure_index_dir()
+
+    # ⚠⚠️ ONE INDEX AT A TIME, AND THIS CHECK WAS MISSING ENTIRELY.
+    #
+    # ⚠️ MEASURED, AND IT COST THE USER TWO HOURS: a run started while another was going. The
+    # second wrote its own status, which said "finished", while the first kept walking a home
+    # directory and kept the database lock. The daemon then could not start, so there was no
+    # search and no AI indicator — and the user reasonably reported it as a missing button.
+    #
+    # ⚠️ SO `read_status` IS ASKED BEFORE ANYTHING IS TOUCHED. It decides by PID LIVENESS, not by
+    # the flag in the file, because the flag is written by whichever run wrote last and the
+    # process holding the lock is a different one.
+    from .vectors import read_status
+    live = read_status(INDEX_DIR)
+    if live.get("running"):
+        pid = live.get("pid")
+        print(f"  ✗ an index is already running (pid {pid}).")
+        print(f"    Starting a second one would have them overwrite each other's progress and")
+        print(f"    fight over the database lock — which also stops the search engine starting.")
+        print(f"    Wait for it, or stop it with:  kill {pid}")
+        # ⚠️ NON-ZERO, because the caller MUST be able to tell that no work started. The daemon's
+        # auto-repair reads this exit code to decide whether to report a failure.
+        return 3
+
     store = Store(DB_PATH)
     roots = [Path(p) for p in store.get_meta("roots", [])]
     if not roots:
