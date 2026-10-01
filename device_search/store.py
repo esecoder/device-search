@@ -126,7 +126,7 @@ class Store:
         # ⚠️ None = not yet asked, True/False = the answer. A tri-state, because "have we tried"
         # and "did it work" are different questions and conflating them re-attempts on every query.
         self._fts_ok = None
-        self._tri_ok = None
+        self._tri_conn = None      # ⚠️ the separate connection, lazily opened
         self._tri_ready = None
         # ⚠⚠️ BUILT EAGERLY, NOT LAZILY, AND THE TRIGGERS ARE WHY.
         #
@@ -164,7 +164,6 @@ class Store:
         # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
         # anything at runtime.
         self._ensure_fts()
-        self._ensure_trigram()
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
         # would fail every query with "no such column". Silent upgrade breakage is the kind of
@@ -682,84 +681,116 @@ class Store:
             self._fts_ok = False
         return self._fts_ok
 
-    # ⚠⚠️ A TRIGRAM INDEX, FOR THE ONE BACKEND THAT IS STILL A FULL SCAN.
+    # ⚠⚠️ THE TRIGRAM INDEX LIVES IN ITS OWN FILE, BECAUSE IT MADE ANOTHER BACKEND 12x SLOWER.
     #
-    # ⚠️ `exact` exists for fragments — `InputLayer(shape=(784,))` is not a concept, it is 24
-    # characters that exist or do not — and it is a LIKE '%...%' over 6 GB. MEASURED: 9.8s for
-    # the fragment case AFTER the plain-word case was routed away from it.
+    # ⚠️ MEASURED, AND IT IS THE REASON THIS WAS MOVED:
     #
-    # ⚠️ THE WORD TOKENIZER CANNOT HELP HERE, because a fragment has no word boundary:
-    # `(784,)` is not a token and `shape=(784` spans three. ⚠️ A TRIGRAM tokenizer indexes every
-    # THREE-CHARACTER SEQUENCE, so any substring of length >= 3 is a token lookup.
+    #       exact (fragment)   10.7s  ->  0.015s     the thing it was built for  ✅
+    #       path                0.73s ->  9.16s      ⚠️ 12x slower, and never mentioned
+    #       index.db            8.6GB ->  19.4GB     ⚠️ 11GB of trigram data
     #
-    # ⚠️ MEASURED BEFORE BUILDING IT: 0.001s per query on a 20,000-document sample, against a
-    # projected nine minutes for the full corpus. The cost was known rather than guessed.
+    # ⚠️ A TRIGRAM INDEX IS ROUGHLY TWICE THE SIZE OF THE TEXT IT INDEXES. Inside the same file it
+    # interleaves with the `documents` table, so path_search's LIKE scan reads scattered pages,
+    # and a live search went from ~2s to ~13s.
     #
-    # ⚠️ AND IT IS THE SAME ORDERING RULE AS THE WORD INDEX, learned the hard way twice already:
-    # the table and its triggers are created AFTER the schema, and BEFORE the first write.
-    def _ensure_trigram(self) -> bool:
-        if self._tri_ok is not None:
-            return self._tri_ok
+    # ⚠️ SO IT IS A SECOND DATABASE. `content=''` — CONTENTLESS — because FTS5 cannot take its
+    # content from a table in another file, and because the content is not needed: `exact_search`
+    # only ever asks for ROWIDS. Storing the text twice would double a 6 GB corpus for nothing.
+    #
+    # ⚠️ THE COST IS THAT TRIGGERS CANNOT CROSS DATABASES. The word index is kept in sync by
+    # triggers on `documents`; this one has to be told explicitly from add_many. That is a real
+    # trade, made knowingly: ⚠️ a missing sync here would make NEW files invisible to fragment
+    # search, which is exactly the bug found in the word index an hour ago.
+    def _tri(self):
+        """The trigram connection, opened lazily. None when it cannot be opened."""
+        if self._tri_conn is not None:
+            return self._tri_conn if self._tri_conn is not False else None
         try:
-            self.conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS docs_tri USING fts5("
-                "text, content='documents', content_rowid='id', tokenize='trigram')")
-            for _name, _sql in (
-                ("docs_tri_ai", "CREATE TRIGGER IF NOT EXISTS docs_tri_ai AFTER INSERT ON documents "
-                                "BEGIN INSERT INTO docs_tri(rowid, text) VALUES (new.id, new.text); END"),
-                ("docs_tri_ad", "CREATE TRIGGER IF NOT EXISTS docs_tri_ad AFTER DELETE ON documents "
-                                "BEGIN INSERT INTO docs_tri(docs_tri, rowid, text) "
-                                "VALUES('delete', old.id, old.text); END"),
-                ("docs_tri_au", "CREATE TRIGGER IF NOT EXISTS docs_tri_au AFTER UPDATE ON documents "
-                                "BEGIN INSERT INTO docs_tri(docs_tri, rowid, text) "
-                                "VALUES('delete', old.id, old.text); "
-                                "INSERT INTO docs_tri(rowid, text) VALUES (new.id, new.text); END"),
-            ):
-                self.conn.execute(_sql)
-            self.conn.commit()
-            self._tri_ok = True
+            # ⚠️ `idx_path` COMES FROM CONFIG SO THE FILE SITS BESIDE THE INDEX, not inside it.
+            path = getattr(self, "tri_path", None) or (Path(str(self.db_path) + ".tri"))
+            c = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA busy_timeout=30000")
+            c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs_tri USING fts5("
+                      "text, content='', tokenize='trigram')")
+            c.commit()
+            self._tri_conn = c
         except sqlite3.OperationalError:
-            # ⚠️ NOT EVERY BUILD HAS THE TRIGRAM TOKENIZER. `like` still works and is merely slow.
-            self._tri_ok = False
-        return self._tri_ok
+            # ⚠️ NO TRIGRAM TOKENIZER, OR NO ROOM FOR THE FILE. `exact` falls back to the LIKE
+            # scan, which is slower and correct.
+            self._tri_conn = False
+        return self._tri_conn if self._tri_conn is not False else None
 
     def trigram_ready(self) -> bool:
-        """⚠️ True once the index actually HOLDS something, which is what `exact` checks.
+        """⚠️ True once the index HOLDS something. Asked once, then remembered.
 
-        ⚠️ The distinction matters: the table can exist and be empty for nine minutes while it
-        builds. Falling back to LIKE during that window is correct; falling back forever because
-        the first check saw an empty table is the bug this method prevents.
+        ⚠️ The first version asked this on every search and it cost 2.55s of a 2.6s query — the
+        readiness check was more expensive than the thing it guarded. ⚠️ A constant cost per
+        search is the signature of a check rather than a lookup.
         """
-        if not self._ensure_trigram():
+        if self._tri_ready is not None:
+            return self._tri_ready
+        c = self._tri()
+        if c is None:
+            self._tri_ready = False
             return False
-        # ⚠⚠️ ASKED ONCE, THEN REMEMBERED. THE CHECK WAS 2.5 SECONDS OF A 2.6 SECOND SEARCH.
-        #
-        # ⚠️ MEASURED: `SELECT count(*) FROM docs_tri_data` on a 2,751,406-row index took 2.55s —
-        # so the question "is the index ready?" cost more than the query it was guarding, on
-        # every single search. ⚠️ It was called from exact_search, and the symptom was that
-        # EVERY query took about the same 2.6s no matter what was typed. A constant cost per
-        # search is the signature of a check rather than a lookup.
-        #
-        # ⚠️ AND IT CANNOT BECOME UNREADY. The index is built once and maintained by triggers, so
-        # a True is permanent for the life of this connection. Caching it is not an optimisation
-        # that risks correctness — it is removing a query that only ever needs one answer.
-        if self._tri_ready is None:
-            try:
-                self._tri_ready = self.conn.execute(
-                    "SELECT count(*) FROM docs_tri_data").fetchone()[0] > 100
-            except sqlite3.OperationalError:
-                self._tri_ready = False
+        try:
+            self._tri_ready = c.execute("SELECT count(*) FROM docs_tri_data").fetchone()[0] > 100
+        except sqlite3.OperationalError:
+            self._tri_ready = False
         return self._tri_ready
 
-    def build_trigram(self, progress=None) -> bool:
-        """Build or rebuild the trigram index. ⚠️ One long write, once, ever."""
-        if not self._ensure_trigram():
-            return False
-        self.conn.execute("INSERT INTO docs_tri(docs_tri) VALUES('rebuild')")
-        self.conn.commit()
-        if progress:
-            progress()
-        return True
+    def build_trigram(self) -> int:
+        """Populate the trigram index from the documents table. ⚠️ One long write, once, ever."""
+        c = self._tri()
+        if c is None:
+            return 0
+        c.execute("DELETE FROM docs_tri")
+        n = 0
+        # ⚠️ STREAMED, NOT FETCHED. A home directory is 6 GB of text; `fetchall()` would hold all
+        # of it in memory at once to write an index that already duplicates most of it on disk.
+        cur = self.conn.execute("SELECT id, text FROM documents")
+        batch = []
+        while True:
+            rows = cur.fetchmany(2000)
+            if not rows:
+                break
+            c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
+                          [(i, t or "") for i, t in rows])
+            n += len(rows)
+            if n % 50000 == 0:
+                c.commit()
+                print(f"    … {n:,} indexed", flush=True)
+        c.commit()
+        self._tri_ready = None
+        return n
+
+    def tri_add(self, rows) -> None:
+        """⚠️ KEEP THE SECOND DATABASE IN STEP — there are no triggers across files."""
+        c = self._tri()
+        if c is None or not self._tri_ready:
+            return
+        try:
+            c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
+                          [(i, t or "") for i, t in rows])
+        except sqlite3.OperationalError:
+            pass      # ⚠️ a failed sync must not break an index run; the next build repairs it
+
+    def tri_drop(self, ids) -> None:
+        """⚠️ A DELETED FILE MUST STOP MATCHING. A stale row here outlives the file it describes."""
+        c = self._tri()
+        if c is None or not self._tri_ready or not ids:
+            return
+        try:
+            # ⚠️ IN CHUNKS: SQLite caps the number of bound parameters, and a prune can carry
+            # tens of thousands of ids.
+            ids = list(ids)
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                c.execute(f"DELETE FROM docs_tri WHERE rowid IN ({ph})", chunk)
+        except sqlite3.OperationalError:
+            pass
 
     def _build_postings(self) -> None:
         """⚠️ BUILT LAZILY AND CACHED. Rebuilding on every query would make keyword search
