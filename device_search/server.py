@@ -745,7 +745,8 @@ class Handler(BaseHTTPRequestHandler):
                              # ⚠️ The ETA and rate come from the process DOING the work. The
                              # daemon cannot derive them, so it must not invent them.
                              "live": {k: st["live"].get(k) for k in
-                                      ("running", "percent", "rate", "eta_seconds",
+                                      ("running", "percent", "rate", "eta_seconds", "stage",
+                                         "files_seen", "elapsed_seconds", "note",
                                        "documents_done", "documents_total", "reason")}})
             return
         if not self._authorised():
