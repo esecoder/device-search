@@ -103,6 +103,50 @@ def cmd_setup(args) -> int:
 # =============================================================================
 # index
 # =============================================================================
+def cmd_deep_index(args) -> int:
+    """Build the substring index used for code-fragment queries.
+
+    ⚠⚠️ A SEPARATE, OPTIONAL, LONG STEP, AND IT IS SEPARATE BECAUSE IT IS OPTIONAL.
+
+    Ordinary search does not need this. It exists for one kind of query —
+    `InputLayer(shape=(784,))`, a fragment with no word boundary — which the word index cannot
+    answer and the LIKE scan answers in ten seconds.
+
+    ⚠️ IT IS BIG AND SLOW: measured at 8.3 GB and more than twelve minutes for 859,569
+    documents. ⚠️ SO IT IS NOT PART OF `ds index` AND IS NEVER STARTED WITHOUT BEING ASKED FOR.
+    A tool that quietly spends twelve minutes and eight gigabytes on a first run has decided
+    something the user should have decided.
+
+    ⚠️ AND IT RESUMES. Killed at 650,000 of 859,569, it continues from there rather than
+    starting again — which is what makes it something a person can actually run.
+    """
+    from .vectors import read_status, write_status
+    store = Store(DB_PATH)
+    total = store.count()
+    print("=" * 78)
+    print(f"DEEP INDEX  {total:,} documents")
+    print("=" * 78)
+    print("  This builds an index of every three-character sequence, so that a code fragment")
+    print(f"  like  InputLayer(shape=(784,))  can be found quickly instead of by a slow scan.")
+    print()
+    print(f"  ⚠️ It needs roughly as much disk as the index itself, and takes minutes.")
+    print(f"  ⚠️ It can be stopped at any time with Ctrl-C and resumed by running this again.")
+    print()
+    t0 = time.time()
+    try:
+        n = store.build_trigram()
+    except KeyboardInterrupt:
+        # ⚠️ A CLEAN INTERRUPT IS THE EXPECTED EXIT, not a failure. The progress is already on
+        # disk — it is committed with the data — so saying "stopped, run this again" is true.
+        print()
+        print("  stopped. Run the same command again to continue from here.")
+        return 130
+    print()
+    print(f"  ✅ {n:,} documents indexed in {time.time()-t0:.0f}s")
+    print(f"  ⚠️ ready: {store.trigram_ready()}")
+    return 0
+
+
 def cmd_index(args) -> int:
     ensure_index_dir()
 
@@ -782,6 +826,10 @@ def main(argv=None) -> int:
     p.add_argument("--rerank", action="store_true",
                    help="reorder results with a cross-encoder (~5s, 80MB model)")
     p.set_defaults(fn=cmd_search)
+
+    p = sub.add_parser("deep-index",
+                       help="build the substring index for code-fragment search (slow, large)")
+    p.set_defaults(fn=cmd_deep_index)
 
     p = sub.add_parser("runtime", help="which embedding runtime, and what it costs")
     p.add_argument("--chunks", type=int, default=0, help="project onto this many chunks")

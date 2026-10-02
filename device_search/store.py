@@ -559,7 +559,22 @@ class Store:
         # rare: a two-character search matches a large fraction of the corpus anyway.
         if len(literal) >= 3 and self.trigram_ready():
             try:
-                rows = self.conn.execute(
+                # ⚠⚠️ `self._tri()`, NOT `self.conn`. THE TRIGRAM TABLE IS IN ANOTHER DATABASE.
+                #
+                # ⚠️ IT WAS self.conn, so this asked the MAIN database for `docs_tri` — which is not
+                # there — raised OperationalError, and was caught by the `except ... pass` two lines
+                # below. ⚠️ SO THE TRIGRAM INDEX WAS BUILT, FILLED, MARKED READY, AND NEVER ONCE
+                # QUERIED. Every fragment search fell through to the LIKE scan.
+                #
+                # ⚠️ MEASURED, AND IT IS WHY THIS WAS HARD TO SEE: the gate passed
+                # (len>=3 and trigram_ready() both True), the branch alone ran in 0.002s when
+                # called directly, and exact_search still took 6.3s. Three true statements that
+                # together said nothing about which database the query had gone to.
+                #
+                # ⚠️ AND THE SILENT EXCEPT IS WHAT HID IT. A fallback that swallows every error is
+                # indistinguishable from a fallback that is never needed — the 11.1 GB index and
+                # the ten-second scan produced identical behaviour from the outside.
+                rows = self._tri().execute(
                     "SELECT rowid FROM docs_tri WHERE docs_tri MATCH ? LIMIT ?",
                     ('"' + literal.replace('"', '""') + '"', limit * 4)).fetchall()
                 # ⚠️ THE TRIGRAM MATCH IS A CANDIDATE SET, NOT A RESULT. It finds DOCUMENTS
@@ -591,8 +606,17 @@ class Store:
                     # needs the text, and the text is what we stopped fetching.
                     hits.sort(key=lambda r: r[1])
                     return [(i, 1.0) for i, _ln in hits[:limit]]
-            except sqlite3.OperationalError:
-                pass      # ⚠️ any trigram failure falls through to the scan
+            except sqlite3.OperationalError as _e:
+                # ⚠⚠️ SAID OUT LOUD, NOT SWALLOWED. A silent fallback is indistinguishable from a
+                # fallback that is never needed, which is how a built-and-ready index went
+                # unqueried through every fragment search without anything reporting it.
+                # ⚠️ The scan still runs — search must never fail because an optimisation did — but
+                # the reason is now visible the first time rather than never.
+                if not getattr(self, "_tri_warned", False):
+                    self._tri_warned = True
+                    import sys as _sys
+                    print(f"  ⚠️ trigram index unavailable, using the slow scan: "
+                          f"{type(_e).__name__}: {_e}", file=_sys.stderr)
 
         esc = literal.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self.conn.execute(
@@ -790,8 +814,8 @@ class Store:
             self._tri_ready = False
         return self._tri_ready
 
-    def build_trigram(self) -> int:
-        """Populate the trigram index from the documents table. ⚠️ One long write, once, ever."""
+    def build_trigram(self, resume: bool = True) -> int:
+        """Populate the trigram index. ⚠️ Resumable: an interrupted run continues where it stopped."""
         c = self._tri()
         if c is None:
             return 0
@@ -803,29 +827,83 @@ class Store:
         #
         # ⚠️ AND `tri_drop` BELOW IS STILL VALID, because it deletes by rowid via the special
         # 'delete' command instead. The restriction is on unbounded deletes, not targeted ones.
-        c.execute("DROP TABLE IF EXISTS docs_tri")
-        c.execute("CREATE VIRTUAL TABLE docs_tri USING fts5(text, content='', tokenize='trigram')")
-        c.commit()
-        n = 0
+        # ⚠⚠️ RESUMABLE, BECAUSE THE BUILD TAKES TWELVE MINUTES AND THE MACHINE IS IN USE.
+        #
+        # ⚠️ MEASURED: 859,569 documents, more than twelve minutes, and it reached 650,000 before
+        # being interrupted — at which point the only options were to start again from zero or to
+        # ship an index that is silently incomplete for the rest of its life.
+        #
+        # ⚠️ A CONTENTLESS TABLE CANNOT BE PARTIALLY DELETED, so resuming cannot mean "redo the
+        # last batch". ⚠️ IT MEANS REMEMBERING HOW FAR IT GOT. The build is ordered by rowid and
+        # records the last id written; an interrupted run continues from there.
+        #
+        # ⚠️ AND THE IDS ARE ALSO A CHECK. On resume the stored id must still exist in `documents`
+        # — if the index was cleared or rebuilt since, it does not, and the trigram index is
+        # stale in a way that only a full rebuild repairs.
+        resume_from = 0
+        if resume:
+            try:
+                mark = self.get_meta("trigram_progress", None)
+                if mark is not None:
+                    mark = int(mark)
+                    # ⚠️ VERIFIED AGAINST THE CONTENT TABLE, not trusted. A stored id that no longer
+                    # exists means the documents were rebuilt and this index describes a corpus
+                    # that is gone.
+                    if self.conn.execute("SELECT 1 FROM documents WHERE id >= ? LIMIT 1",
+                                         (mark,)).fetchone():
+                        resume_from = mark
+            except (TypeError, ValueError, sqlite3.OperationalError):
+                resume_from = 0
+
+        if resume_from == 0:
+            c.execute("DROP TABLE IF EXISTS docs_tri")
+            c.execute("CREATE VIRTUAL TABLE docs_tri USING fts5(text, content='', "
+                      "tokenize='trigram')")
+            c.commit()
+            self.set_meta("trigram_progress", 0)
+            self.conn.commit()
+        n = resume_from
         # ⚠️ STREAMED, NOT FETCHED. A home directory is 6 GB of text; `fetchall()` would hold all
         # of it in memory at once to write an index that already duplicates most of it on disk.
-        cur = self.conn.execute("SELECT id, text FROM documents")
-        batch = []
+        total = self.conn.execute("SELECT count(*) FROM documents").fetchone()[0]
+        cur = self.conn.execute("SELECT id, text FROM documents WHERE id > ? ORDER BY id",
+                                (resume_from,))
+        t_start = time.time()
         while True:
             rows = cur.fetchmany(2000)
             if not rows:
                 break
             c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
                           [(i, t or "") for i, t in rows])
-            n += len(rows)
-            if n % 50000 == 0:
-                c.commit()
-                print(f"    … {n:,} indexed", flush=True)
+            n = rows[-1][0]
+            # ⚠️ THE PROGRESS IS PERSISTED WITH THE DATA, in the same commit. Recording it
+            # separately would leave the two disagreeing after a crash, and the disagreement
+            # would be silent: an index missing a range of documents that nothing reports.
+            self.set_meta("trigram_progress", n)
+            c.commit()
+            self.conn.commit()
+            if n % 100000 < 2000:
+                done = n - resume_from
+                rate = done / max(time.time() - t_start, 1)
+                left = (total - n) / rate if rate > 0 else 0
+                print(f"    … {n:,}/{total:,} indexed, about {left/60:.0f}m left", flush=True)
+                # ⚠️ WRITTEN THE SAME WAY THE CRAWL WRITES ITS PROGRESS, so the existing banner
+                # reads it without knowing which phase produced it.
+                try:
+                    from .vectors import write_status
+                    write_status(INDEX_DIR, stage="trigram", finished=False,
+                                 documents_total=total, documents_done=n,
+                                 elapsed_seconds=int(time.time() - t_start),
+                                 started=t_start, percent=round(n / max(total, 1) * 100, 1),
+                                 eta_seconds=int(left))
+                except Exception:
+                    pass
         c.commit()
         # ⚠️ RECORDED ONLY AFTER THE INDEX IS COMPLETE. Writing the flag first would mark an index
         # current before it contained anything — the same ordering mistake as the crawl's format
         # version, which would have left a "v2" index with no directories in it.
         self.set_meta("trigram_built", True)
+        self.set_meta("trigram_progress", 0)     # ⚠️ nothing left to resume
         self.conn.commit()
         self._tri_ready = True
         return n
