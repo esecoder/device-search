@@ -188,6 +188,19 @@ class Store:
 
     # ---------------------------------------------------------------- writes
     @_serialised
+    def _tri_sync_all(self, ids=None) -> None:
+        """Refresh the trigram index entries for `ids`, or rebuild if it is not populated.
+
+        ⚠️ Called after a prune, because a deleted file that still matches fragment search is the
+        worst possible stale result: the user is shown a path that does not exist.
+        """
+        if not self.trigram_ready():
+            return
+        if ids is None:
+            self.build_trigram()
+            return
+        self.tri_drop(ids)
+
     def clear(self) -> None:
         self.conn.execute("DELETE FROM documents")
         self.conn.commit()
@@ -212,6 +225,30 @@ class Store:
             "method=excluded.method, is_dir=excluded.is_dir",
             rows)
         self.conn.commit()
+
+        # ⚠⚠️ AND THE SECOND DATABASE HAS TO BE TOLD, BECAUSE TRIGGERS CANNOT CROSS FILES.
+        #
+        # ⚠️ The word index is kept in step by triggers ON `documents`. The trigram index lives in
+        # its own file with no content of its own, so no trigger can reach it.
+        #
+        # ⚠️ WITHOUT THIS LINE EVERY FILE INDEXED AFTER THE TRIGRAM BUILD IS INVISIBLE TO FRAGMENT
+        # SEARCH — and it looks exactly like the file not existing. ⚠️ That is the same bug
+        # already found once in the word index, where a document inserted after the build could
+        # not be found by keyword search, before a restart or after one.
+        #
+        # ⚠️ THE URL IS RE-READ AFTER THE UPSERT, because a conflicting path keeps its ORIGINAL
+        # rowid and the index must be told the same id the table now holds.
+        try:
+            ids = [self.conn.execute("SELECT id FROM documents WHERE path=?",
+                                     (r[0],)).fetchone()[0] for r in rows]
+            self.tri_drop(ids)          # ⚠️ forget the old terms before adding the new ones
+            self.tri_add([(i, r[5]) for i, r in zip(ids, rows)])
+            self.conn.commit()
+        except Exception:
+            # ⚠️ A SYNC FAILURE MUST NOT FAIL THE INDEX RUN. The document is safely in the main
+            # table; the trigram index is an optimisation, and a rebuild repairs it.
+            pass
+
         self._invalidate()
         return len(rows)
 
@@ -734,9 +771,22 @@ class Store:
         if c is None:
             self._tri_ready = False
             return False
+        # ⚠⚠️ A MARKER IN THE MAIN DATABASE, NOT A ROW COUNT IN THE INDEX.
+        #
+        # ⚠️ The first version asked `count(*) FROM docs_tri_data > 100` and it was WRONG IN BOTH
+        # DIRECTIONS: SQLite packs trigram data into a handful of large rows, so a fully built
+        # index over 300 documents reported ELEVEN rows — and the same check on the 859,569-document
+        # index took 2.55 SECONDS per search.
+        #
+        # ⚠️ MEASURED: raw MATCH returned 300 hits while trigram_ready said False. The index was
+        # built and working and the check that decides whether to use it said no.
+        #
+        # ⚠️ SO THE BUILD RECORDS THAT IT HAPPENED. A flag written once, in the database that is
+        # already being read, with no scan of either index to ask a question whose answer never
+        # changes.
         try:
-            self._tri_ready = c.execute("SELECT count(*) FROM docs_tri_data").fetchone()[0] > 100
-        except sqlite3.OperationalError:
+            self._tri_ready = bool(self.get_meta("trigram_built", False))
+        except Exception:
             self._tri_ready = False
         return self._tri_ready
 
@@ -745,7 +795,17 @@ class Store:
         c = self._tri()
         if c is None:
             return 0
-        c.execute("DELETE FROM docs_tri")
+        # ⚠⚠️ DROP AND RECREATE. A CONTENTLESS FTS5 TABLE CANNOT BE DELETED FROM.
+        #
+        # ⚠️ MEASURED: `DELETE FROM docs_tri` raises "cannot DELETE from contentless fts5 table".
+        # Contentless means FTS5 stores no copy of the text, so it cannot reconstruct what to
+        # remove for an arbitrary delete — only the whole index can go.
+        #
+        # ⚠️ AND `tri_drop` BELOW IS STILL VALID, because it deletes by rowid via the special
+        # 'delete' command instead. The restriction is on unbounded deletes, not targeted ones.
+        c.execute("DROP TABLE IF EXISTS docs_tri")
+        c.execute("CREATE VIRTUAL TABLE docs_tri USING fts5(text, content='', tokenize='trigram')")
+        c.commit()
         n = 0
         # ⚠️ STREAMED, NOT FETCHED. A home directory is 6 GB of text; `fetchall()` would hold all
         # of it in memory at once to write an index that already duplicates most of it on disk.
@@ -762,13 +822,27 @@ class Store:
                 c.commit()
                 print(f"    … {n:,} indexed", flush=True)
         c.commit()
-        self._tri_ready = None
+        # ⚠️ RECORDED ONLY AFTER THE INDEX IS COMPLETE. Writing the flag first would mark an index
+        # current before it contained anything — the same ordering mistake as the crawl's format
+        # version, which would have left a "v2" index with no directories in it.
+        self.set_meta("trigram_built", True)
+        self.conn.commit()
+        self._tri_ready = True
         return n
 
     def tri_add(self, rows) -> None:
         """⚠️ KEEP THE SECOND DATABASE IN STEP — there are no triggers across files."""
         c = self._tri()
-        if c is None or not self._tri_ready:
+        # ⚠⚠️ NO `_tri_ready` CHECK HERE, AND THAT CHECK WAS A CIRCULAR DEPENDENCY.
+        #
+        # ⚠️ The first version refused to add unless the index was already populated — but nothing
+        # populates it except build_trigram, so on a fresh database NOTHING WAS EVER ADDED and
+        # `trigram_ready` stayed False forever. ⚠️ MEASURED: 300 documents inserted, the index
+        # built, and trigram_ready still False.
+        #
+        # ⚠️ The guard was there to avoid writing to an index that does not exist. The right way to
+        # say that is "is the connection open", which is what `c is None` already says.
+        if c is None:
             return
         try:
             c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
@@ -779,7 +853,7 @@ class Store:
     def tri_drop(self, ids) -> None:
         """⚠️ A DELETED FILE MUST STOP MATCHING. A stale row here outlives the file it describes."""
         c = self._tri()
-        if c is None or not self._tri_ready or not ids:
+        if c is None or not ids:
             return
         try:
             # ⚠️ IN CHUNKS: SQLite caps the number of bound parameters, and a prune can carry
@@ -788,7 +862,11 @@ class Store:
             for i in range(0, len(ids), 500):
                 chunk = ids[i:i + 500]
                 ph = ",".join("?" * len(chunk))
-                c.execute(f"DELETE FROM docs_tri WHERE rowid IN ({ph})", chunk)
+                # ⚠️ THE CONTENTLESS DELETE FORM: 'delete' WITH THE OLD TEXT, which FTS5 requires
+                # in order to know which terms to forget. A plain DELETE is rejected outright.
+                for rid in chunk:
+                    c.execute("INSERT INTO docs_tri(docs_tri, rowid, text) VALUES('delete', ?, '')",
+                              (rid,))
         except sqlite3.OperationalError:
             pass
 
