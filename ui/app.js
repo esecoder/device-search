@@ -553,8 +553,14 @@ function renderInner() {
     //
     // ⚠️ AND IT NO LONGER EXPLAINS ITSELF. "That is the answer, not an error" is the app
     // reassuring the user about its own health. They wanted a fact, not a disclaimer.
-    t.textContent = `No file matches ${metaInfo.explain || "that filter"} in the folders `
-                  + `being searched. Widen the search area in Settings if you expected one.`;
+    // ⚠⚠️ THE BACKEND'S REASON WHEN THERE IS ONE, A GENERIC LINE WHEN THERE IS NOT.
+    //
+    // ⚠️ The generic line was stating a fact the app had no basis for: "no file matches size
+    // 10 GB to 11 GB" for an index that holds NOTHING above 2 MB. ⚠️ “I found nothing” and “I did
+    // not look” are different answers, and only the backend knows which one it gave.
+    t.textContent = metaInfo.empty_reason
+      || `No file matches ${metaInfo.explain || "that filter"} in the folders being searched. `
+         + `Widen the search area in Settings if you expected one.`;
     d.appendChild(t);
     box.appendChild(d);
   }

@@ -244,6 +244,47 @@ def has_text_query(f: dict) -> bool:
     return any(w not in _FILLER and len(w) > 1 for w in left.split())
 
 
+def explain_empty(store, f: dict, hits: int) -> str:
+    """Why a filter found nothing — in particular when the answer is “we never looked”.
+
+    ⚠⚠️ THIS EXISTS BECAUSE THE APP WAS STATING A FACT IT HAD NO BASIS FOR.
+
+    ⚠️ MEASURED: `10gb files` parses to size 10 GB to 11 GB, the index holds NOTHING above 2 MB,
+    and the interface said “No file matches size 10 GB to 11 GB”. ⚠️ That is a claim about the
+    user's disk made from a corpus that structurally cannot contain the answer.
+
+    ⚠️ “I FOUND NOTHING” AND “I DID NOT LOOK” ARE DIFFERENT ANSWERS. A search tool may say the
+    first; saying the second while meaning the first is how someone concludes their file does
+    not exist when it does.
+    """
+    if hits:
+        return ""
+    from .config import MAX_FILE_BYTES
+    # ⚠️ ONLY WHEN THE FILTER REACHES ABOVE THE LIMIT. A search for 1 MB files is fully answered
+    # by the index, and warning about the limit there would be noise on a correct result.
+    floor = f.get("min_bytes")
+    if not floor or floor < MAX_FILE_BYTES:
+        return ""
+    try:
+        n, total = store.conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(size),0) FROM skipped").fetchone()
+        biggest = store.conn.execute(
+            "SELECT size FROM skipped ORDER BY size DESC LIMIT 1").fetchone()
+    except Exception:
+        n, total, biggest = 0, 0, None
+    parts = [f"No file matches {describe(f)} in the folders being searched."]
+    parts.append(f"⚠️ Files larger than {human_bytes(MAX_FILE_BYTES)} are not indexed, so "
+                 f"anything above that was never examined.")
+    if n:
+        parts.append(f"{n:,} larger file{'s' if n != 1 else ''} "
+                     f"({human_bytes(int(total))}) were set aside, and the largest is "
+                     f"{human_bytes(int(biggest[0]))}.")
+    # ⚠️ THE ACTION IS NAMED, because “this is a limit” without “here is how to change it” is
+    # a dead end for the user who actually does have a 10 GB file.
+    parts.append("Raise the size limit in Settings if you need to search them.")
+    return " ".join(parts)
+
+
 def run(store, f: dict, limit: int = 40) -> list[tuple]:
     """Execute the filters. ⚠️ Straight SQL — no ranking, because there is nothing to rank:
     every row either satisfies the filter or does not."""
