@@ -409,6 +409,14 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
             results["meta"] = _mrun(store, _mf, limit=PER_BACKEND)
             trace["meta"] = {"filters": _mf, "explain": _mdesc(_mf),
                              "hits": len(results["meta"])}
+            # ⚠⚠️ AND THE REASON WHEN IT FOUND NOTHING, computed HERE because only the backend can
+            # tell “no match” from “never examined”. ⚠️ The interface used to print “no file
+            # matches size 10 GB to 11 GB” for a corpus that holds nothing above 2 MB — a claim
+            # about the user's disk made from an index that cannot contain the answer.
+            from .metadata import explain_empty as _mwhy
+            _why = _mwhy(store, _mf, len(results["meta"]))
+            if _why:
+                trace["meta"]["empty_reason"] = _why
 
             # ⚠⚠️ AND IF THE FILTERS CONSUMED THE WHOLE QUERY, THE TEXT RESULTS ARE DROPPED.
             #
