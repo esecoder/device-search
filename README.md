@@ -217,7 +217,7 @@ also the risk.
 
 ## Verified
 
-Measured on the `11-rag` track (13 documents, 399 vectors):
+Functional behaviour, measured on the `11-rag` track (13 documents, 399 vectors):
 
 | Test | Result |
 |---|---|
@@ -226,13 +226,39 @@ Measured on the `11-rag` track (13 documents, 399 vectors):
 | Concept question (no shared keywords) | ✅ routed to semantic, correct file #1 |
 | **Control: a string not on disk** | ✅ **exit 1, "NO LEXICAL MATCH"** — no false confidence |
 
-⚠️ **Not verified:** behaviour on a 500k-file home directory. The crawl is written for it
-(permission errors are skips, symlinks are not followed, every skip is counted) but it has only
-been run on a 13-file corpus. **Index a curated set first** and check `ds stats` before trusting
-`everything` mode.
+Scale behaviour, measured separately on a **859,569-document corpus (6.9 GB)** — see
+[the index section](#the-index-what-fts5-gave-and-what-the-trigram-index-cost):
+
+| Test | Result |
+|---|---|
+| Keyword search, first call | ✅ **0.002s** (was **351.45s** on the in-process BM25) |
+| Index build | ✅ **90s, once ever** — it lives in the database, not rebuilt per restart |
+| Fragment search via trigram | ✅ **10.73s → 0.015s** — ⚠️ but see the recommendation to revert it |
+| `path` after the trigram move | ⚠️ **1.77s**, still worse than the **0.73s** before any of this |
+
+**Test suites:**
+
+```bash
+npm test                              # 32 assertions — the UI and setup paths
+python tests/test_fts_fallback.py     # 9 checks — the FTS5 fast path, its fallback, and
+                                      #   identifiers containing '_' and '.' on both
+```
+
+⚠️ **The fallback test is not decoration.** The NumPy BM25 fallback turned out to be **dead code
+that returned nothing** on exactly the builds it existed to serve, and the assertion that caught
+it is `keyword search still returns results on the fallback`.
+
+⚠️ **Not verified:** the crawl has not been exercised on a large *home* directory specifically.
+It is written for one (permission errors are skips, symlinks are not followed, every skip is
+counted), and the index work above has been measured at 859,569 documents — but **index a
+curated set first** and check `ds stats` before trusting `everything` mode.
 
 ⚠️ **Also not verified:** the `--llm` reranker's happy path — it needs an API key. The secret
 interlock is rule-based and tested; the ranking quality is not.
+
+⚠️ **And the honest state of the trigram index: not finished, and probably not worth it.** Size,
+build cost and benefit are all measured above, and the recommendation is to revert it — stated
+rather than left for someone to discover from their disk filling up.
 
 ---
 
@@ -241,9 +267,171 @@ interlock is rule-based and tested; the ranking quality is not.
 - **No vector database.** SQLite holds this corpus comfortably. A server-backed DB adds an
   install, a port and a failure mode, and buys nothing until you are past millions of chunks.
 - **No LangChain / LlamaIndex.** The routing logic is ~80 lines. Reading it is the point.
-- **No FTS5.** SQLite ships it and I reached for it first — then could not verify it was
-  present, because `sqlite3` compiled without FTS5 is common. ⚠️ **A backend that is silently
-  absent is worse than one that is slower**, so BM25 is implemented in NumPy and always works.
+- **No FTS5 *as the only* keyword path.** FTS5 *is* used — see
+  [the index section](#the-index-what-fts5-gave-and-what-the-trigram-index-cost) below — but the
+  NumPy BM25 is kept as a **runtime-checked fallback**, because `sqlite3` compiled without FTS5
+  is common on macOS system Python. ⚠️ **A backend that is silently absent is worse than one
+  that is slower**, which is why the check is at runtime and the degradation is logged rather
+  than assumed.
 - **No model-based query classifier.** The classifier is rule-based: deterministic, testable,
   no key. ⚠️ It is also genuinely worse than a model on ambiguous queries, and that is stated
   rather than implied.
+
+---
+
+## The index: what FTS5 gave, and what the trigram index cost
+
+⚠️ **This section corrects an earlier claim in this README.** It used to say, under *"What is
+deliberately not here"*, that there was no FTS5 — because `sqlite3` compiled without FTS5 is
+common on macOS system Python, and *"a backend that is silently absent is worse than one that
+is slower."* **That reasoning was sound and the conclusion was wrong.** The right answer was to
+check at runtime and degrade, not to avoid the fast path. The code does that now; the README
+did not catch up.
+
+### FTS5 is the primary keyword backend
+
+At **859,569 documents (6.9 GB)**, the first keyword query took **five minutes fifty-one
+seconds**:
+
+```
+                before      after
+exact            4.09s       (see below)
+path             0.79s       1.77s
+keyword        351.45s       0.002s     ← 'screenshot', 400 hits
+```
+
+The Python BM25 *caches*, so the second query was 0.06 s — **but the first call happens on every
+daemon restart**, and its postings live in RAM. That is what the user experiences as the app
+being broken.
+
+FTS5 keeps the index **on disk** and maintains it **with triggers**, which the in-process
+postings could not do. It is an **external-content** table (`content='documents'`) so the text
+is not stored twice — at 6.9 GB a duplicate copy is the difference between an index and a
+second corpus. It uses the **same BM25 formula and the same `k1` and `b`** as the Python path,
+so the two agree rather than quietly disagreeing, and the Python version stays as a
+**runtime-checked fallback** for builds without FTS5 (`tests/test_fts_fallback.py` pins both
+the fallback and its warning).
+
+```
+building the index   90s   ONCE, EVER — it lives in the database, not rebuilt per restart
+'screenshot'       0.002s   400 hits
+'merge conflict'   0.011s   400 hits
+'php'              0.004s   400 hits
+```
+
+### ⚠️ The first attempt was fast and wrong, and that is the part worth keeping
+
+```
+count(docs_fts)   859,569
+count(documents)  859,569
+raw MATCH             0
+```
+
+With `content='documents'` the FTS table is external-content, so `SELECT count(*) FROM docs_fts`
+returns the number of rows in the **content** table — not the number of terms indexed. **The
+rebuild check compared a number with itself, passed every time, and the rebuild never ran.**
+
+Searches then returned in **0.00 s with zero results**. ⚠️ **Fast, and wrong — and a speed
+measurement alone would have called it a success.** Fixed by counting `docs_fts_data`, which is
+the actual index: a fresh table has a handful of structural rows, a built one has hundreds of
+thousands.
+
+### ⚠️ Three more silent bugs in the FTS work, each found only by testing a fresh database
+
+1. **No triggers.** An external-content FTS5 table stores no text of its own, so it cannot know
+   a row changed. ⚠️ **MEASURED:** a document inserted after the index was built was invisible to
+   keyword search — before a restart *and* after one. Fixed with SQLite's documented
+   three-trigger pattern (insert / delete / update, the update deleting then re-inserting,
+   because a delete without the old text leaves stale terms that match forever).
+2. **Eager but too early.** The triggers were created at open — but *before*
+   `executescript(SCHEMA)`, so `content='documents'` named a table that did not exist, the
+   `CREATE` failed, `_fts_ok` stayed `False`, and keyword search fell back to the slow Python
+   path **forever, without saying so.**
+3. **`.isalnum()` dropped every identifier with an underscore or a dot.** ⚠️ **MEASURED:** a raw
+   `MATCH` for `unique_token_xyz` and `db_acl.php` returned their rows, and the search returned
+   **zero** — because `"_".isalnum()` is `False` and the token was filtered before the query was
+   built. ⚠️ **This is a file search tool:** underscores and dots are in most filenames and most
+   code identifiers, so the filter removed exactly the tokens the product exists to find, and it
+   did so silently, by returning an empty result rather than an error. Fixed by **quoting** the
+   tokens instead — FTS5 treats a quoted token as a literal string, so punctuation cannot be
+   parsed as syntax. Filtering was never needed.
+
+### ⚠️ And a fourth, found while writing this section: the fallback was dead code
+
+`_build_postings()` — the function that builds the NumPy BM25 index — **had no call sites
+anywhere in the codebase.** So on a build without FTS5, the fallback ran with `_n_docs == 0`,
+hit its own guard, and returned `[]` for every query, forever.
+
+```
+two documents indexed:
+  FTS5 path     : keyword_search("quick") -> 1 hit
+  fallback path : keyword_search("quick") -> 0 hits   ← silently nothing
+```
+
+⚠️ **An empty result is the worst possible failure signal for this tool**, because a file search
+that finds nothing reads as *"that file does not exist"* rather than as *"a backend is missing"*.
+So the fallback was **not slow — it was broken**, and the fallback was the entire reason this
+project originally refused to depend on FTS5. **The argument for the reimplementation rested on
+a path that did not work.** Fixed, and `tests/test_fts_fallback.py` now asserts that keyword
+search returns results on the fallback path.
+
+### The trigram index: built, measured, and it should probably be reverted
+
+`exact` exists for fragments — `InputLayer(shape=(784,))` is not a concept, it is 24 characters
+that exist or do not — and a word tokenizer cannot help, because `(784,)` is not a word and
+`shape=(784` spans three. A trigram tokenizer indexes every three-character sequence, so any
+substring of length ≥ 3 becomes a token lookup instead of a scan of 6 GB.
+
+```
+InputLayer           10.73s -> 0.015s
+shape=(784                   -> 0.004s
+db_acl.php                   -> 0.002s
+```
+
+⚠️ **But adding an index is not local, and the honest measured result is not a clean win:**
+
+```
+                          before      after
+exact (fragment)          10.70s      0.015s     the thing it was built for   ✅
+path                       0.73s      9.16s      ⚠️ 12x SLOWER, never mentioned
+index.db                    8.6GB     19.4GB     ⚠️ 11GB of trigram data
+live search                  ~2s        ~13s     ⚠️ NET WORSE
+```
+
+A trigram index is roughly **twice the size of the text it indexes**, and inside the same file
+it interleaves with `documents`, so `path_search`'s `LIKE` scan reads scattered pages. Fixed by
+**moving it into its own file** (`content=''`, contentless, because FTS5 cannot take content
+from another database and `exact_search` only ever asks for rowids):
+
+```
+index.db          19.4GB -> 8.2GB
+index.db.tri               8.3GB      its own file
+path_search        9.16s -> 1.77s
+```
+
+⚠️ **The cost, paid knowingly:** triggers cannot cross database files, so this index has to be
+told about changes explicitly from `add_many` — and **two bugs made that sync dead code**, both
+found only by testing it. One was a **circular dependency**: `tri_add` refused to add unless
+`_tri_ready` was set, and nothing sets `_tri_ready` except a populated index — so on a fresh
+database, **nothing was ever added, ever.** The other: `DELETE FROM docs_tri` on a contentless
+table is rejected outright (`cannot DELETE from contentless fts5 table`).
+
+⚠️ **⚠️ AND THE HONEST RECOMMENDATION IS TO REVERT IT.**
+
+```
+size       8.3GB   for an 8.2GB corpus    — it nearly doubles the disk
+build      >12min  for 859,569 documents  — on a machine the user is using
+benefit    10.7s → 0.015s on FRAGMENT queries, which are the minority of searches
+```
+
+Eight gigabytes and twelve minutes to speed up a query type most searches are not is a bad
+trade, and **the right time to say so is before it ships rather than after a user's disk fills.**
+The routing fix that came with it — running `exact` only where it is genuinely needed, because a
+query of ordinary words is already answered by `keyword` in milliseconds — is the real win, and
+it cost nothing:
+
+```
+screenshot      4.88s -> 1.25s
+merge conflict  7.19s -> 0.93s
+db_acl.php      7.35s -> 0.81s
+```
