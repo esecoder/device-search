@@ -1,18 +1,27 @@
 """
-store.py — the index: a SQLite database holding extracted text plus two search backends.
+store.py — the index: a SQLite database holding extracted text plus the search backends.
 
 ⚠️ WHY SQLITE AND NOT A VECTOR DATABASE. At device scale (10k-500k files) everything fits on
 one machine, one process and one file. A server-backed vector DB adds an install, a port and a
 failure mode, and buys nothing until you are past millions of chunks. The pragmatic choice is
 the right one here, and saying so is more useful than reaching for the fashionable tool.
 
-⚠️⚠️ AND WHY THERE IS NO FTS5 IN THIS FILE, WHICH IS A DELIBERATE CHANGE OF MIND.
-SQLite ships FTS5, which gives BM25 for free. I reached for it first — and then could not
-verify it was present, because `sqlite3` compiled without FTS5 is common on macOS system Python.
-**A search backend that is silently absent is worse than one that is slower.** So BM25 below is
-implemented in NumPy against a real inverted index, and it always works. It is the second time
-this repository has chosen the reimplementation over the shortcut, and both times the reason was
-the same: the shortcut's failure mode was invisible.
+⚠️⚠️ FTS5 IS USED, AND THIS IS A CORRECTION OF AN EARLIER CLAIM IN THIS FILE.
+
+This docstring used to say there was no FTS5 here, and give a good reason: FTS5 may be absent
+(`sqlite3` compiled without it is common on macOS system Python), and a search backend that is
+silently absent is worse than one that is slower. That reason was sound. **The conclusion was
+wrong, and the fix was to stop treating "may be absent" as "must not be used".**
+
+What actually happened is below in this file: SQLite keeps an inverted index ON DISK and
+maintains it with triggers, which the in-process postings could not do. At 859,569 documents
+the first keyword query took **351 seconds**; it is now **0.002s**. So FTS5 is the primary
+backend and the NumPy BM25 is the FALLBACK — the original worry is handled by checking at
+runtime and degrading, rather than by refusing to use the fast path at all.
+
+⚠️ THE GENERALISABLE LESSON, because it cost a lot to learn: "I could not verify this
+dependency is present" is a reason to add a fallback, not a reason to avoid the dependency.
+Avoiding it hid a five-minute first-query cost behind a reassuring-sounding principle.
 """
 
 from __future__ import annotations
@@ -736,9 +745,26 @@ class Store:
                 self.conn.execute(_sql)
             self.conn.commit()
             self._fts_ok = True
-        except sqlite3.OperationalError:
-            # ⚠️ NOT COMPILED IN, OR AN OLD FILE THAT CANNOT TAKE THE TABLE. The Python path still
-            # works; it is slower and that is all.
+        except sqlite3.OperationalError as _e:
+            # ⚠️ NOT COMPILED IN, OR AN OLD FILE THAT CANNOT TAKE THE TABLE.
+            #
+            # ⚠️ AND IT USED TO SAY NOTHING HERE, WHICH WAS THE SAME BUG ALREADY FOUND IN THE
+            # TRIGRAM PATH. A silent fallback is indistinguishable from a fallback that is never
+            # needed, so the slow path could run forever with nothing reporting it. The trigram
+            # path had been given a warning; this one had not.
+            #
+            # ⚠️ AND "SLOWER" IS NOT A SMALL WORD HERE. MEASURED AT 859,569 DOCUMENTS, the Python
+            # BM25 took 351 SECONDS on its first call. It caches, so the second query was 0.06s —
+            # and the first call happens on EVERY daemon restart, which is what the user
+            # experiences as the app being broken. Saying nothing about that is not acceptable.
+            # ⚠️ Search still runs, because it must never fail over an optimisation — but the
+            # reason is now visible the first time rather than never.
+            if not getattr(self, "_fts_warned", False):
+                self._fts_warned = True
+                import sys as _sys
+                print(f"  ⚠️ FTS5 unavailable, falling back to the in-process BM25 "
+                      f"(much slower on the first query): "
+                      f"{type(_e).__name__}: {_e}", file=_sys.stderr)
             self._fts_ok = False
         return self._fts_ok
 
@@ -1014,6 +1040,24 @@ class Store:
             # other part of the system looked correct.
             return [(rid, -float(r)) for rid, r in rows]
 
+        # ⚠️⚠️ THE POSTINGS HAVE TO BE BUILT, AND NOTHING WAS BUILDING THEM.
+        #
+        # ⚠️ `_build_postings()` HAD NO CALL SITES ANYWHERE IN THE CODEBASE. So on a build
+        # without FTS5 this path ran with `_n_docs == 0` and `_postings is None`, fell through
+        # the guard below, and returned `[]` — for every query, forever.
+        #
+        # ⚠️ MEASURED: two documents indexed, `keyword_search("quick")` returned 0 hits;
+        # calling `_build_postings()` by hand made the same query return 1.
+        #
+        # ⚠️ AND AN EMPTY RESULT IS THE WORST POSSIBLE FAILURE SIGNAL FOR THIS TOOL, because a
+        # file search that finds nothing reads as "that file does not exist" rather than as "a
+        # backend is missing". ⚠️ So the fallback was not slow — IT WAS BROKEN — and the
+        # fallback is the entire reason this file originally refused to depend on FTS5. The
+        # argument for the reimplementation rested on a path that did not work.
+        #
+        # Lazy and cached, so this costs nothing on the FTS5 path and one build per write
+        # otherwise.
+        self._build_postings()
         q = tokenize(query)
         if not q or not self._n_docs:
             return []
