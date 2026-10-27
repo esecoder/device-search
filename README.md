@@ -108,11 +108,11 @@ export PATH="$PWD/bin:$PATH"     # then: ds search "..."
 
 ```bash
 ds setup --mode curated              # Documents, Desktop, Downloads, code folders
-ds setup --mode everything           # ⚠️ ENTIRE home directory, NO exclusions — reads the warning
+ds setup --mode everything           #  ENTIRE home directory, NO exclusions — reads the warning
 ds setup --roots ~/work ~/notes      # exactly these folders
 
 ds index                             # crawl + build; safe to re-run (incremental)
-ds index --no-semantic               # ⚠️ START HERE on a real corpus — see the timings below
+ds index --no-semantic               #  START HERE on a real corpus — see the timings below
 ds search 'some exact string'
 ds search 'a question about a concept'
 ds search 'retrievers.py' -k 5 --json
@@ -166,7 +166,7 @@ daemon itself, and cannot if there is no interpreter to launch.
 ```bash
 cd ~/WebstormProjects/device-search
 
-./bin/ds setup --roots ~/Documents ~/work   # ⚠️ YOUR folders, not a test corpus
+./bin/ds setup --roots ~/Documents ~/work   #  YOUR folders, not a test corpus
 ./bin/ds index                              # build the index
 
 cd src-tauri
