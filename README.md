@@ -30,13 +30,13 @@ So the tool runs four backends and **the query decides which ones run**:
 | **path** | *where is the file called X?* | `retrievers.py` |
 | **semantic** (local embeddings) | *what is this concept near?* | `how do I check video moves smoothly` |
 
-⚠️ **That routing is the agentic part.** Not "run everything and merge" — a fixed three-stage
+**That routing is the agentic part.** Not "run everything and merge" — a fixed three-stage
 pipeline is not an agent. The classifier reads the query, picks the tools, and if the first pass
 finds nothing, **broadens** to the ones it skipped.
 
 ---
 
-## ⚠️ The finding that shaped the design
+## The finding that shaped the design
 
 A control query — `ZZQX_NOT_IN_ANY_FILE_9931`, which is definitely not on disk — returned
 **thirteen confident results.** Semantic search always returns its top-k, because cosine
@@ -52,7 +52,7 @@ The obvious fix is a minimum-similarity threshold. **The measurement says that c
 | `where is the BM25 implementation` | 0.632 ← real |
 | `ZZQX_NOT_IN_ANY_FILE_9931` | 0.615 ← garbage |
 
-⚠️ **The best garbage query outscores the worst real one. The boundary is negative.**
+**The best garbage query outscores the worst real one. The boundary is negative.**
 This is embedding anisotropy — bge-small maps everything into a narrow cone, so every score
 lands in 0.5–0.7 whether or not the document is relevant.
 
@@ -64,7 +64,7 @@ MATCHES — your words are in these files (2)
   ...evidence the thing exists...
 
 CLOSEST BY MEANING — no word match, ranked by similarity (4)
-  ⚠️ These are NOT evidence the thing exists.
+  These are NOT evidence the thing exists.
 ```
 
 Only lexical hits count as "found". Semantic hits are offered as leads, labelled as leads.
@@ -80,7 +80,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-⚠️ **The base install is TORCH-FREE (~264 MB)**, and the code defaults to ONNX to match.
+**The base install is TORCH-FREE (~264 MB)**, and the code defaults to ONNX to match.
 The previous version of `requirements.txt` installed `sentence-transformers`, which downloads
 ~2 GB of PyTorch that nothing runs unless you ask for it.
 
@@ -90,7 +90,7 @@ The previous version of `requirements.txt` installed `sentence-transformers`, wh
 | `+ pip install -r requirements-media.txt` | ~110 MB more | PDF and OCR |
 | `+ pip install -r requirements-torch.txt` | ~2 GB | the PyTorch path, for GPU or large indexing runs |
 
-⚠️ **`onnxruntime` is pinned below 1.20 in `requirements.txt`, and the pin is not cosmetic.**
+**`onnxruntime` is pinned below 1.20 in `requirements.txt`, and the pin is not cosmetic.**
 1.23+ is built for macOS 13.4 and **fails to load on macOS 13.0**. An unpinned install produces
 an app that dies at import with a symbol error before it can explain itself.
 
@@ -121,10 +121,10 @@ ds stats                             # what is actually indexed
 ds secrets-report                    # recognised secrets in the index, redacted
 ```
 
-⚠️ **Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
+**Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
 miss from a full one are different facts, and only the tool knows which one you just had.
 
-## ⚠️ How long indexing takes, and why
+## How long indexing takes, and why
 
 **Two phases with wildly different costs.** The crawl and text extraction are fast; the
 embedding phase is not, and it dominates everything.
@@ -132,14 +132,14 @@ embedding phase is not, and it dominates everything.
 | Corpus | Text phase | Embedding phase (ONNX) | Embedding phase (torch) |
 |---|---|---|---|
 | 117 documents | **0.1 s** | 12 min | 3 min |
-| **5,700 documents** (a real Documents+Desktop+Downloads) | ~2 min | ⚠️ **~6.5 hours** | **~1.7 hours** |
-| 100,000 documents | ~30 min | ⚠️ **~115 hours** | ~30 hours |
+| **5,700 documents** (a real Documents+Desktop+Downloads) | ~2 min | **~6.5 hours** | **~1.7 hours** |
+| 100,000 documents | ~30 min | **~115 hours** | ~30 hours |
 
-⚠️ **The measured rate is 8.2 chunks/sec on ONNX and 31.4 on torch**, on CPU, from 5,726 real
-chunks. ⚠️ **Neither runtime makes CPU indexing at this scale pleasant — the difference is a
+**The measured rate is 8.2 chunks/sec on ONNX and 31.4 on torch**, on CPU, from 5,726 real
+chunks. **Neither runtime makes CPU indexing at this scale pleasant — the difference is a
 factor of four, not an order of magnitude.**
 
-⚠️ **SO RUN THIS FIRST:**
+**SO RUN THIS FIRST:**
 ```bash
 ./bin/ds index --no-semantic
 ```
@@ -147,20 +147,20 @@ It finishes in seconds and gives you **exact string matching, BM25 and filename 
 everything** — which covers the query that motivated this project. Semantic search is the thing
 you add afterwards, overnight, or on a machine with a GPU.
 
-⚠️ **AND IF YOU RUN THE FULL INDEX, DON'T SIT AND WATCH IT.** It will look hung after a few
+**AND IF YOU RUN THE FULL INDEX, DON'T SIT AND WATCH IT.** It will look hung after a few
 minutes of no output, because the embedding phase reports every 5,000 documents. Run it under
 `nohup` and check the log:
 ```bash
 nohup ./bin/ds index > /tmp/index.log 2>&1 &
 tail -f /tmp/index.log
 ```
-⚠️ **It is incremental**, so interrupting it is survivable — but the VECTOR phase is not
+**It is incremental**, so interrupting it is survivable — but the VECTOR phase is not
 resumable yet: an interrupted embedding run leaves the previous `vectors.npy` in place, and
 nothing warns you that it is stale. Check with `./bin/ds stats`.
 
 ## Run the desktop app
 
-⚠️ **Requires the venv to exist first** (see Install above) — the shell launches the Python
+**Requires the venv to exist first** (see Install above) — the shell launches the Python
 daemon itself, and cannot if there is no interpreter to launch.
 
 ```bash
@@ -177,12 +177,12 @@ A **tray icon** appears. Press **`Cmd+Shift+Space`** (Windows/Linux: `Ctrl+Shift
 summon the search box. Left-click the tray icon does the same. `Esc` dismisses; the app stays
 running in the tray.
 
-⚠️ **NOT `Cmd+Space`** — that is Spotlight's, and overriding a well-known system shortcut in an
+**NOT `Cmd+Space`** — that is Spotlight's, and overriding a well-known system shortcut in an
 open-source app is a hostile default.
 
-⚠️ **If the hotkey does nothing on macOS**, grant Accessibility permission in
+**If the hotkey does nothing on macOS**, grant Accessibility permission in
 System Settings → Privacy & Security. A global hotkey is an OS-level capability and macOS gates
-it. ⚠️ **This is unverified** — the app was built on a machine where the window could not be
+it. **This is unverified** — the app was built on a machine where the window could not be
 seen, so the layout and the hotkey firing are unchecked.
 
 ### What needs to be running
@@ -202,15 +202,15 @@ If a search says *"daemon unreachable"*, start it manually and read the error:
 
 ## Privacy
 
-⚠️ **A search index is a copy of your files in a second location.** That is the point, and it is
+**A search index is a copy of your files in a second location.** That is the point, and it is
 also the risk.
 
 - The index lives at **`~/.device-search/`** (mode `700`), never in this repo.
 - **`--llm` sends file snippets to an API.** It is off by default.
-- ⚠️ **Before any snippet leaves the process, it is scanned for recognised secret formats**
+- **Before any snippet leaves the process, it is scanned for recognised secret formats**
   (private keys, `sk-…`, `AKIA…`, `ghp_…`, JWT, `.env` assignments, connection strings). A match
   is **dropped, not redacted**, and the drop is reported.
-- ⚠️ **That interlock is not a guarantee.** A regex cannot recognise an unlabelled password in a
+- **That interlock is not a guarantee.** A regex cannot recognise an unlabelled password in a
   notes file. It stops the catastrophic, obvious cases. **Anything it cannot recognise is your
   responsibility** — which is why `everything` mode prints what it will do and makes you type
   the word before it starts.
@@ -233,8 +233,8 @@ Scale behaviour, measured separately on a **859,569-document corpus (6.9 GB)** �
 |---|---|
 | Keyword search, first call | ✅ **0.002s** (was **351.45s** on the in-process BM25) |
 | Index build | ✅ **90s, once ever** — it lives in the database, not rebuilt per restart |
-| Fragment search via trigram | ✅ **10.73s → 0.015s** — ⚠️ but see the recommendation to revert it |
-| `path` after the trigram move | ⚠️ **1.77s**, still worse than the **0.73s** before any of this |
+| Fragment search via trigram | ✅ **10.73s → 0.015s** — but see the recommendation to revert it |
+| `path` after the trigram move | **1.77s**, still worse than the **0.73s** before any of this |
 
 **Test suites:**
 
@@ -244,19 +244,19 @@ python tests/test_fts_fallback.py     # 9 checks — the FTS5 fast path, its fal
                                       #   identifiers containing '_' and '.' on both
 ```
 
-⚠️ **The fallback test is not decoration.** The NumPy BM25 fallback turned out to be **dead code
+**The fallback test is not decoration.** The NumPy BM25 fallback turned out to be **dead code
 that returned nothing** on exactly the builds it existed to serve, and the assertion that caught
 it is `keyword search still returns results on the fallback`.
 
-⚠️ **Not verified:** the crawl has not been exercised on a large *home* directory specifically.
+**Not verified:** the crawl has not been exercised on a large *home* directory specifically.
 It is written for one (permission errors are skips, symlinks are not followed, every skip is
 counted), and the index work above has been measured at 859,569 documents — but **index a
 curated set first** and check `ds stats` before trusting `everything` mode.
 
-⚠️ **Also not verified:** the `--llm` reranker's happy path — it needs an API key. The secret
+**Also not verified:** the `--llm` reranker's happy path — it needs an API key. The secret
 interlock is rule-based and tested; the ranking quality is not.
 
-⚠️ **And the honest state of the trigram index: not finished, and probably not worth it.** Size,
+**And the honest state of the trigram index: not finished, and probably not worth it.** Size,
 build cost and benefit are all measured above, and the recommendation is to revert it — stated
 rather than left for someone to discover from their disk filling up.
 
@@ -270,18 +270,18 @@ rather than left for someone to discover from their disk filling up.
 - **No FTS5 *as the only* keyword path.** FTS5 *is* used — see
   [the index section](#the-index-what-fts5-gave-and-what-the-trigram-index-cost) below — but the
   NumPy BM25 is kept as a **runtime-checked fallback**, because `sqlite3` compiled without FTS5
-  is common on macOS system Python. ⚠️ **A backend that is silently absent is worse than one
+  is common on macOS system Python. **A backend that is silently absent is worse than one
   that is slower**, which is why the check is at runtime and the degradation is logged rather
   than assumed.
 - **No model-based query classifier.** The classifier is rule-based: deterministic, testable,
-  no key. ⚠️ It is also genuinely worse than a model on ambiguous queries, and that is stated
+  no key. It is also genuinely worse than a model on ambiguous queries, and that is stated
   rather than implied.
 
 ---
 
 ## The index: what FTS5 gave, and what the trigram index cost
 
-⚠️ **This section corrects an earlier claim in this README.** It used to say, under *"What is
+**This section corrects an earlier claim in this README.** It used to say, under *"What is
 deliberately not here"*, that there was no FTS5 — because `sqlite3` compiled without FTS5 is
 common on macOS system Python, and *"a backend that is silently absent is worse than one that
 is slower."* **That reasoning was sound and the conclusion was wrong.** The right answer was to
@@ -319,7 +319,7 @@ building the index   90s   ONCE, EVER — it lives in the database, not rebuilt 
 'php'              0.004s   400 hits
 ```
 
-### ⚠️ The first attempt was fast and wrong, and that is the part worth keeping
+### The first attempt was fast and wrong, and that is the part worth keeping
 
 ```
 count(docs_fts)   859,569
@@ -331,15 +331,15 @@ With `content='documents'` the FTS table is external-content, so `SELECT count(*
 returns the number of rows in the **content** table — not the number of terms indexed. **The
 rebuild check compared a number with itself, passed every time, and the rebuild never ran.**
 
-Searches then returned in **0.00 s with zero results**. ⚠️ **Fast, and wrong — and a speed
+Searches then returned in **0.00 s with zero results**. **Fast, and wrong — and a speed
 measurement alone would have called it a success.** Fixed by counting `docs_fts_data`, which is
 the actual index: a fresh table has a handful of structural rows, a built one has hundreds of
 thousands.
 
-### ⚠️ Three more silent bugs in the FTS work, each found only by testing a fresh database
+### Three more silent bugs in the FTS work, each found only by testing a fresh database
 
 1. **No triggers.** An external-content FTS5 table stores no text of its own, so it cannot know
-   a row changed. ⚠️ **MEASURED:** a document inserted after the index was built was invisible to
+   a row changed. **MEASURED:** a document inserted after the index was built was invisible to
    keyword search — before a restart *and* after one. Fixed with SQLite's documented
    three-trigger pattern (insert / delete / update, the update deleting then re-inserting,
    because a delete without the old text leaves stale terms that match forever).
@@ -347,16 +347,16 @@ thousands.
    `executescript(SCHEMA)`, so `content='documents'` named a table that did not exist, the
    `CREATE` failed, `_fts_ok` stayed `False`, and keyword search fell back to the slow Python
    path **forever, without saying so.**
-3. **`.isalnum()` dropped every identifier with an underscore or a dot.** ⚠️ **MEASURED:** a raw
+3. **`.isalnum()` dropped every identifier with an underscore or a dot.** **MEASURED:** a raw
    `MATCH` for `unique_token_xyz` and `db_acl.php` returned their rows, and the search returned
    **zero** — because `"_".isalnum()` is `False` and the token was filtered before the query was
-   built. ⚠️ **This is a file search tool:** underscores and dots are in most filenames and most
+   built. **This is a file search tool:** underscores and dots are in most filenames and most
    code identifiers, so the filter removed exactly the tokens the product exists to find, and it
    did so silently, by returning an empty result rather than an error. Fixed by **quoting** the
    tokens instead — FTS5 treats a quoted token as a literal string, so punctuation cannot be
    parsed as syntax. Filtering was never needed.
 
-### ⚠️ And a fourth, found while writing this section: the fallback was dead code
+### And a fourth, found while writing this section: the fallback was dead code
 
 `_build_postings()` — the function that builds the NumPy BM25 index — **had no call sites
 anywhere in the codebase.** So on a build without FTS5, the fallback ran with `_n_docs == 0`,
@@ -368,7 +368,7 @@ two documents indexed:
   fallback path : keyword_search("quick") -> 0 hits   ← silently nothing
 ```
 
-⚠️ **An empty result is the worst possible failure signal for this tool**, because a file search
+**An empty result is the worst possible failure signal for this tool**, because a file search
 that finds nothing reads as *"that file does not exist"* rather than as *"a backend is missing"*.
 So the fallback was **not slow — it was broken**, and the fallback was the entire reason this
 project originally refused to depend on FTS5. **The argument for the reimplementation rested on
@@ -388,14 +388,14 @@ shape=(784                   -> 0.004s
 db_acl.php                   -> 0.002s
 ```
 
-⚠️ **But adding an index is not local, and the honest measured result is not a clean win:**
+**But adding an index is not local, and the honest measured result is not a clean win:**
 
 ```
                           before      after
 exact (fragment)          10.70s      0.015s     the thing it was built for   ✅
-path                       0.73s      9.16s      ⚠️ 12x SLOWER, never mentioned
-index.db                    8.6GB     19.4GB     ⚠️ 11GB of trigram data
-live search                  ~2s        ~13s     ⚠️ NET WORSE
+path                       0.73s      9.16s      12x SLOWER, never mentioned
+index.db                    8.6GB     19.4GB     11GB of trigram data
+live search                  ~2s        ~13s     NET WORSE
 ```
 
 A trigram index is roughly **twice the size of the text it indexes**, and inside the same file
@@ -409,14 +409,14 @@ index.db.tri               8.3GB      its own file
 path_search        9.16s -> 1.77s
 ```
 
-⚠️ **The cost, paid knowingly:** triggers cannot cross database files, so this index has to be
+**The cost, paid knowingly:** triggers cannot cross database files, so this index has to be
 told about changes explicitly from `add_many` — and **two bugs made that sync dead code**, both
 found only by testing it. One was a **circular dependency**: `tri_add` refused to add unless
 `_tri_ready` was set, and nothing sets `_tri_ready` except a populated index — so on a fresh
 database, **nothing was ever added, ever.** The other: `DELETE FROM docs_tri` on a contentless
 table is rejected outright (`cannot DELETE from contentless fts5 table`).
 
-⚠️ **⚠️ AND THE HONEST RECOMMENDATION IS TO REVERT IT.**
+**AND THE HONEST RECOMMENDATION IS TO REVERT IT.**
 
 ```
 size       8.3GB   for an 8.2GB corpus    — it nearly doubles the disk
