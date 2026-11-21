@@ -105,6 +105,20 @@ chmod +x "$APP/Contents/MacOS/device-search"
 #
 # Build it with:  ./bin/build-sidecar.sh
 DAEMON="$HERE/dist/device-search-daemon"
+# Refuse to bundle a daemon older than the code it runs. A stale binary is
+# indistinguishable from a bug: the app starts, the endpoint returns "no such
+# route", and the Python source looks correct the whole time. Measured: the
+# shell was rebuilt and the daemon was not, so a new endpoint appeared to be
+# missing from code that had it.
+if [ -f "$DAEMON" ]; then
+    NEWER=$(find "$HERE/device_search" -name '*.py' -newer "$DAEMON" 2>/dev/null | head -1)
+    if [ -n "$NEWER" ]; then
+        echo "    ⚠️  the daemon is older than $NEWER" >&2
+        echo "        rebuild it first: ./bin/build-sidecar.sh" >&2
+        exit 1
+    fi
+fi
+
 if [ -f "$DAEMON" ]; then
     cp "$DAEMON" "$APP/Contents/MacOS/device-search-daemon"
     chmod +x "$APP/Contents/MacOS/device-search-daemon"

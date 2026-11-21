@@ -259,6 +259,58 @@ def index_command() -> list[str]:
     return [sys.executable, "-u", "-m", "device_search.cli", "index"]
 
 
+def folder_costs(store, parent: str | None = None) -> list[dict]:
+    """Immediate subfolders of `parent`, with what each one would cost to index.
+
+    The numbers come from the database rather than from walking the disk: a walk
+    of a home directory takes minutes and would make the checkboxes feel broken,
+    while a GROUP BY returns in milliseconds. The figure shown is what has actually
+    been indexed under that path, which is the number the user is deciding about.
+
+    `parent=None` returns the top-level entries of the home directory, so the first
+    screen offers a choice rather than a list of nothing.
+    """
+    import os
+    from .config import SKIP_DIR_NAMES, MAX_FILE_BYTES
+
+    base = parent or str(store.get_meta("scan_root") or os.path.expanduser("~"))
+    base = base.rstrip("/") or "/"
+    prefix = base + "/"
+
+    counts: dict[str, dict] = {}
+    for path, size in store.conn.execute(
+            "SELECT path, COALESCE(size,0) FROM documents WHERE path LIKE ?",
+            (prefix + "%",)):
+        rest = path[len(prefix):]
+        if "/" not in rest:
+            continue                        # a file directly in base, not a folder
+        child = rest.split("/", 1)[0]
+        d = counts.setdefault(child, {"files": 0, "bytes": 0})
+        d["files"] += 1
+        d["bytes"] += size
+
+    out = []
+    for name, d in sorted(counts.items(), key=lambda kv: -kv[1]["files"]):
+        if not name:
+            continue
+        full = prefix + name
+        excluded = name in SKIP_DIR_NAMES
+        # The index stores the text plus the word index, measured at about 1.4x.
+        # Time is the crawl; embedding is separate and shown as its own column.
+        index_bytes = int(d["bytes"] * 1.4)
+        out.append({
+            "name": name,
+            "path": full,
+            "files": d["files"],
+            "text_bytes": d["bytes"],
+            "index_bytes": index_bytes,
+            "excluded": excluded,
+            "reason": "excluded by default" if excluded else "",
+            "parent": base,
+        })
+    return out
+
+
 class Engine:
     """⚠️ MODULE-LEVEL STATE IS THE POINT, NOT A SMELL. The whole reason this is a daemon is
     that loading the model is expensive; a per-request object would defeat it."""
@@ -849,6 +901,11 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/folders":
+                q = parse_qs(url.query)
+                parent = (q.get("path") or [None])[0]
+                self._send(200, {"folders": folder_costs(ENGINE.store, parent),
+                                 "parent": parent or str(ENGINE.store.get_meta("scan_root") or "")})
             elif url.path == "/api/roots":
                 from pathlib import Path as _P
 

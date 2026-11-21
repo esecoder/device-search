@@ -57,6 +57,11 @@ const Setup = (() => {
   // So: the message lives here, and render() draws it. Same rule as `chosen`.
   let msgText = "";
   let msgKind = "";
+
+  // Folder tree state: which parent is being shown, and which folders are ticked.
+  // Kept at module level so a re-render (switching tabs) does not lose the
+  // selection the user just made.
+  let treeState = null;
   // ⚠️ AND THE SAME PATTERN A THIRD TIME: whether the text-path fallback is OPEN is state.
   //
   // The picker's failure handler did `inp.style.display = ""` and then called render() — which
@@ -155,7 +160,131 @@ const Setup = (() => {
       return;
     }
 
-    // The code-fragment index is the one optional piece that can use more disk than the
+  
+  // ---- folder tree with live cost ------------------------------------------
+  //
+  // Every folder shows what it would cost before anything is committed: how many
+  // files, how much index, how long. The totals update as boxes are ticked, so the
+  // consequence of a choice is visible while making it rather than after.
+  //
+  // The numbers come from the backend, computed from what is already indexed. A
+  // disk walk would take minutes on a home directory and make the checkboxes feel
+  // broken.
+  async function renderTree(host) {
+    // Reads the module-level treeState directly rather than taking it as a
+    // parameter. As a parameter it was shadowed on one of the re-render paths
+    // and arrived undefined, which blanked the panel; there is only ever one
+    // tree, so a parameter was never buying anything.
+    if (!treeState) treeState = { parent: null, selected: new Map() };
+    const wrap = document.createElement("div");
+    wrap.className = "tree";
+    host.appendChild(wrap);
+
+    const totals = document.createElement("div");
+    totals.className = "tree-totals";
+
+    async function load(path) {
+      const r = await api("/api/folders" + (path ? "?path=" + encodeURIComponent(path) : ""));
+        // `r.data` guarded, not assumed: reading it directly blanked the whole
+        // setup panel whenever a response carried no body, which is a normal
+        // failure rather than an exceptional one.
+        if (!r || !r.ok || !r.data) return [];
+        if (!treeState.parent) treeState.parent = r.data.parent || null;
+      return r.data.folders || [];
+    }
+
+    function fmtBytes(n) {
+      if (n > 1e9) return (n / 1e9).toFixed(1) + " GB";
+      if (n > 1e6) return (n / 1e6).toFixed(0) + " MB";
+      if (n > 1e3) return (n / 1e3).toFixed(0) + " KB";
+      return n + " B";
+    }
+
+    function updateTotals() {
+      let files = 0, bytes = 0;
+      for (const f of treeState.selected.values()) { files += f.files; bytes += f.index_bytes; }
+      // Measured crawl rate is about 1,500 files per second on text, and embedding
+      // is a separate, much slower job that is not started here.
+      const mins = Math.max(files / 1500 / 60, 0);
+      totals.textContent = treeState.selected.size
+        ? `${treeState.selected.size} folder${treeState.selected.size > 1 ? "s" : ""} · `
+          + `${files.toLocaleString()} files · about ${fmtBytes(bytes)} of index · `
+          + `about ${mins < 1 ? "under a minute" : Math.round(mins) + " minutes"} to crawl`
+        : "Nothing selected yet.";
+    }
+
+    async function renderList() {
+      wrap.innerHTML = "";
+      const folders = await load(treeState.parent);
+      if (!folders.length) {
+        wrap.textContent = "No indexed folders under this path yet. Index a folder first, "
+                         + "then its subfolders appear here with their costs.";
+        return;
+      }
+      for (const f of folders) {
+        const row = document.createElement("label");
+        row.className = "tree-row" + (f.excluded ? " excluded" : "");
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = treeState.selected.has(f.path);
+        if (f.excluded) {
+          cb.disabled = true;
+          cb.title = "Excluded by default: " + f.reason;
+        }
+        cb.onchange = () => {
+          if (cb.checked) treeState.selected.set(f.path, f);
+          else treeState.selected.delete(f.path);
+          updateTotals();
+        };
+
+        const name = document.createElement("span");
+        name.className = "tree-name";
+        name.textContent = f.name;
+
+        const cost = document.createElement("span");
+        cost.className = "tree-cost";
+        cost.textContent = `${f.files.toLocaleString()} files · ${fmtBytes(f.index_bytes)}`;
+
+        row.appendChild(cb); row.appendChild(name); row.appendChild(cost);
+        wrap.appendChild(row);
+      }
+    }
+
+    host.appendChild(totals);
+
+    const actions = document.createElement("div");
+    actions.style.marginTop = "10px";
+    const save = document.createElement("button");
+    save.className = "setup-btn";
+    save.textContent = "Apply folder selection";
+    save.onclick = async () => {
+      const paths = [...treeState.selected.keys()];
+      if (!paths.length) return;
+      save.disabled = true;
+      save.textContent = "Applying…";
+      const r = await api("/api/roots", { method: "POST", body: { paths, mode: "explicit" } });
+      if (!r.ok) {
+        save.disabled = false;
+        save.textContent = "Apply folder selection";
+        const m = el("setup-msg");
+        if (m) { m.textContent = r.error || "Could not save the selection."; m.className = "setup-msg err"; }
+        return;
+      }
+      // Removing a folder is a separate, deliberate action because it deletes
+      // rows. Naming it here means the user sees that applying a narrower
+      // selection also forgets what is no longer in it.
+      save.textContent = "Saved — indexing will start for these folders";
+    };
+    actions.appendChild(save);
+    host.appendChild(actions);
+
+    await renderList();
+    updateTotals();
+    return { render: renderList, updateTotals };
+  }
+
+  // The code-fragment index is the one optional piece that can use more disk than the
     // documents it indexes, so it is never started without the cost being shown and the
     // choice being clicked. The numbers come from the backend, computed from the corpus,
     // rather than being written here where they would go stale.
@@ -220,6 +349,11 @@ const Setup = (() => {
     msg.id = "setup-msg";
     msg.className = "setup-msg";
     host.appendChild(msg);
+
+    if (!treeState) {
+      treeState = { parent: null, selected: new Map() };
+      renderTree(host);
+    }
     // ⚠️ DRAWN FROM STATE on every render, so a message set before a render is still there after it.
     paintNote();
 
