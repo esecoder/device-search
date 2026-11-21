@@ -8,4 +8,18 @@
 -r requirements.txt
 
 pdftext>=0.7          # PDF -> text, WITH page positions, so hits can say "page 12"
-rapidocr-onnxruntime  # image -> text (OCR), via ONNX Runtime
+# rapidocr imports cv2 and declares opencv-python, which has no wheel for
+# macOS arm64 on Python 3.12 and builds from source for an hour or more.
+# opencv-python-headless has a wheel and provides the same `cv2` module, so it is
+# installed first and rapidocr is then installed without resolving its dependency:
+#
+#   pip install opencv-python-headless pyclipper shapely pyyaml pillow six tqdm
+#   pip install --no-deps rapidocr-onnxruntime
+#
+# The four extra packages are rapidocr's remaining dependencies. Installing it
+# normally pulls opencv-python and compiles OpenCV from source.
+opencv-python-headless  # provides cv2, from a wheel
+pyclipper>=1.2.0
+shapely>=1.7.1,!=2.0.4
+tqdm
+# rapidocr-onnxruntime itself: install with --no-deps, see above

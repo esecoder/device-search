@@ -36,12 +36,21 @@ ENTRY="$(mktemp -t ds_entry).py"
 trap 'rm -f "$ENTRY"' EXIT
 cat > "$ENTRY" <<'PYEOF'
 import multiprocessing
-from device_search.server import main
+import sys
 
 if __name__ == "__main__":
     # Required when freezing: without it, a frozen process that starts a child
     # re-runs the parent instead of the child.
     multiprocessing.freeze_support()
+
+    # One binary, two jobs. With no arguments it is the daemon; with "index" it is
+    # the indexer. The daemon re-runs the indexer as a child process when it needs
+    # to repair the index, and in a frozen build the child command is this same
+    # executable - so it has to understand the word the daemon passes it.
+    if len(sys.argv) > 1 and sys.argv[1] == "index":
+        from device_search.cli import main as cli_main
+        raise SystemExit(cli_main(["index", "--no-semantic"]))
+    from device_search.server import main
     raise SystemExit(main())
 PYEOF
 
@@ -81,7 +90,11 @@ if [ -x dist/device-search-daemon ]; then
     echo
     echo "  verifying it runs with no repository on the path..."
     cd /tmp
-    if /Users/eseudom/WebstormProjects/device-search/dist/device-search-daemon --version 2>&1 | head -2; then
+    # `--help` proves the interpreter and the package are inside the binary: if
+    # either were missing, argparse would never be reached. An earlier version
+    # of this check used `--version`, which the daemon does not define, so it
+    # reported failure for a build that was fine.
+    if "$HERE/dist/device-search-daemon" --help >/dev/null 2>&1; then
         echo "  the binary starts on its own"
     else
         echo "  the binary did not start; check the log above" >&2

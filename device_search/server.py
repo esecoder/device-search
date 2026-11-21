@@ -243,6 +243,22 @@ def llm_probe(timeout: int = 25) -> dict:
             "reason": "" if txt else "the model returned no content"}
 
 
+def index_command() -> list[str]:
+    """The command that re-runs the indexer, correct in both frozen and normal mode.
+
+    `sys.executable` is the Python interpreter when running from source, and the
+    frozen binary when running as a shipped app. Using it blindly means a shipped
+    app runs `<binary> -m device_search.cli index`, which the binary does not
+    understand. The fallback that made it appear to work was worse: it found a
+    system python3 with none of the media packages and re-indexed every document as
+    plain text. Measured: a 48-minute crawl under /Library/Frameworks/Python that
+    had no pdftext and no OCR, overwriting the extractions that did.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "index"]
+    return [sys.executable, "-u", "-m", "device_search.cli", "index"]
+
+
 class Engine:
     """⚠️ MODULE-LEVEL STATE IS THE POINT, NOT A SMELL. The whole reason this is a daemon is
     that loading the model is expensive; a per-request object would defeat it."""
@@ -605,7 +621,7 @@ class Engine:
             out = open(log_path, "a")
         except OSError:
             out = subprocess.DEVNULL
-        cmd = [sys.executable, "-u", "-m", "device_search.cli", "index"]
+        cmd = index_command()
         try:
             proc = subprocess.Popen(cmd, stdout=out, stderr=out,
                                     cwd=str(Path(__file__).resolve().parent.parent))
@@ -1034,7 +1050,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 out = subprocess.DEVNULL
             # ⚠️ `-u` so the log is written immediately rather than sitting in a buffer.
-            cmd = [sys.executable, "-u", "-m", "device_search.cli", "index"]
+            cmd = index_command()
             try:
                 proc = subprocess.Popen(cmd, stdout=out, stderr=out,
                                         cwd=str(Path(__file__).resolve().parent.parent))

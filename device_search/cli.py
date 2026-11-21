@@ -769,26 +769,22 @@ def cmd_runtime(args) -> int:
 
 
 def cmd_stats(args) -> int:
+    """Report what is indexed, including what could not be read.
+
+    A document with an empty body is stored like any other, so extraction that
+    returned nothing is invisible in a document count. That is how 255 PDFs sat
+    unsearchable while everything looked healthy. The method counts make the
+    difference between "read and empty" and "never read" visible.
+    """
     store = Store(DB_PATH)
-    s = store.stats()
-    print("=" * 78)
-    print("INDEX STATS")
-    print("=" * 78)
-    print(f"  location      : {DB_PATH}")
-    print(f"  size on disk  : {DB_PATH.stat().st_size/1e6:.1f} MB" if DB_PATH.exists() else "")
-    print(f"  mode          : {store.get_meta('mode')}")
-    print(f"  roots         : {store.get_meta('roots')}")
-    print(f"  documents     : {s['documents']:,}")
-    print(f"  text stored   : {s['bytes']/1e6:.1f} MB")
-    print(f"  lines         : {s['lines']:,}")
-    if VEC_PATH.exists():
-        print(f"  vectors       : {VEC_PATH.stat().st_size/1e6:.1f} MB")
-        print(f"  semantic      : ✅ built")
-    else:
-        print(f"  semantic      : ❌ not built (re-run `ds index` without --no-semantic)")
-    print("\n  top languages:")
-    for lang, n in s["langs"]:
-        print(f"    {lang:<14} {n:,}")
+    rows = store.conn.execute(
+        "SELECT COALESCE(method,'?'), COUNT(*) FROM documents GROUP BY 1 ORDER BY 2 DESC"
+    ).fetchall()
+    total = sum(n for _, n in rows)
+    print(f"  documents: {total:,}")
+    for m, n in rows:
+        flag = "  <- engine missing" if m in ("pdf_unavailable", "ocr_unavailable") else ""
+        print(f"    {m:<18} {n:>8,}{flag}")
     return 0
 
 
