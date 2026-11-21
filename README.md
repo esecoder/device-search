@@ -124,6 +124,72 @@ ds secrets-report                    # recognised secrets in the index, redacted
 **Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
 miss from a full one are different facts, and only the tool knows which one you just had.
 
+## What gets indexed, and what it costs
+
+### Excluded by default
+
+Installed dependencies and application data are **not** indexed. On a typical machine these
+are the majority of every file on disk:
+
+```
+.git/  node_modules/  .venv/  venv/  build/  dist/  target/  .next/  coverage/
+__pycache__/  .mypy_cache/  .pytest_cache/  .ruff_cache/  Pods/  vendor/
+.cargo/  .rustup/  .npm/  .bun/  .yarn/  .konan/  .gradle/  .m2/  .hermes/
+.nvm/  .pyenv/  .rbenv/  .sdkman/  .cache/  Library/
+```
+
+Measured on one home folder, these held **755,412 of 859,569 indexed rows — 88%**. Excluding
+them left **78,915 documents (9.2%)**. The index was almost entirely package-manager metadata
+and application caches, not anything the user wrote.
+
+`--include-deps` indexes them anyway, for when you do want to search a dependency's source.
+
+### Disk usage
+
+The index is roughly **3.5x the size of the text it indexes**, depending on which optional
+pieces are on:
+
+| Component | Size | Notes |
+|---|---|---|
+| `index.db` | **1.4x** the stored text | documents + the FTS5 word index |
+| `index.db.tri` | **1.9x** the stored text | optional, see below |
+| vectors | **1,536 B per chunk** | `.npy` shard files, not SQLite |
+
+For a typical Documents + Desktop + Downloads corpus (about 100 MB of text) the whole index is
+**250-350 MB**. That ratio is normal for a search index.
+
+### The code-fragment index is optional
+
+`ds deep-index` builds a trigram index so queries like `InputLayer(shape=(784,))` return in
+milliseconds instead of scanning. It is **not built unless you ask for it**, and it prints its
+cost first:
+
+```
+  Documents to index :      586,383
+  Disk it will use   :        11.4 GB   (free: 170.1 GB)
+  Time to build      :          10 minutes
+
+  Build it? This is the only step that uses this much space. [y/N]
+```
+
+Without it, fragment queries still work — they scan and take about 9 seconds. For a few
+thousand files the index is a few hundred megabytes and almost always worth it. For a home
+directory it was 11.1 GB against a corpus that was mostly package caches, which is why it is
+a decision rather than a default.
+
+### Removing a folder
+
+```bash
+./bin/ds forget ~/old-project            # shows what it will remove, then asks
+./bin/ds forget ~/old-project --vacuum   # and shrinks the file afterwards
+```
+
+Removal frees the rows immediately. **The file only returns the space after a `VACUUM`**,
+which needs free disk equal to the file size and takes a few minutes on a multi-gigabyte
+database — so it is a separate flag rather than something that happens silently.
+
+---
+
 ## How long indexing takes, and why
 
 **Two phases with wildly different costs.** The crawl and text extraction are fast; the
