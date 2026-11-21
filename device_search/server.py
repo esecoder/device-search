@@ -438,13 +438,13 @@ class Engine:
                     a = ask_model(query, srcs)
                     if not a.get("error"):
                         answer = {"text": a["answer"], "citations": a.get("citations", []),
-                        # The context report travels WITH the answer, because that is
-                        # where the interface reads it. Left in `trace`, it was returned to
-                        # the client and never displayed.
-                        answer["context"] = trace.get("context") or {}
                                   "refused": a.get("refused", False),
                                   "invented": a.get("invented_citations") or [],
-                                  "uncited": bool(a.get("uncited"))}
+                          "uncited": bool(a.get("uncited")),
+                          # Travels WITH the answer, because that is where the
+                          # interface reads it. Left in `trace`, it was returned
+                          # to the client and never displayed.
+                          "context": trace.get("context") or {}}
                     else:
                         trace["answer_error"] = a["error"]
                 else:
