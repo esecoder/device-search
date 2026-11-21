@@ -612,8 +612,18 @@ function renderInner() {
     for (const c of answer.citations || []) {
       const a = document.createElement("span");
       a.className = "answer-cite";
-      a.textContent = `[${c.n}] ${c.path.split("/").pop()}`;
-      a.title = c.path;
+        // The page, when the source is a PDF: pdftext leaves [page N] markers
+        // in the extracted text, so the backend can report which pages a
+        // snippet came from. Without it a citation says "this file" when the
+        // file has 40 pages, which is the same as not citing it.
+        let where = "";
+        if (c.page_first) {
+          where = c.page_last && c.page_last !== c.page_first
+            ? ` p.${c.page_first}–${c.page_last}`
+            : ` p.${c.page_first}`;
+        }
+        a.textContent = `[${c.n}] ${c.path.split("/").pop()}${where}`;
+        a.title = c.page_first ? `${c.path} (page ${c.page_first})` : c.path;
       a.onclick = () => openPath(c.path);
       d.appendChild(a);
     }

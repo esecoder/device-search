@@ -67,6 +67,25 @@ def _client():
     return {"key": key, "base": base, "model": model}
 
 
+PAGE_MARKER = re.compile(r"\[page (\d+)\]")
+
+
+def page_span(snippet: str) -> tuple[int, int] | None:
+    """The pages a snippet covers, from the markers pdftext leaves in the text.
+
+    Returns (first, last) or None when the snippet has no markers - which is the
+    normal case for anything that is not a PDF.
+
+    A snippet can straddle a page break, so the answer is a range rather than a
+    single number. Reporting only the first page of a two-page quote would send
+    the reader to the wrong place half the time.
+    """
+    nums = [int(m) for m in PAGE_MARKER.findall(snippet or "")]
+    if not nums:
+        return None
+    return min(nums), max(nums)
+
+
 def build_context(cands, text_of, max_sources=MAX_SOURCES):
     """Return [(label, path, snippet)] with secrets removed, plus a report.
 
@@ -93,7 +112,8 @@ def build_context(cands, text_of, max_sources=MAX_SOURCES):
                 if k not in report["blocked_kinds"]:
                     report["blocked_kinds"].append(k)
             continue
-        sources.append((len(sources) + 1, c.path, raw[:MAX_CHARS_PER_SOURCE]))
+        snippet = raw[:MAX_CHARS_PER_SOURCE]
+        sources.append((len(sources) + 1, c.path, snippet))
         report["sent"] += 1
     return sources, report
 
@@ -170,7 +190,17 @@ def ask(query: str, sources, client=None) -> dict:
     cited = {int(m) for m in re.findall(r"\[(\d+)\]", text)}
     unknown = sorted(cited - valid)
     by_num = {n: p for n, p, _s in sources}
-    citations = [{"n": n, "path": by_num[n]} for n in sorted(cited & valid)]
+    pages = {}
+    for n, _p, snip in sources:
+        span = page_span(snip)
+        if span:
+            pages[n] = span
+    citations = []
+    for n in sorted(cited & valid):
+        c = {"n": n, "path": by_num[n]}
+        if n in pages:
+            c["page_first"], c["page_last"] = pages[n]
+        citations.append(c)
 
     refused = text.strip().strip('"').startswith(REFUSAL[:30])
     out = {"answer": text, "citations": citations, "refused": refused, "error": ""}

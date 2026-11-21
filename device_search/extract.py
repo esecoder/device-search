@@ -82,16 +82,18 @@ def extract_pdf(path: Path, max_pages: int | None = None) -> str:
     "line 8,231", which is true and useless — the user thinks in pages. The marker lets the
     snippet say which page it came from.
     """
-    from pdftext.extraction import plain_text_output
-    text = plain_text_output(str(path), sort=False, hyphens=False)
+    # Per page, not the flat output. plain_text_output joins every page into one
+    # string with NO separator - measured: zero form feeds on a six-page document
+    # - so splitting its result on \f produced one 'page' holding the whole file.
+    # The content was complete; the page boundaries were gone, which meant
+    # every citation reported page 1.
+    from pdftext.extraction import paginated_plain_text_output
+    pages = paginated_plain_text_output(str(path), sort=False, hyphens=False)
     if max_pages:
-        # ⚠️ The page marker is the only place a page boundary is recorded, so a cap is
-        # applied on the markers rather than on characters.
-        parts = text.split("\f")
-        text = "\f".join(parts[:max_pages])
+        pages = pages[:max_pages]
     out = []
-    for i, page in enumerate(text.split("\f"), 1):
-        if page.strip():
+    for i, page in enumerate(pages, 1):
+        if page and page.strip():
             out.append(f"[page {i}]\n{page}")
     return "\n".join(out)
 
