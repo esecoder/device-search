@@ -217,7 +217,7 @@ def cmd_index(args) -> int:
     # ⚠️ SO `read_status` IS ASKED BEFORE ANYTHING IS TOUCHED. It decides by PID LIVENESS, not by
     # the flag in the file, because the flag is written by whichever run wrote last and the
     # process holding the lock is a different one.
-    from .vectors import read_status
+    from .vectors import read_status, write_status
     live = read_status(INDEX_DIR)
     if live.get("running"):
         pid = live.get("pid")

@@ -172,6 +172,7 @@ class Store:
         # ⚠️ THE RULE: A TRIGGER MUST EXIST BEFORE THE FIRST WRITE, AND A TABLE MUST EXIST BEFORE
         # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
         # anything at runtime.
+        self._drop_stale_trigram_triggers()
         self._ensure_fts()
         # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
@@ -685,6 +686,24 @@ class Store:
     # database file may predate this table, so every use is guarded and the Python BM25 remains
     # as the fallback. ⚠️ A search backend that refuses to run because an optional extension is
     # missing turns "slower" into "broken".
+    def _drop_stale_trigram_triggers(self) -> None:
+        """Remove triggers left behind when the trigram moved to its own file.
+
+        The trigram index was once a table in this database, and three triggers were
+        created to keep it in step. Moving the table to a separate file left the
+        triggers behind, pointing at a table that no longer exists here. Every insert
+        then failed with "no such table: main.docs_tri" - including the crawl.
+
+        Called on every open because a database created by the old version will still
+        have them, and there is no version number to check against.
+        """
+        try:
+            for name in ("docs_tri_ai", "docs_tri_ad", "docs_tri_au"):
+                self.conn.execute(f"DROP TRIGGER IF EXISTS {name}")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
     def _ensure_fts(self) -> bool:
         if self._fts_ok is not None:
             return self._fts_ok
