@@ -726,6 +726,37 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     except Exception as e:
         trace["vectors"] = {"stale": None, "reason": f"could not check ({type(e).__name__})"}
 
+    # FOLLOW REFERENCES, BEFORE RERANKING.
+    #
+    # Some questions cannot be answered from one document: the result
+    # that matches names a second document, and the fact asked for is
+    # only there. Following it is a lookup against the index, so a
+    # wrong hop is impossible - the worst case is that nothing is added.
+    #
+    # Runs before the reranker so followed documents compete on merit
+    # rather than being appended after the order is decided.
+    try:
+        from .multi_hop import follow
+        extra, hop_trace = follow(store, cands)
+        if extra:
+            known = {c.doc_id for c in cands}
+            for doc_id, path in extra:
+                if doc_id in known:
+                    continue
+                row = store.by_id(doc_id)
+                if not row:
+                    continue
+                # Scored below the direct hits: reached by reference, not by
+                # matching the question. Sorting them first would put a
+                # referenced file above the one that mentioned it.
+                cands.append(Candidate(doc_id=doc_id, path=path,
+                                        lang=row[3] or "",
+                                        n_lines=row[5] or 0,
+                                        score=0.0, sources=["hop"], lexical=True))
+        trace["hop"] = hop_trace
+    except Exception as e:
+        trace["hop"] = {"error": f"{type(e).__name__}: {e}"}
+
     if use_llm and cands:
         cands, llm_report = llm_rerank(query, cands)
         trace["llm"] = llm_report
