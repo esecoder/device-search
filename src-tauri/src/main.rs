@@ -166,13 +166,45 @@ fn ensure_daemon(app: &tauri::AppHandle) -> Option<Child> {
     let out = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).ok();
     let err = out.as_ref().and_then(|f| f.try_clone().ok());
 
-    let mut cmd = Command::new(py);
-    // ⚠️ `-u` IS NOT OPTIONAL FOR A LOGGED CHILD. Python buffers stdout when it is not a
-    // terminal, so the daemon's startup messages sat in a 8KB buffer and never reached the file —
-    // meaning a crash before the buffer filled would produce an EMPTY log and a user staring at
-    // "did not start" with nothing to read. Unbuffered is the difference between a log that
-    // works and a log that exists.
-    cmd.args(["-u", "-m", "device_search.server", "--port", "8734"]).current_dir(&repo);
+    // Prefer a bundled executable over an interpreter. A shipped app has no Python
+    // on the target machine and no repository to import from, so the only thing
+    // that can run there is a self-contained binary. Look for it beside the app
+    // binary and in the resource directory before falling back to an interpreter,
+    // which is what development uses.
+    let mut sidecar: Option<std::path::PathBuf> = None;
+    for base in roots.iter() {
+        for candidate in [
+            format!("{base}/device-search-daemon"),
+            format!("{base}/../MacOS/device-search-daemon"),
+            format!("{base}/bin/device-search-daemon"),
+        ] {
+            let p = std::path::PathBuf::from(&candidate);
+            if p.is_file() {
+                sidecar = Some(p);
+                break;
+            }
+        }
+        if sidecar.is_some() {
+            break;
+        }
+    }
+
+    let mut cmd = match &sidecar {
+        Some(path) => {
+            let mut c = Command::new(path);
+            c.arg("--port").arg("8734");
+            c
+        }
+        None => {
+            let mut c = Command::new(py);
+            // `-u` is not optional for a logged child: Python buffers stdout when it
+            // is not a terminal, so a crash before the buffer fills leaves an empty
+            // log and a user staring at "did not start" with nothing to read.
+            c.args(["-u", "-m", "device_search.server", "--port", "8734"])
+                .current_dir(&repo);
+            c
+        }
+    };
     if let Some(f) = out {
         cmd.stdout(std::process::Stdio::from(f));
     }

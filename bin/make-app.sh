@@ -99,6 +99,21 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/device-search"
 chmod +x "$APP/Contents/MacOS/device-search"
 
+# The self-contained daemon, if one has been built. Without this the app can only
+# run on a machine that has this repository and a Python environment; with it, the
+# bundle is the whole program.
+#
+# Build it with:  ./bin/build-sidecar.sh
+DAEMON="$HERE/dist/device-search-daemon"
+if [ -f "$DAEMON" ]; then
+    cp "$DAEMON" "$APP/Contents/MacOS/device-search-daemon"
+    chmod +x "$APP/Contents/MacOS/device-search-daemon"
+    echo "    daemon    : $(du -h "$DAEMON" | cut -f1) (self-contained)"
+else
+    echo "    daemon    : NOT BUNDLED - this app needs Python and this repository" >&2
+    echo "                build one with ./bin/build-sidecar.sh" >&2
+fi
+
 # ---- the icon ----------------------------------------------------------------
 # ⚠️ .icns, NOT .png. macOS reads CFBundleIconFile as an .icns resource; a png silently produces
 # the generic blank icon, which reads as "this app is broken" before it is even opened.
