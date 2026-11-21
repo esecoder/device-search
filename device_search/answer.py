@@ -48,8 +48,52 @@ from .config import find_secrets
 # ⚠️ HOW MUCH CONTEXT IS SENT. This is a device search answering a question about a file, not
 # a report. Six documents at 1,200 characters is ~2,000 tokens — enough to answer, small
 # enough that the model attends to all of it rather than losing the middle, and cheap.
-MAX_SOURCES = 6
-MAX_CHARS_PER_SOURCE = 1200
+MAX_SOURCES = 8
+
+# A TOKEN BUDGET, NOT A CHARACTER BUDGET.
+#
+# The first version capped each source at 1,200 characters and sent up to six of
+# them. Characters do not bound tokens: the measured ratio on this corpus is about
+# 3.4 characters per token, so six sources was 2,100 tokens on average and could be
+# far more on dense text - code and tables run nearer 3.0, which is 2,400 tokens
+# from the same six snippets. A limit that cannot predict the thing it is limiting
+# is not a limit.
+#
+# 6,000 tokens leaves room for the question and the answer inside a 8k-16k window
+# without crowding out either.
+CONTEXT_TOKEN_BUDGET = 6_000
+
+# No single snippet may take more than this share of the budget.
+#
+# Measured: with only the total budget enforced, one 20,000-character document
+# consumed 5,883 of 6,000 tokens and the other nine files were never sent. The
+# answer then reflected whichever file happened to be retrieved first, which is
+# the opposite of context engineering. A per-snippet ceiling makes the budget
+# shared rather than winner-takes-all.
+MAX_TOKENS_PER_SOURCE = 1_200
+
+# Characters per token. Measured on this corpus (see semantic.py, where the same
+# ratio drove the chunk size). Used only when the embedder's tokenizer is
+# unavailable, and kept as a single constant so the two cannot drift.
+CHARS_PER_TOKEN = 3.4
+
+
+def estimate_tokens(text: str) -> int:
+    """Approximate the token count of a string.
+
+    The embedder's tokenizer is used when it is already loaded, because it is
+    exact. Building one purely to measure would cost more than the estimate is
+    worth, so the fallback is the measured ratio.
+    """
+    if not text:
+        return 0
+    try:
+        from .semantic import _TOKENIZER      # set once the model has loaded
+        if _TOKENIZER is not None:
+            return len(_TOKENIZER.encode(text, add_special_tokens=False))
+    except Exception:
+        pass
+    return int(len(text) / CHARS_PER_TOKEN) + 1
 
 # ⚠️ THE REFUSAL SENTENCE IS DEFINED HERE AND CHECKED BELOW, so the set of things that count as
 # "no answer" is explicit rather than whatever the model happens to phrase.
@@ -86,25 +130,81 @@ def page_span(snippet: str) -> tuple[int, int] | None:
     return min(nums), max(nums)
 
 
-def build_context(cands, text_of, max_sources=MAX_SOURCES):
+def _signature(text: str, n: int = 240) -> str:
+    """A normalised prefix, used to spot the same content arriving twice.
+
+    Retrieval returns overlapping chunks and, when the query matches several
+    places in one file, the same passage can be sent more than once. Paying
+    tokens for a duplicate costs accuracy: it makes one passage look like
+    corroboration when it is repetition.
+    """
+    head = re.sub(r"\s+", " ", (text or "")[:n]).strip().lower()
+    return head
+
+
+def build_context(cands, text_of, max_sources=MAX_SOURCES,
+                  token_budget=CONTEXT_TOKEN_BUDGET,
+                  max_per_document=2):
     """Return [(label, path, snippet)] with secrets removed, plus a report.
 
-    ⚠️ SIMPLE NUMERIC LABELS — [1], [2] — RATHER THAN PATHS. A model asked to cite
-    `~/Documents/very/long/path/File.php` will paraphrase it, truncate it, or invent a fifth
-    one. Asked for a small integer it is reliably correct, and the integer is mapped back to a
-    real path by this function rather than by the model.
+    Three rules, in this order, because each one changes what fits:
+
+      1. DROP DUPLICATES. Two snippets with the same opening are one source, not
+         two. Sending both makes a repeated claim look corroborated.
+
+      2. LIMIT EACH FILE. Two passages from one document is enough to establish
+         what it says. More than that crowds out other files, which is how an
+         answer ends up reflecting whichever document happened to be longest.
+
+      3. SPEND A TOKEN BUDGET, not a character count. Each snippet is trimmed to
+         what remains, and the loop stops when the budget is gone.
+
+    Labels are small integers rather than paths: a model asked to cite
+    `~/Documents/very/long/path/File.php` paraphrases, truncates, or invents a
+    fifth one. Asked for an integer it is reliably correct, and the mapping back
+    to a real path happens here rather than in the model.
     """
-    sources, report = [], {"sent": 0, "blocked": 0, "blocked_kinds": []}
+    sources, report = [], {
+        "sent": 0, "blocked": 0, "blocked_kinds": [],
+        "dropped_duplicate": 0, "dropped_over_quota": 0,
+        "tokens_used": 0, "budget": token_budget, "truncated": 0,
+    }
+    seen: set[str] = set()
+    per_doc: dict[str, int] = {}
+
     for c in cands:
         if len(sources) >= max_sources:
             break
         raw = (text_of(c) or "").strip()
         if not raw:
             continue
-        # ⚠️ THE INTERLOCK. Scanned BEFORE the request is built, and the snippet is DROPPED
-        # rather than redacted: a partially-redacted private key is still most of a private
-        # key, and a worse answer is preferable to uploading one.
-        hits = find_secrets(raw[:MAX_CHARS_PER_SOURCE])
+
+        sig = _signature(raw)
+        if sig and sig in seen:
+            report["dropped_duplicate"] += 1
+            continue
+
+        if per_doc.get(c.path, 0) >= max_per_document:
+            report["dropped_over_quota"] += 1
+            continue
+
+        remaining = token_budget - report["tokens_used"]
+        if remaining <= 50:
+            break
+
+        # The smaller of what is left and what one source is allowed. Without the
+        # second term the first large document takes the whole budget.
+        allowance = min(remaining, MAX_TOKENS_PER_SOURCE)
+
+        # Trim before the secret scan, so the scan sees exactly what would be sent.
+        max_chars = int(allowance * CHARS_PER_TOKEN)
+        snippet = raw[:max_chars]
+        if len(raw) > len(snippet):
+            report["truncated"] += 1
+
+        # THE INTERLOCK. The snippet is DROPPED, not redacted: a partially
+        # redacted private key is still most of a private key.
+        hits = find_secrets(snippet)
         if hits:
             report["blocked"] += 1
             for h in hits:
@@ -112,9 +212,13 @@ def build_context(cands, text_of, max_sources=MAX_SOURCES):
                 if k not in report["blocked_kinds"]:
                     report["blocked_kinds"].append(k)
             continue
-        snippet = raw[:MAX_CHARS_PER_SOURCE]
+
         sources.append((len(sources) + 1, c.path, snippet))
+        seen.add(sig)
+        per_doc[c.path] = per_doc.get(c.path, 0) + 1
+        report["tokens_used"] += estimate_tokens(snippet)
         report["sent"] += 1
+
     return sources, report
 
 
