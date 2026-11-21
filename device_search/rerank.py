@@ -41,7 +41,15 @@ from __future__ import annotations
 
 import time
 
-DEFAULT_MODEL = "BAAI/bge-reranker-base"
+# ⚠️ CHANGED FROM BAAI/bge-reranker-base AFTER MEASURING IT.
+#
+# bge-reranker-base is about 1.1 GB. On this machine the download stalled partway
+# and the benchmark sat at 2.4% CPU for twenty minutes without scoring a single
+# query - which is not a slow feature, it is a feature that never arrives. For a
+# desktop tool the model has to be small enough to download quickly and run on a
+# CPU, and the difference in ranking quality between the tiny and base models is
+# smaller than the difference between having a reranker and not.
+DEFAULT_MODEL = "jinaai/jina-reranker-v1-tiny-en"
 
 # ⚠️ THE CANDIDATE CAP, AND IT IS THE WHOLE DESIGN. The model is O(n) forward passes. At
 # roughly 8 candidates per second on this CPU, 50 candidates is ~6 seconds and 200 would be
@@ -134,3 +142,80 @@ def rerank_candidates(query: str, cands: list, snippets: dict, reranker: Reranke
     return {"moved": moved, "seconds": reranker.last_seconds, "top_n": len(head),
             "load_seconds": reranker.load_seconds,
             "worst_drop": max((before[c.doc_id] - i for i, c in enumerate(head)), default=0)}
+
+
+# ============================================================================
+# DOES IT HELP? — measured, not assumed
+# ============================================================================
+#
+# A reranker that makes results worse is common and invisible. The list still
+# looks plausible, the user has no baseline, and the code looks correct. The
+# models are trained on web-search passages; a codebase is not web-search
+# passages, and a long README that mentions a word in passing can outscore the
+# file that is actually about it.
+#
+# So enabling this is a measurement, not an opinion. `evaluate()` returns the
+# deltas AND a verdict, and the caller is expected to honour the verdict.
+
+import math as _math
+
+
+def mrr(ranked: list[int], relevant: set[int], k: int | None = None) -> float:
+    """Reciprocal rank of the first correct result. 1.0 means it was first."""
+    if not relevant:
+        return 0.0
+    for i, doc_id in enumerate(ranked[:k] if k else ranked, 1):
+        if doc_id in relevant:
+            return 1.0 / i
+    return 0.0
+
+
+def ndcg(ranked: list[int], relevant: set[int], k: int | None = None) -> float:
+    """Binary-relevance nDCG. 1.0 means every correct document is at the top.
+
+    A correct hit at rank 4 is worth 1/log2(5) rather than 0, which is the
+    difference between this and MRR: nDCG rewards finding several correct
+    documents, MRR only rewards finding one early.
+    """
+    if not relevant:
+        return 0.0
+    ranked = ranked[:k] if k else ranked
+    dcg = sum(1.0 / _math.log2(i + 1)
+              for i, doc_id in enumerate(ranked, 1) if doc_id in relevant)
+    ideal = sum(1.0 / _math.log2(i + 1)
+                for i in range(1, min(len(relevant), len(ranked)) + 1))
+    return dcg / ideal if ideal else 0.0
+
+
+def evaluate(before: list[list[int]], after: list[list[int]],
+             relevant: list[set[int]], k: int = 10,
+             tolerance: float = 0.005) -> dict:
+    """Compare two orderings across a query set and decide whether to ship it.
+
+    `before` and `after` hold one ranked id list per query; `relevant` holds the
+    correct ids for each. The tolerance is where a difference is inside noise for
+    a query set of this size - a small regression is not worth disabling the
+    feature over, a systematic one is.
+    """
+    n = min(len(before), len(after), len(relevant))
+    if n == 0:
+        return {"ok": False, "verdict": "no queries", "queries": 0}
+
+    mrr_b = sum(mrr(before[i], relevant[i], k) for i in range(n)) / n
+    mrr_a = sum(mrr(after[i], relevant[i], k) for i in range(n)) / n
+    ndcg_b = sum(ndcg(before[i], relevant[i], k) for i in range(n)) / n
+    ndcg_a = sum(ndcg(after[i], relevant[i], k) for i in range(n)) / n
+
+    d_mrr, d_ndcg = mrr_a - mrr_b, ndcg_a - ndcg_b
+    ok = d_mrr >= -tolerance and d_ndcg >= -tolerance
+    improved = d_mrr > 0.01 or d_ndcg > 0.01
+
+    return {
+        "ok": ok,
+        "queries": n,
+        "mrr_before": round(mrr_b, 4), "mrr_after": round(mrr_a, 4), "d_mrr": round(d_mrr, 4),
+        "ndcg_before": round(ndcg_b, 4), "ndcg_after": round(ndcg_a, 4), "d_ndcg": round(d_ndcg, 4),
+        "verdict": ("HELPS" if improved else
+                    "no measurable difference" if ok else
+                    "MAKES RESULTS WORSE - leave it off"),
+    }
