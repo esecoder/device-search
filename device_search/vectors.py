@@ -106,6 +106,39 @@ def write_status(index_dir: Path, **fields) -> None:
         pass
 
 
+def pid_is_alive(pid: int) -> bool:
+    """Whether a process is actually running, as opposed to merely existing.
+
+    `os.kill(pid, 0)` answers "does this pid exist", and a ZOMBIE exists: the
+    process has exited but its parent has not reaped it, so the pid stays
+    allocated. Measured on this machine: a finished crawl left a <defunct> child,
+    every liveness check said "alive", and `ds index` refused to start with
+    "an index is already running (pid 41679)" for as long as the zombie lasted.
+
+    The fix is to read the process state and treat Z as dead. Linux exposes it in
+    /proc; macOS has no /proc, so both fall back to `ps -o stat=`, which exists on
+    both.
+    """
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError, PermissionError):
+        return False
+
+    # `ps` is the portable check. Its absence should not turn a live process into
+    # a dead one, so a failure here returns True: the kill(0) already succeeded.
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return True
+    if not out:
+        return False
+    return not out.upper().startswith("Z")
+
+
 def read_status(index_dir: Path) -> dict:
     """⚠️ RETURNS running=False FOR A DEAD PID, whatever the file says.
 
@@ -136,7 +169,8 @@ def read_status(index_dir: Path) -> dict:
     # the status is alive, something IS running, whatever the file says about it.
     if pid:
         try:
-            os.kill(pid, 0)
+            if not pid_is_alive(pid):
+                raise ProcessLookupError
             # ⚠️ ALIVE. Trust the process, not the file: `finished` may have been written by a
             # different run, and the one holding the lock is this one.
             d["running"] = True
@@ -157,7 +191,8 @@ def read_status(index_dir: Path) -> dict:
         return d
     if pid:
         try:
-            os.kill(pid, 0)         # ⚠️ signal 0 = "does this process exist?" and nothing else
+            if not pid_is_alive(pid):
+                raise ProcessLookupError
         except (OSError, ProcessLookupError):
             d["running"] = False
             d["reason"] = f"the process that was indexing ({pid}) is gone"
