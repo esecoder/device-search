@@ -118,6 +118,8 @@ ds search 'a question about a concept'
 ds search 'retrievers.py' -k 5 --json
 ds search 'something' --llm          # optional LLM rerank (see privacy below)
 ds stats                             # what is actually indexed
+  ds deep-index                        # OPTIONAL code-fragment index; shows its cost, asks first
+  ds forget ~/old-project              # remove a folder and reclaim its space
 ds secrets-report                    # recognised secrets in the index, redacted
 ```
 
@@ -200,6 +202,7 @@ embedding phase is not, and it dominates everything.
 | 117 documents | **0.1 s** | 12 min | 3 min |
 | **5,700 documents** (a real Documents+Desktop+Downloads) | ~2 min | **~6.5 hours** | **~1.7 hours** |
 | 100,000 documents | ~30 min | **~115 hours** | ~30 hours |
+| 586,383 files (a whole home directory) | ~15 min | **137 hours** | ~40 hours |
 
 **The measured rate is 8.2 chunks/sec on ONNX and 31.4 on torch**, on CPU, from 5,726 real
 chunks. **Neither runtime makes CPU indexing at this scale pleasant — the difference is a
