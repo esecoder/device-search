@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -34,6 +35,52 @@ IDS_PATH = INDEX_DIR / "vectors.ids.npy"
 # =============================================================================
 # setup
 # =============================================================================
+def cmd_forget(args) -> int:
+    """Remove a folder from the index and give its disk space back."""
+    store = Store(DB_PATH)
+    roots = [os.path.expanduser(r) for r in args.paths]
+    preview = store.remove_under_roots(roots, dry_run=True)
+    n = preview.get("documents", 0)
+    if not n:
+        print("  Nothing in the index is under that path.")
+        return 0
+
+    size_before = sum(f.stat().st_size for f in INDEX_DIR.glob("index.db*") if f.exists())
+    print("=" * 70)
+    print("REMOVE FROM INDEX")
+    print("=" * 70)
+    for r in roots:
+        print(f"  {r}")
+    print()
+    print(f"  Documents to remove : {n:>10,}")
+    print(f"  Database size now   : {size_before/1e9:>10.2f} GB")
+    print()
+    print("  Removal frees the rows. The file itself only shrinks after a VACUUM,")
+    print("  which needs free disk equal to the file size and takes a few minutes.")
+    print()
+    if not args.yes:
+        try:
+            reply = input("  Remove it? [y/N] ")
+        except EOFError:
+            reply = ""
+        if reply.strip().lower() not in ("y", "yes"):
+            print("  Cancelled.")
+            return 0
+
+    result = store.remove_under_roots(roots)
+    removed = result.get("documents", 0)
+    print(f"  Removed {removed:,} documents.")
+    if args.vacuum:
+        print("  Reclaiming space (this can take a few minutes)...")
+        store.conn.execute("VACUUM")
+        size_after = sum(f.stat().st_size for f in INDEX_DIR.glob("index.db*") if f.exists())
+        print(f"  Database size now   : {size_after/1e9:.2f} GB "
+              f"(freed {(size_before-size_after)/1e9:.2f} GB)")
+    else:
+        print("  Run again with --vacuum to reclaim the space on disk.")
+    return 0
+
+
 def cmd_setup(args) -> int:
     print("=" * 78)
     print("DEVICE-SEARCH SETUP")
@@ -104,34 +151,44 @@ def cmd_setup(args) -> int:
 # index
 # =============================================================================
 def cmd_deep_index(args) -> int:
-    """Build the substring index used for code-fragment queries.
-
-    ⚠⚠️ A SEPARATE, OPTIONAL, LONG STEP, AND IT IS SEPARATE BECAUSE IT IS OPTIONAL.
-
-    Ordinary search does not need this. It exists for one kind of query —
-    `InputLayer(shape=(784,))`, a fragment with no word boundary — which the word index cannot
-    answer and the LIKE scan answers in ten seconds.
-
-    ⚠️ IT IS BIG AND SLOW: measured at 8.3 GB and more than twelve minutes for 859,569
-    documents. ⚠️ SO IT IS NOT PART OF `ds index` AND IS NEVER STARTED WITHOUT BEING ASKED FOR.
-    A tool that quietly spends twelve minutes and eight gigabytes on a first run has decided
-    something the user should have decided.
-
-    ⚠️ AND IT RESUMES. Killed at 650,000 of 859,569, it continues from there rather than
-    starting again — which is what makes it something a person can actually run.
-    """
-    from .vectors import read_status, write_status
+    """Build the optional code-fragment index, with its cost shown first."""
     store = Store(DB_PATH)
-    total = store.count()
-    print("=" * 78)
-    print(f"DEEP INDEX  {total:,} documents")
-    print("=" * 78)
-    print("  This builds an index of every three-character sequence, so that a code fragment")
-    print(f"  like  InputLayer(shape=(784,))  can be found quickly instead of by a slow scan.")
+    files = store.conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE COALESCE(is_dir,0)=0").fetchone()[0]
+    text = store.conn.execute(
+        "SELECT COALESCE(SUM(LENGTH(text)),0) FROM documents").fetchone()[0]
+
+    # Estimate from the measured ratios: the trigram file runs about 1.9x the stored
+    # text, and the build indexes roughly 975 documents per second.
+    est_gb = max(text * 1.9 / 1e9, 0.01)
+    est_min = max(files / 975 / 60, 0.1)
+    free_gb = shutil.disk_usage(INDEX_DIR).free / 1e9
+
+    print("=" * 70)
+    print("CODE-FRAGMENT INDEX (optional)")
+    print("=" * 70)
     print()
-    print(f"  ⚠️ It needs roughly as much disk as the index itself, and takes minutes.")
-    print(f"  ⚠️ It can be stopped at any time with Ctrl-C and resumed by running this again.")
+    print("  Searches like  InputLayer(shape=(784,))  need this. Normal keyword and")
+    print("  phrase search work without it. Without it, fragment queries still work")
+    print("  but scan the whole index and take about 9 seconds.")
     print()
+    print(f"  Documents to index : {files:>12,}")
+    print(f"  Disk it will use   : {est_gb:>11.1f} GB   (free: {free_gb:.1f} GB)")
+    print(f"  Time to build      : {est_min:>11.0f} minutes")
+    print()
+    if est_gb > free_gb:
+        print(f"  Not enough free disk space. Free up {est_gb - free_gb:.1f} GB first.")
+        return 1
+    if not getattr(args, "yes", False):
+        try:
+            reply = input("  Build it? This is the only step that uses this much space. [y/N] ")
+        except EOFError:
+            reply = ""
+        if reply.strip().lower() not in ("y", "yes"):
+            print("  Cancelled. Nothing was written.")
+            return 0
+    print()
+    t0 = time.time()
     t0 = time.time()
     try:
         n = store.build_trigram()
@@ -827,8 +884,15 @@ def main(argv=None) -> int:
                    help="reorder results with a cross-encoder (~5s, 80MB model)")
     p.set_defaults(fn=cmd_search)
 
+    p = sub.add_parser("forget", help="remove a folder from the index and reclaim space")
+    p.add_argument("paths", nargs="+", help="folder or file paths to remove")
+    p.add_argument("--vacuum", action="store_true", help="shrink the database afterwards")
+    p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    p.set_defaults(fn=cmd_forget)
+
     p = sub.add_parser("deep-index",
-                       help="build the substring index for code-fragment search (slow, large)")
+                       help="build the optional code-fragment index (shows its cost first)")
+    p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     p.set_defaults(fn=cmd_deep_index)
 
     p = sub.add_parser("runtime", help="which embedding runtime, and what it costs")
