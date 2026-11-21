@@ -127,7 +127,8 @@ const Setup = (() => {
     // "optional" so nobody thinks it is a requirement to finish setup.
     const tabs = document.createElement("div");
     tabs.className = "setup-tabs";
-    for (const [id, label] of [["folders", "Folders"], ["ai", "AI (optional)"]]) {
+    for (const [id, label] of [["folders", "Folders"], ["ai", "AI (optional)"],
+                               ["code", "Code search (optional)"]]) {
       const t = document.createElement("button");
       t.className = "setup-tab" + (step === id ? " on" : "");
       t.textContent = label;
@@ -139,7 +140,8 @@ const Setup = (() => {
     const h = document.createElement("div");
     h.className = "setup-title";
     h.textContent = step === "ai" ? "Connect a model to ask questions"
-                                  : "What should be searchable?";
+                 : step === "code" ? "Faster code-fragment search"
+                                   : "What should be searchable?";
     host.appendChild(h);
 
     // ⚠️ THE MODEL STEP IS ITS OWN RENDERER, DRAWN INTO THIS PANEL. Splitting it this way keeps
@@ -150,6 +152,57 @@ const Setup = (() => {
       box.id = "ai-step";
       host.appendChild(box);
       AI.renderInto(box);
+      return;
+    }
+
+    // The code-fragment index is the one optional piece that can use more disk than the
+    // documents it indexes, so it is never started without the cost being shown and the
+    // choice being clicked. The numbers come from the backend, computed from the corpus,
+    // rather than being written here where they would go stale.
+    if (step === "code") {
+      const box = document.createElement("div");
+      box.className = "code-step";
+      box.innerHTML = "<p>Finding a fragment like <code>InputLayer(shape=(784,))</code> "
+                    + "normally scans the index and takes about nine seconds. An optional "
+                    + "index of every three-character sequence makes it near-instant.</p>"
+                    + "<div id='code-cost' class='setup-sub'>Checking the cost…</div>"
+                    + "<div id='code-actions'></div>";
+      host.appendChild(box);
+
+      const costEl = box.querySelector("#code-cost");
+      const actEl = box.querySelector("#code-actions");
+
+      (async () => {
+        const r = await api("/api/deep-index");
+        if (!r.ok) { costEl.textContent = r.error || "Could not read the cost."; return; }
+        const d = r.data || {};
+        if (d.built) {
+          costEl.textContent = "The code-fragment index is already built.";
+          return;
+        }
+        if (d.estimated_gb > d.free_gb) {
+          costEl.textContent = `Needs about ${d.estimated_gb} GB but only ${d.free_gb} GB `
+                             + "is free. Free up space first.";
+          return;
+        }
+        costEl.textContent = `${d.documents.toLocaleString()} documents · about `
+                           + `${d.estimated_gb} GB · about ${d.estimated_minutes} minutes. `
+                           + `You have ${d.free_gb} GB free.`;
+
+        const go = document.createElement("button");
+        go.className = "setup-btn";
+        go.textContent = "Build it";
+        go.onclick = async () => {
+          go.disabled = true;
+          go.textContent = "Starting…";
+          const s2 = await api("/api/deep-index", { method: "POST", body: {} });
+          if (!s2.ok) { go.disabled = false; go.textContent = "Build it"; return; }
+          costEl.textContent = "Building in the background. Search keeps working; "
+                             + "progress appears in the banner.";
+          go.remove();
+        };
+        actEl.appendChild(go);
+      })();
       return;
     }
 

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import secrets
 import socket
 import subprocess
@@ -255,6 +256,7 @@ class Engine:
         # can actually see. Putting it on the server and reading it from the engine was a real
         # AttributeError that only surfaced when the endpoint was called.
         self.last_index: dict = {}
+        self.deep_index_state: dict = {}
         # ⚠️ AUTO-REPAIR, WITH A POLICY RATHER THAN A TRIGGER.
         #
         # The machinery to repair stale vectors has existed for several commits — plan_resume
@@ -813,6 +815,22 @@ class Handler(BaseHTTPRequestHandler):
                 ENGINE._llm_env()
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask,
                                               rerank=rerank))
+            elif url.path == "/api/deep-index":
+                # The interface needs the cost before it asks, for the same reason the
+                # command line does: this is the only step that can use more disk than
+                # the documents it indexes.
+                text = ENGINE.store.conn.execute(
+                    "SELECT COALESCE(SUM(LENGTH(text)),0) FROM documents").fetchone()[0]
+                files = ENGINE.store.conn.execute(
+                    "SELECT COUNT(*) FROM documents WHERE COALESCE(is_dir,0)=0").fetchone()[0]
+                self._send(200, {
+                    "available": True,
+                    "documents": files,
+                    "estimated_gb": round(max(text * 1.9 / 1e9, 0.01), 2),
+                    "estimated_minutes": round(max(files / 975 / 60, 0.1), 1),
+                    "free_gb": round(shutil.disk_usage(INDEX_DIR).free / 1e9, 1),
+                    "built": ENGINE.store.trigram_ready(),
+                })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
             elif url.path == "/api/roots":
@@ -859,6 +877,29 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             return
         path_q = urlparse(self.path)
+
+        if path_q.path == "/api/deep-index":
+            # Started in a thread so the request returns immediately and the interface can
+            # keep polling /api/index/status for the same progress the crawl uses.
+            state = ENGINE.deep_index_state
+            if state.get("running"):
+                self._send(200, {"started": False, "reason": "already running"})
+                return
+            state.update({"running": True, "error": None, "finished": False})
+
+            def _run():
+                try:
+                    ENGINE.store.build_trigram()
+                    state["finished"] = True
+                except Exception as exc:
+                    state["error"] = f"{type(exc).__name__}: {exc}"
+                finally:
+                    state["running"] = False
+
+            import threading
+            threading.Thread(target=_run, daemon=True).start()
+            self._send(200, {"started": True})
+            return
 
         # ⚠⚠ SAVING THE MODEL SETTINGS BELONGS HERE, NOT IN do_GET.
         #
