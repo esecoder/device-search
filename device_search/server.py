@@ -419,6 +419,17 @@ class Engine:
                     row = self.store.by_id(c.doc_id)
                     return (row[4] if row else "") or ""
                 srcs, rep = build_context(cands, _text)
+                # The context budget is reported on every answer, not only when it
+                # bites: a user seeing 4 of 6,000 tokens knows there was room;
+                # one seeing 6,000 of 6,000 and 5 truncated knows there was not.
+                trace["context"] = {
+                    "tokens_used": rep["tokens_used"],
+                    "budget": rep["budget"],
+                    "sources": rep["sent"],
+                    "truncated": rep["truncated"],
+                    "dropped_duplicate": rep["dropped_duplicate"],
+                    "dropped_over_quota": rep["dropped_over_quota"],
+                }
                 if rep["blocked"]:
                     # ⚠️ THE INTERLOCK IS REPORTED, NOT SILENT. A user whose snippet was withheld
                     # needs to know the answer is based on less than everything that matched.
@@ -427,6 +438,10 @@ class Engine:
                     a = ask_model(query, srcs)
                     if not a.get("error"):
                         answer = {"text": a["answer"], "citations": a.get("citations", []),
+                        # The context report travels WITH the answer, because that is
+                        # where the interface reads it. Left in `trace`, it was returned to
+                        # the client and never displayed.
+                        answer["context"] = trace.get("context") or {}
                                   "refused": a.get("refused", False),
                                   "invented": a.get("invented_citations") or [],
                                   "uncited": bool(a.get("uncited"))}

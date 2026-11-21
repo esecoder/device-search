@@ -609,6 +609,19 @@ function renderInner() {
       w.textContent = "⚠️ no citations — this is the model's wording, not evidence";
       d.appendChild(w);
     }
+    // What the answer had to work with, shown only when it is tight.
+    if (answer.context && answer.context.budget) {
+      const cx = answer.context;
+      if (cx.tokens_used / cx.budget > 0.9 || cx.truncated > 0) {
+        const n2 = document.createElement("span");
+        n2.className = "answer-flag";
+        n2.textContent = `context ${cx.tokens_used.toLocaleString()}`
+          + `/${cx.budget.toLocaleString()} tokens across ${cx.sources} source`
+          + `${cx.sources === 1 ? "" : "s"}`
+          + (cx.truncated ? ` — ${cx.truncated} truncated` : "");
+        d.appendChild(n2);
+      }
+    }
     for (const c of answer.citations || []) {
       const a = document.createElement("span");
       a.className = "answer-cite";
