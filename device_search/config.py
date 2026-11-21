@@ -123,6 +123,13 @@ SKIP_DIR_NAMES = {
     ".hermes", ".local", ".nvm", ".pyenv", ".rbenv", ".sdkman",
     # macOS per-user application data: caches, logs, and container files.
     "Library",
+    # AI assistant and agent working directories. These hold session transcripts,
+    # browser-recording frames and tool caches - generated data about the tools
+    # themselves, not documents the user wrote. Measured: 4,730 of 6,160 indexed
+    # images were frames from one browser recording, which made image search
+    # return near-identical frames for every query.
+    ".gemini", ".cursor", ".codeium", ".continue", ".aider",
+    ".anthropic", ".claude", ".codex", ".openai",
 }
 # ⚠️ MEDIA WE CAN EXTRACT TEXT FROM — moved OUT of SKIP_EXTS and into the index.
 # ⚠️ These were previously skipped as "binary", which was correct when the tool was text-only

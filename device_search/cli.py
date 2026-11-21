@@ -204,6 +204,77 @@ def cmd_deep_index(args) -> int:
     return 0
 
 
+def cmd_images(args) -> int:
+    """Build the image index: match a written description to a picture."""
+    from .image_search import ImageIndex
+    store = Store(DB_PATH)
+
+    # Select by extension in Python rather than building a SQL expression out of
+    # config values. A first version left an unused placeholder query above this
+    # line; it ran on every call and its result was discarded.
+    IMG = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+    # Skip paths inside excluded directories even though they are still in the
+    # database from before the exclusion existed. Without this, 4,730 of 6,160
+    # images were browser-recording frames and every query returned near-identical
+    # frames: the cosine similarities were correct and the answers were useless.
+    from .config import SKIP_DIR_NAMES
+    def _excluded(path: str) -> bool:
+        return any(part in SKIP_DIR_NAMES for part in path.split("/"))
+
+    rows = [(i, p) for i, p in store.conn.execute(
+        "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")
+        if Path(p).suffix.lower() in IMG and not _excluded(p)]
+
+    if not rows:
+        print("  no images in the index")
+        return 0
+
+    print("=" * 70)
+    print("IMAGE INDEX")
+    print("=" * 70)
+    est_min = len(rows) * 0.25 / 60
+    print(f"  images        : {len(rows):,}")
+    print(f"  estimated time: {est_min:.0f} minutes")
+    print(f"  disk          : {len(rows) * 768 * 4 / 1e6:.0f} MB")
+    print()
+    if not args.yes:
+        try:
+            reply = input("  Build it? [y/N] ")
+        except EOFError:
+            reply = ""
+        if reply.strip().lower() not in ("y", "yes"):
+            print("  Cancelled.")
+            return 0
+
+    idx = ImageIndex()
+    n, skipped = idx.embed_images(rows)
+    out = INDEX_DIR / "images"
+    idx.save(out)
+    print()
+    print(f"  embedded {n:,} images, skipped {skipped:,}")
+    print(f"  saved to {out}")
+    return 0
+
+
+def cmd_image_search(args) -> int:
+    """Find pictures by describing them."""
+    from .image_search import ImageIndex
+    idx = ImageIndex()
+    if not idx.load(INDEX_DIR / "images"):
+        print("  no image index yet. Build one with:  ds images")
+        return 1
+    store = Store(DB_PATH)
+    hits = idx.search(args.query, k=args.k)
+    if not hits:
+        print("  no matches")
+        return 0
+    for doc_id, score in hits:
+        row = store.conn.execute("SELECT path FROM documents WHERE id=?", (doc_id,)).fetchone()
+        if row:
+            print(f"  {score:6.3f}  {row[0]}")
+    return 0
+
+
 def cmd_index(args) -> int:
     ensure_index_dir()
 
@@ -885,6 +956,15 @@ def main(argv=None) -> int:
     p.add_argument("--vacuum", action="store_true", help="shrink the database afterwards")
     p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     p.set_defaults(fn=cmd_forget)
+
+    p = sub.add_parser("images", help="build the image index (describe a picture to find it)")
+    p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    p.set_defaults(fn=cmd_images)
+
+    p = sub.add_parser("image-search", help="find images by describing them")
+    p.add_argument("query")
+    p.add_argument("-k", type=int, default=10)
+    p.set_defaults(fn=cmd_image_search)
 
     p = sub.add_parser("deep-index",
                        help="build the optional code-fragment index (shows its cost first)")
