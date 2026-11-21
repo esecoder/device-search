@@ -201,14 +201,31 @@ class VectorStore:
             d = json.loads(self.manifest_path.read_text())
             m = Manifest(**{k: v for k, v in d.items() if k in Manifest.__dataclass_fields__})
             return m
-        except Exception:
-            # ⚠️ A CORRUPT MANIFEST IS TREATED AS ABSENT, not fatal. The shard files are still
-            # there and still correct; an unreadable bookkeeping file should cost a re-index of
-            # the metadata, not the app. ⚠️ And it is MOVED ASIDE rather than deleted, because
-            # silently destroying the only record of what was done is how a bug becomes
-            # unreproducible.
+        except Exception as exc:
+            # A manifest that will not load is treated as absent, not fatal: the shard files
+            # are still on disk and still correct, so an unreadable bookkeeping file should
+            # cost a re-index of the metadata rather than the whole index.
+            #
+            # It is moved aside rather than deleted, because destroying the only record of
+            # what was done makes the problem impossible to diagnose afterwards.
+            #
+            # The original code caught every exception and did not record why. A manifest
+            # written by an older version - valid JSON with a field the current class does
+            # not know about - raised TypeError, was called corrupt, and was quarantined.
+            # That silently turned semantic search off: the vectors were all still there,
+            # and nothing said so. The reason is now written next to the file so the next
+            # person can tell "old" from "damaged" without guessing.
+            sidecar = self.manifest_path.with_suffix(".json.bad")
             try:
-                self.manifest_path.rename(self.manifest_path.with_suffix(".json.bad"))
+                sidecar.write_text(
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    f"original file preserved at: {self.manifest_path.name}\n"
+                    f"if this was a schema change, the file is not corrupt - check whether\n"
+                    f"Manifest still has every field the file contains before discarding it.\n")
+            except OSError:
+                pass
+            try:
+                self.manifest_path.rename(sidecar)
             except OSError:
                 pass
             return Manifest()
