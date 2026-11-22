@@ -130,8 +130,21 @@ def extract_image(path: Path, min_conf: float = 0.5) -> str:
 
 
 def extract_text_file(path: Path) -> str:
-    """⚠️ READ AS utf-8 WITH REPLACEMENT, NOT STRICTLY. Plenty of real source files are latin-1
-    or contain one invalid byte, and refusing the whole file over one byte loses everything."""
+    """Read as utf-8 with replacement, but REFUSE anything that is not text.
+
+    `extract()` is reachable directly as well as through the crawl's is_text_file
+    gate, and a direct call on a .aiff stored the raw container bytes as a
+    document - "FORM\x00\x05...SSND\x00..." in the index, searchable and useless.
+    Measured: 391 KB of binary presented as text.
+
+    The crawl already rejects unknown extensions, so this is the second line of
+    defence rather than the first. It exists because the first line is a list of
+    extensions, and a list is always missing something.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read(8192)
+    if b"\x00" in head:
+        raise ValueError("binary")
     return path.read_text(encoding="utf-8", errors="replace")
 
 
@@ -140,8 +153,27 @@ def extract_text_file(path: Path) -> str:
 # =============================================================================
 # ⚠️ ORDER MATTERS AND IS BY COST: utf-8 read (microseconds) -> PDF (ms) -> OCR (SECONDS).
 # The cheap paths must be tried first so a corpus of text files never pays for OCR.
+from .config import AUDIO_EXTS, VIDEO_EXTS, transcribe_enabled
+
 PDF_EXTS = {".pdf"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+
+
+_TRANSCRIBER = None
+
+
+def _transcriber():
+    """One Whisper instance for the whole process.
+
+    Loading the model takes about 39 seconds. Constructing one per file would make
+    a folder of ten recordings take six and a half minutes before any audio was
+    read, which is the difference between "slow" and "broken".
+    """
+    global _TRANSCRIBER
+    if _TRANSCRIBER is None:
+        from .audio import Transcriber
+        _TRANSCRIBER = Transcriber()
+    return _TRANSCRIBER
 
 
 def extract(path: Path) -> tuple[str, str]:
@@ -166,8 +198,26 @@ def extract(path: Path) -> tuple[str, str]:
             return extract_image(path), "ocr"
         except Exception as e:
             return "", f"ocr_error:{type(e).__name__}"
+    if ext in AUDIO_EXTS or ext in VIDEO_EXTS:
+        # OPT-IN, AND THE DEFAULT IS "NOT ATTEMPTED" RATHER THAN "FAILED".
+        #
+        # Whisper is the slowest extractor in this project by an order of magnitude.
+        # A crawl that quietly starts transcribing every recording looks hung, and
+        # the user has no way to tell it apart from one. So the method says
+        # audio_skipped, which is a statement of intent rather than an error - and
+        # `ds stats` counts it, so the number is visible instead of implied.
+        if not transcribe_enabled():
+            return "", "audio_skipped"
+        from .audio import Transcriber
+        _t = _transcriber()
+        text, method = _t.transcribe(path)
+        if method == "audio_unavailable" and _t.last_error:
+            return "", f"audio_error:{_t.last_error[:60]}"
+        return text, method
     try:
         return extract_text_file(path), "utf8"
+    except ValueError:
+        return "", "binary"
     except (OSError, PermissionError):
         return "", "unreadable"
 

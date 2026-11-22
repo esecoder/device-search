@@ -135,6 +135,21 @@ SKIP_DIR_NAMES = {
 # ⚠️ These were previously skipped as "binary", which was correct when the tool was text-only
 # and is now wrong: a PDF and a screenshot are exactly what people search for. The extension
 # list is deliberately the ones extract.py has a real extractor for.
+# Audio and video. Transcribed by Whisper, which is far slower than every other
+# extractor here - measured at 14x realtime on this machine, so an hour of audio
+# is about four minutes of CPU. It is therefore OPT-IN and never runs unless
+# TRANSCRIBE_MEDIA is set, because a crawl that silently spends four minutes per
+# recording is a crawl that looks hung.
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma",
+               ".aiff", ".aif", ".aifc", ".caf", ".amr", ".au", ".3gp"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
+# Read at extraction time rather than at import, so a setting changed in the
+# daemon takes effect without restarting it.
+def transcribe_enabled() -> bool:
+    import os as _os
+    return _os.environ.get("TRANSCRIBE_MEDIA", "").strip() in ("1", "true", "yes")
+
 MEDIA_EXTS = {
     ".pdf",
     ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif",
@@ -142,7 +157,10 @@ MEDIA_EXTS = {
 SKIP_EXTS = {
     # ⚠️ Images we have no OCR path for, and everything genuinely without text.
     ".ico", ".svgz", ".heic",
-    ".mp3", ".mp4", ".mov", ".avi", ".mkv", ".wav", ".flac", ".m4a", ".aac", ".webm",
+    # Audio and video are NOT here. They were, from before transcription existed,
+    # and SKIP_EXTS is checked before AUDIO_EXTS - so `.mp4` returned binary_ext and
+    # the transcription branch was unreachable. Removing them is what makes the
+    # av_media route above do anything at all.
     ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".dmg", ".pkg", ".iso",
     # Compiled / binary
     ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe", ".o", ".a", ".class", ".jar",
@@ -225,6 +243,14 @@ def is_text_file(path: Path, size: int) -> tuple[bool, str]:
     # ⚠️ CHECKED BEFORE TEXT_EXTS, and it is NOT a text file — `extract.py` dispatches it to
     # OCR or pdftext. The reason string is distinct so the crawl stats separate "indexed as
     # text" from "indexed via OCR", which is what tells a user whether media is being covered.
+    # Audio and video are "media" for routing purposes even though they are
+    # skipped for extraction unless TRANSCRIBE_MEDIA is set. Routing them here
+    # means the crawl records them with a method (audio_skipped) instead of
+    # dropping them as unknown extensions, so `ds stats` can say how much media
+    # exists and is NOT searchable - which is the number that motivates turning
+    # transcription on.
+    if ext in AUDIO_EXTS or ext in VIDEO_EXTS:
+        return True, "av_media"
     if ext in MEDIA_EXTS:
         return True, "media"
     if ext in TEXT_EXTS:
