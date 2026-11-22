@@ -215,11 +215,42 @@ const Setup = (() => {
 
     async function renderList() {
       wrap.innerHTML = "";
-      const folders = await load(treeState.parent);
+      let folders = await load(treeState.parent);
+
+      // ON A FRESH INSTALL THERE IS NOTHING TO LIST, BECAUSE NOTHING IS INDEXED.
+      //
+      // The tree is built from the database, which is empty the first time the app
+      // opens - so a new user saw "index a folder first" with no way to do it. The
+      // setup panel is the only UI they have, and it was telling them to use
+      // something that does not exist.
+      //
+      // The suggested folders come from /api/roots and are checked for existence
+      // there, so this offers Documents/Desktop/Downloads on the first run and
+      // stops offering them once real data exists.
       if (!folders.length) {
-        wrap.textContent = "No indexed folders under this path yet. Index a folder first, "
-                         + "then its subfolders appear here with their costs.";
-        return;
+        const r = await api("/api/roots");
+        const suggested = (r && r.data && r.data.suggested) || [];
+        folders = suggested.filter((f) => f.exists).map((f) => ({
+          name: f.name,
+          path: f.path,
+          files: f.files || 0,
+          text_bytes: f.text_bytes || 0,
+          index_bytes: f.index_bytes || 0,
+          excluded: false,
+          reason: "",
+          suggested: true,
+        }));
+        if (!folders.length) {
+          wrap.textContent = "No folders available. Index a folder with the command line: "
+                           + "ds setup --roots ~/Documents && ds index";
+          return;
+        }
+        const note = document.createElement("div");
+        note.className = "setup-sub";
+        note.textContent = "These are the folders people usually start with. "
+                         + "Nothing is indexed yet, so there are no costs to show until "
+                         + "you pick one and it is crawled.";
+        host.insertBefore(note, wrap);
       }
       for (const f of folders) {
         const row = document.createElement("label");

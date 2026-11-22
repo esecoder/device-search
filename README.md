@@ -504,3 +504,62 @@ screenshot      4.88s -> 1.25s
 merge conflict  7.19s -> 0.93s
 db_acl.php      7.35s -> 0.81s
 ```
+
+---
+
+## Building a copy you can send to someone
+
+Three steps, and the third is the only one that needs an account you may not have.
+
+```bash
+./bin/build-sidecar.sh   # freezes the daemon: Python, packages and code in one binary
+./bin/make-app.sh        # assembles the .app, refusing a stale daemon
+./bin/make-dmg.sh        # produces dist/device-search-<version>-macos-arm64.dmg
+```
+
+The result is a **85 MB disk image** that runs on a machine with no Python, no
+repository, and no environment variables. Verified by copying it to `/tmp` and
+launching it there.
+
+### ⚠️ It is unsigned, and that has consequences
+
+macOS will refuse to open it by default, with a message that does not explain
+what happened. The user has to **right-click → Open → Open** once. The image
+contains a `READ ME FIRST.txt` that says exactly this.
+
+**To sign it properly** you need an Apple Developer account (about $99/year):
+
+```bash
+# 1. Sign the binary and the daemon, inside-out
+codesign --force --options runtime --timestamp \
+    --sign "Developer ID Application: YOUR NAME (TEAMID)" \
+    "device-search.app/Contents/MacOS/device-search-daemon"
+codesign --force --options runtime --timestamp \
+    --sign "Developer ID Application: YOUR NAME (TEAMID)" \
+    "device-search.app"
+
+# 2. Sign the image
+codesign --sign "Developer ID Application: YOUR NAME (TEAMID)" dist/device-search.dmg
+
+# 3. Notarise and staple, so a machine with no network can verify it
+xcrun notarytool submit dist/device-search.dmg \
+    --apple-id "you@example.com" --team-id TEAMID --password "app-specific-password" --wait
+xcrun stapler staple dist/device-search.dmg
+```
+
+Without all three steps the "unidentified developer" dialog returns. `codesign`
+alone is not enough; Gatekeeper checks the notarisation ticket.
+
+### Other platforms
+
+There is no cross-compilation here. Each platform builds on its own machine:
+
+| | |
+|---|---|
+| **macOS** | `build-sidecar.sh` + `make-app.sh` + `make-dmg.sh` (this machine) |
+| **Windows** | PyInstaller produces `.exe`; Tauri produces `.msi` via `cargo tauri build` |
+| **Linux** | PyInstaller + Tauri `.deb`/`.AppImage` |
+
+⚠️ **`onnxruntime==1.19.2` must be pinned in every bundle.** Version 1.23.2 fails
+to load on macOS 13 with `Symbol not found: __ZNSt3__18to_charsEPcS0_d`, and it
+fails at import — so the app starts and dies, rather than refusing to install.

@@ -259,6 +259,42 @@ def index_command() -> list[str]:
     return [sys.executable, "-u", "-m", "device_search.cli", "index"]
 
 
+def estimate_folder(path: str, budget_s: float = 1.5) -> dict:
+    """Count files and bytes under a path, with a time budget.
+
+    Needed only on a fresh install, where the database is empty and every folder
+    costs "0 files, 0 bytes" - which is true and useless, because the whole point
+    of the tree is showing what a choice will cost BEFORE it is made.
+
+    The walk is bounded. A home directory takes minutes, and a setup screen that
+    hangs is worse than one showing an estimate. When the budget runs out the
+    result is marked incomplete rather than reported as a total.
+    """
+    import os
+    import time
+    from .config import AUDIO_EXTS, SKIP_DIR_NAMES, VIDEO_EXTS
+
+    files = 0
+    size = 0
+    complete = True
+    t0 = time.time()
+
+    for root, dirs, names in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIR_NAMES]
+        for n in names:
+            files += 1
+            try:
+                size += os.stat(os.path.join(root, n)).st_size
+            except OSError:
+                pass
+        if time.time() - t0 > budget_s:
+            complete = False
+            break
+
+    return {"files": files, "text_bytes": size,
+            "index_bytes": int(size * 1.4), "complete": complete}
+
+
 def folder_costs(store, parent: str | None = None) -> list[dict]:
     """Immediate subfolders of `parent`, with what each one would cost to index.
 
@@ -298,7 +334,7 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
         # The index stores the text plus the word index, measured at about 1.4x.
         # Time is the crawl; embedding is separate and shown as its own column.
         index_bytes = int(d["bytes"] * 1.4)
-        out.append({
+        entry = {
             "name": name,
             "path": full,
             "files": d["files"],
@@ -307,7 +343,8 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
             "excluded": excluded,
             "reason": "excluded by default" if excluded else "",
             "parent": base,
-        })
+        }
+        out.append(entry)
     return out
 
 
@@ -928,10 +965,15 @@ class Handler(BaseHTTPRequestHandler):
                 configured = ENGINE.store.get_meta("roots") or []
                 # ⚠️ SUGGESTED FOLDERS ARE CHECKED FOR EXISTENCE, so the UI never offers a
                 # folder the user does not have. An empty Downloads on a fresh machine is normal.
-                suggested = [
-                    {"path": str(f), "name": f.name, "exists": f.is_dir()}
-                    for f in (_P.home() / "Documents", _P.home() / "Desktop", _P.home() / "Downloads")
-                ]
+                # With an estimate, because on a fresh install these are the only
+                # folders the setup screen can offer and "0 files" is not a choice
+                # anyone can make. Bounded walk: see estimate_folder.
+                suggested = []
+                for f in (_P.home() / "Documents", _P.home() / "Desktop", _P.home() / "Downloads"):
+                    entry = {"path": str(f), "name": f.name, "exists": f.is_dir()}
+                    if entry["exists"]:
+                        entry.update(estimate_folder(str(f)))
+                    suggested.append(entry)
                 self._send(200, {"configured": configured,
                                  "indexed": ENGINE.store.roots_in_index(),
                                  "suggested": suggested,
