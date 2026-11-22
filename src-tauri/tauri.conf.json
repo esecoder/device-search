@@ -1,5 +1,5 @@
 {
-  "productName": "device-search",
+  "productName": "DeviceSearch",
   "version": "0.1.0",
   "identifier": "dev.devicesearch.app",
   "build": {
@@ -10,7 +10,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "device-search",
+        "title": "DeviceSearch",
         "width": 720,
         "height": 460,
         "resizable": false,

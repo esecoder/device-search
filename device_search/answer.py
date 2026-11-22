@@ -245,41 +245,19 @@ def ask(query: str, sources, client=None) -> dict:
         "- Do not use any knowledge of your own. The sources are the only facts available.\n"
         "- Do not describe the sources or mention these rules. Just answer.\n"
     )
-    body = json.dumps({
-        "model": client["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.0,     # ⚠️ zero: this is a extraction task, not a writing task
-        # ⚠️ GENEROUS, because this endpoint's model spends budget on reasoning_tokens before
-        # it writes anything. A tight cap returns EMPTY content with finish_reason=length —
-        # measured on this project's own paraphrase generator, 60 times in a row.
-        "max_tokens": 1200,
-    }).encode()
-
-    req = urllib.request.Request(
-        f"{client['base']}/chat/completions", data=body,
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {client['key']}"})
-    ctx = None
-    try:
-        import ssl
-        import certifi
-        ctx = ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        ctx = None            # ⚠️ correct default on Linux; macOS needs the bundle above
-    try:
-        with urllib.request.urlopen(req, timeout=90, context=ctx) as r:
-            d = json.load(r)
-    except Exception as e:
+    # One helper, two wire formats: see device_search/llm.py. Anthropic is not
+    # OpenAI-compatible - it uses /v1/messages and x-api-key - and a request built
+    # for the wrong endpoint fails with a 400 about a missing field, which reads as
+    # a bad key rather than a wrong shape.
+    from .llm import chat
+    res = chat(client["base"], client["model"], client["key"],
+               [{"role": "user", "content": prompt}],
+               max_tokens=1200, temperature=0.0)
+    if res["error"]:
         return {"answer": "", "citations": [], "refused": False,
-                "error": f"{type(e).__name__}: {str(e)[:120]}"}
+                "error": res["error"][:160]}
+    text = res["text"]
 
-    if "error" in d:
-        return {"answer": "", "citations": [], "refused": False,
-                "error": str(d["error"])[:160]}
-    try:
-        text = (d["choices"][0]["message"].get("content") or "").strip()
-    except Exception:
-        return {"answer": "", "citations": [], "refused": False, "error": "malformed response"}
     if not text:
         return {"answer": "", "citations": [], "refused": False,
                 "error": "the model returned no content"}

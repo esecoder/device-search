@@ -189,9 +189,13 @@ const Setup = (() => {
         // `r.data` guarded, not assumed: reading it directly blanked the whole
         // setup panel whenever a response carried no body, which is a normal
         // failure rather than an exceptional one.
-        if (!r || !r.ok || !r.data) return [];
-        if (!treeState.parent) treeState.parent = r.data.parent || null;
-      return r.data.folders || [];
+        // api() returns { ok: true, ...body } - the body is spread at the TOP
+        // LEVEL and there is no `data` field. The first version checked r.data,
+        // which was always undefined, so every caller bailed before rendering and
+        // the Code and Media tabs sat on "Checking the cost…" forever.
+        if (!r || !r.ok) return [];
+        if (!treeState.parent) treeState.parent = r.parent || null;
+        return r.folders || [];
     }
 
     function fmtBytes(n) {
@@ -230,7 +234,7 @@ const Setup = (() => {
       // stops offering them once real data exists.
       if (!folders.length) {
         const r = await api("/api/roots");
-        const suggested = (r && r.data && r.data.suggested) || [];
+        const suggested = (r && r.suggested) || [];
         folders = suggested.filter((f) => f.exists).map((f) => ({
           name: f.name,
           path: f.path,
@@ -322,10 +326,11 @@ const Setup = (() => {
   if (step === "media") {
     const box = document.createElement("div");
     box.className = "media-step";
-    box.innerHTML = "<p>Making pictures and video findable by <em>what they show</em> "
-                  + "needs an index built from the images themselves. Audio needs "
-                  + "transcription. None of it is required for text search.</p>"
-                  + "<div id='media-cost' class='setup-sub'>Checking…</div>"
+    box.innerHTML = "<p>Find a picture or a video by describing it, and search "
+                  + "what was said in a recording.</p>"
+                  + "<p class='setup-sub'>Optional. Text search works without any of it. "
+                  + "These take a few minutes and run in the background.</p>"
+                  + "<div id='media-cost' class='setup-sub'>Checking the cost…</div>"
                   + "<div id='media-actions'></div>";
     host.appendChild(box);
 
@@ -334,8 +339,8 @@ const Setup = (() => {
 
     (async () => {
       const r = await api("/api/media");
-      if (!r.ok || !r.data) { costEl.textContent = r.error || "Could not read the cost."; return; }
-      const d = r.data;
+      if (!r.ok) { costEl.textContent = r.error || "Could not read the cost."; return; }
+      const d = r;
       const lines2 = [];
       lines2.push(d.image_index_built
         ? `Pictures: ${d.images.toLocaleString()} indexed.`
@@ -375,9 +380,13 @@ const Setup = (() => {
     if (step === "code") {
       const box = document.createElement("div");
       box.className = "code-step";
-      box.innerHTML = "<p>Finding a fragment like <code>InputLayer(shape=(784,))</code> "
-                    + "normally scans the index and takes about nine seconds. An optional "
-                    + "index of every three-character sequence makes it near-instant.</p>"
+      // Plain language. The previous copy explained "an index of every
+      // three-character sequence", which is accurate and means nothing to the
+      // person deciding whether to click.
+      box.innerHTML = "<p>Makes searching for a piece of code, like "
+                    + "<code>InputLayer(shape=(784,))</code>, almost instant.</p>"
+                    + "<p class='setup-sub'>Without it those searches still work, "
+                    + "they just scan everything and take a few seconds.</p>"
                     + "<div id='code-cost' class='setup-sub'>Checking the cost…</div>"
                     + "<div id='code-actions'></div>";
       host.appendChild(box);
@@ -388,7 +397,7 @@ const Setup = (() => {
       (async () => {
         const r = await api("/api/deep-index");
         if (!r.ok) { costEl.textContent = r.error || "Could not read the cost."; return; }
-        const d = r.data || {};
+        const d = r || {};
         if (d.built) {
           costEl.textContent = "The code-fragment index is already built.";
           return;
@@ -715,6 +724,21 @@ const Setup = (() => {
     const q = el("q"); if (q) q.focus();
   }
   function isOpen() { return el("setup-overlay")?.classList.contains("show"); }
+
+  // CLICKING OUTSIDE CLOSES IT.
+  //
+  // The overlay covers the whole window, so a click anywhere that is not the panel
+  // means "I am done here". Without this the only way out was Escape or the
+  // Settings link again, which is a trap for anyone who reaches for the mouse.
+  //
+  // The listener is on the OVERLAY and checks the target, because the panel is its
+  // CHILD - a handler on the document would also fire for clicks inside the panel
+  // and close it while the user is typing.
+  document.addEventListener("mousedown", (e) => {
+    const ov = el("setup-overlay");
+    if (!ov || !ov.classList.contains("show")) return;
+    if (e.target === ov) close();
+  });
 
   return { refresh, open, close, isOpen: () => el("setup-overlay")?.classList.contains("show") };
 })();

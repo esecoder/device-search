@@ -151,10 +151,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- The executable name must match the file in Contents/MacOS. Only the
+         DISPLAY name is DeviceSearch; renaming the binary breaks the launch. -->
     <key>CFBundleExecutable</key>       <string>device-search</string>
     <key>CFBundleIdentifier</key>       <string>dev.devicesearch.app</string>
-    <key>CFBundleName</key>             <string>device-search</string>
-    <key>CFBundleDisplayName</key>      <string>device-search</string>
+    <key>CFBundleName</key>             <string>DeviceSearch</string>
+    <key>CFBundleDisplayName</key>      <string>DeviceSearch</string>
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key>          <string>0.1.0</string>

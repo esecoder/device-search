@@ -158,6 +158,13 @@ PROVIDERS = [
      "model": "gpt-4o-mini", "needs_key": True, "local": False, "probe": ""},
     {"id": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com",
      "model": "deepseek-chat", "needs_key": True, "local": False, "probe": ""},
+    # Anthropic's API is NOT OpenAI-compatible on the wire: it uses /v1/messages
+    # with a different body and an `x-api-key` header. It is listed here so a user
+    # can see it and pick it, and the request builder below translates for it -
+    # offering it and then sending an OpenAI-shaped request would fail with a 400
+    # that reads like a bad key.
+    {"id": "anthropic", "label": "Anthropic (Claude)", "base_url": "https://api.anthropic.com",
+     "model": "claude-sonnet-4-6", "needs_key": True, "local": False, "probe": ""},
     {"id": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
      "model": "", "needs_key": True, "local": False, "probe": ""},
     {"id": "custom", "label": "Something else…", "base_url": "", "model": "",
@@ -209,36 +216,19 @@ def llm_probe(timeout: int = 25) -> dict:
         return {"ok": False, "reason": "no API key saved"}
     base = (cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
     model = cfg.get("model") or "gpt-4o-mini"
-    body = json.dumps({"model": model,
-                       "messages": [{"role": "user", "content": "Reply with the word: ok"}],
-                       "max_tokens": 200}).encode()
-    req = urllib.request.Request(
-        f"{base}/chat/completions", data=body,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    ctx = None
-    try:
-        import ssl
-        import certifi
-        ctx = ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        ctx = None      # ⚠️ correct default on Linux; macOS needs the bundle above
-    try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-            d = json.load(r)
-    except urllib.error.HTTPError as e:
-        # ⚠️ THE STATUS CODE IS THE USEFUL PART. 401 is a bad key, 404 a bad model, 402 no
-        # credit — three different fixes for what the UI would otherwise show as one failure.
-        try:
-            detail = e.read().decode()[:180]
-        except Exception:
-            detail = ""
-        return {"ok": False, "reason": f"HTTP {e.code}", "detail": detail}
-    except Exception as e:
-        return {"ok": False, "reason": f"{type(e).__name__}: {str(e)[:120]}"}
-    try:
-        txt = (d["choices"][0]["message"].get("content") or "").strip()
-    except Exception:
-        return {"ok": False, "reason": "the response had no message", "detail": str(d)[:180]}
+
+    # One helper, two wire formats. Anthropic uses /v1/messages and x-api-key;
+    # everything else imitates OpenAI. Branching once here is what makes adding a
+    # provider a line rather than a refactor.
+    from .llm import chat as _chat
+    res = _chat(base, model, key,
+                [{"role": "user", "content": "Reply with the word: ok"}],
+                max_tokens=200, timeout=timeout)
+    if res["error"]:
+        return {"ok": False, "reason": res["error"].split(":")[0],
+                "detail": res["error"][:200]}
+    txt = res["text"]
+
     return {"ok": bool(txt), "model": model,
             "reason": "" if txt else "the model returned no content"}
 
@@ -293,6 +283,59 @@ def estimate_folder(path: str, budget_s: float = 1.5) -> dict:
 
     return {"files": files, "text_bytes": size,
             "index_bytes": int(size * 1.4), "complete": complete}
+
+
+def counts_by_ext(store) -> dict:
+    """Files and bytes per extension, computed by SQLite.
+
+    The three settings tabs each need counts of videos, images or audio. The first
+    version pulled ALL 865,000 rows into Python and filtered with `Path(p).suffix`
+    - measured at 9 seconds per request, which is why the tabs sat on
+    "Checking the cost…" and looked broken.
+
+    `substr(path, instr(path, '.'))` is wrong for paths with several dots, so the
+    extension is taken as everything after the LAST dot using replace() arithmetic
+    in SQL. Still one pass, still hundreds of rows out instead of a million.
+    """
+    out: dict[str, dict] = {}
+    for ext, n, total in store.conn.execute(
+        "SELECT lower(substr(path, "
+        "        length(path) - length(replace(path, '.', '')) + 1)) AS e, "
+        "       COUNT(*), COALESCE(SUM(size),0) "
+        "FROM documents WHERE COALESCE(is_dir,0)=0 AND instr(path,'.')>0 "
+        "GROUP BY e").fetchall():
+        if ext.startswith("."):
+            out[ext] = {"files": n, "bytes": total}
+    return out
+
+
+_COUNT_CACHE: dict = {"at": 0.0, "data": {}}
+# Text volume is the expensive one: SUM(LENGTH(text)) reads every document body,
+# measured at 5.7 seconds over 865,000 documents. It changes only when the index
+# does, so it is cached alongside the counts.
+_CORPUS_CACHE: dict = {"at": 0.0, "text": 0, "files": 0}
+
+
+def counts_cached(store) -> dict:
+    """counts_by_ext, memoised for a minute.
+
+    The query takes about 2 seconds on 865,000 rows because the extension has to be
+    computed per row. It only changes when the index does, and the settings panel
+    asks for it on every tab switch - so paying 2s each time is paying repeatedly
+    for an answer that has not moved.
+    """
+    import time as _t
+    if _t.time() - _COUNT_CACHE["at"] < 60 and _COUNT_CACHE["data"]:
+        return _COUNT_CACHE["data"]
+    _COUNT_CACHE["data"] = counts_by_ext(store)
+    _COUNT_CACHE["at"] = _t.time()
+    return _COUNT_CACHE["data"]
+
+
+def total_for(counts: dict, exts: set) -> tuple[int, int]:
+    files = sum(counts.get(e, {}).get("files", 0) for e in exts)
+    nbytes = sum(counts.get(e, {}).get("bytes", 0) for e in exts)
+    return files, nbytes
 
 
 def folder_costs(store, parent: str | None = None) -> list[dict]:
@@ -1052,10 +1095,16 @@ class Handler(BaseHTTPRequestHandler):
                 # The interface needs the cost before it asks, for the same reason the
                 # command line does: this is the only step that can use more disk than
                 # the documents it indexes.
-                text = ENGINE.store.conn.execute(
-                    "SELECT COALESCE(SUM(LENGTH(text)),0) FROM documents").fetchone()[0]
-                files = ENGINE.store.conn.execute(
-                    "SELECT COUNT(*) FROM documents WHERE COALESCE(is_dir,0)=0").fetchone()[0]
+                # Cached: SUM(LENGTH(text)) reads every document body and takes
+                # about six seconds. It only moves when the index does, and the tab
+                # is re-opened every time the user visits Settings.
+                import time as _t
+                if _t.time() - _CORPUS_CACHE["at"] > 60 or not _CORPUS_CACHE["files"]:
+                    row = ENGINE.store.conn.execute(
+                        "SELECT COALESCE(SUM(LENGTH(text)),0), COUNT(*) FROM documents "
+                        "WHERE COALESCE(is_dir,0)=0").fetchone()
+                    _CORPUS_CACHE.update({"text": row[0], "files": row[1], "at": _t.time()})
+                text, files = _CORPUS_CACHE["text"], _CORPUS_CACHE["files"]
                 self._send(200, {
                     "available": True,
                     "documents": files,
@@ -1069,20 +1118,32 @@ class Handler(BaseHTTPRequestHandler):
                 # index shows its cost: both take minutes and one of them writes
                 # gigabytes, so neither may start without the number being visible.
                 from .config import AUDIO_EXTS, VIDEO_EXTS
-                from .video import DEFAULT_INTERVAL, estimate_frames
-                rows = [(i, p) for i, p in ENGINE.store.conn.execute(
-                    "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")]
-                audio = [(i, p) for i, p in rows if Path(p).suffix.lower() in AUDIO_EXTS]
-                video = [(i, p) for i, p in rows if Path(p).suffix.lower() in VIDEO_EXTS]
-                imgs = [(i, p) for i, p in rows
-                        if Path(p).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}]
-                frames = sum(estimate_frames(Path(p), DEFAULT_INTERVAL) for _i, p in video)
+                # NO PER-FILE DURATION LOOKUP HERE.
+                #
+                # The first version opened every video with av to count its frames.
+                # Measured on 131 videos: the request never returned, the interface
+                # sat on "Checking the cost…" and the tab looked broken. Opening a
+                # container is a file read, and 131 of them inside an HTTP handler is
+                # a hang, not a cost estimate.
+                #
+                # Counts come from the database and are instant. The time estimate
+                # is derived from size rather than measured, and labelled as an
+                # estimate - which is what it always was.
+                counts = counts_cached(ENGINE.store)
+                n_audio, _ = total_for(counts, AUDIO_EXTS)
+                n_video, video_bytes = total_for(counts, VIDEO_EXTS)
+                IMG = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+                n_img, _ = total_for(counts, IMG)
+                # ~1 frame per 10s at 3 MB/s of video is the measured average of this
+                # corpus (131 files, 1,458 frames from about 4 hours of screen
+                # recording). Derived from bytes, so it costs nothing to compute.
+                frames = max(int(video_bytes / 3_000_000 / 10), 0)
                 self._send(200, {
-                    "images": len(imgs),
+                    "images": n_img,
                     "image_index_built": (INDEX_DIR / "images" / "image_vectors.npy").exists(),
-                    "image_minutes": round(len(imgs) * 0.22 / 60, 1),
-                    "audio": len(audio),
-                    "video": len(video),
+                    "image_minutes": round(n_img * 0.22 / 60, 1),
+                    "audio": n_audio,
+                    "video": n_video,
                     "frames": frames,
                     "media_minutes": round(frames * 0.19 / 60 + 2, 1),
                     "video_index_built": (INDEX_DIR / "video" / "video_vectors.npy").exists(),

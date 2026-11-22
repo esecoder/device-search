@@ -4,7 +4,11 @@
    show as opaque squares on macOS. */
 
 :root {
-  --bg: rgba(28, 28, 30, 0.86);
+  /* OPAQUE. It was rgba(28,28,30,.86), which made the window see-through once the
+     native transparency started working - the config had been asking for a
+     transparent window all along and the flag was missing, so the 86% alpha had
+     never shown. A search panel over your own desktop is hard to read. */
+  --bg: rgb(28, 28, 30);
   --fg: #f2f2f7;
   --dim: #8e8e93;
   --sep: rgba(255, 255, 255, 0.10);
@@ -31,7 +35,9 @@ html, body {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  backdrop-filter: blur(30px) saturate(180%);
+  /* No backdrop-filter: with an opaque background there is nothing behind it to
+     blur, and the property forces the compositor to keep a live layer for every
+     frame. Removed rather than left as decoration that costs. */
   border-radius: 14px;
   border: 1px solid var(--sep);
   overflow: hidden;
@@ -139,14 +145,35 @@ kbd {
 .setup-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 .setup-sub { font-size: 12px; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }
 .setup-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+/* TWO LINES, NOT TWO COLUMNS.
+   The columns were `18px 130px 1fr` - the name was pinned to 130px, so a folder
+   called "WebstormProjects" ran into the path beside it. A fixed width for
+   user-supplied text is a collision waiting for the first long name.
+
+   Stacked, with the checkbox spanning both lines, so the name can be any length
+   and the path gets the full width to truncate in. */
 .setup-row {
-  display: grid; grid-template-columns: 18px 130px 1fr; gap: 10px;
-  align-items: center; padding: 7px 8px; border-radius: 7px; cursor: pointer;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 1px;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
 }
+.setup-row > input { grid-column: 1; grid-row: 1 / span 2; margin: 0; }
 .setup-row:hover { background: rgba(255,255,255,0.05); }
-.setup-name { font-weight: 500; }
+.setup-name {
+  grid-column: 2; grid-row: 1;
+  padding-right: 26px;           /* clear of the remove button */
+  font-weight: 500; font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .setup-path {
-  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  grid-column: 2; grid-row: 2;
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .setup-add { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -192,6 +219,9 @@ kbd {
 /* ⚠️ UNTICKING IS NOT REMOVING. Untick a folder you picked by mistake and it stayed in the list
    for ever, with no way back to the list you started with. */
 .setup-x {
+  /* Placed explicitly: the row is now a 2-column grid for the name/path stack, and
+     an extra child with no grid position lands in column 1 below the checkbox. */
+  grid-column: 2; grid-row: 1;
   justify-self: end; align-self: center; padding: 0; width: 22px; height: 22px;
   font-size: 15px; line-height: 1; border-radius: 11px; color: var(--dim);
   background: transparent; border: 1px solid transparent;
@@ -406,6 +436,119 @@ kbd {
   padding: 8px 2px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- media results (images and video frames) --------------------------- */
+.group-head {
+  font-size: 11px;
+  letter-spacing: .08em;
+  opacity: .55;
+  margin: 16px 0 6px;
+  padding-left: 2px;
+}
+.media-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.media-row:hover { background: rgba(255,255,255,.06); }
+.media-kind {
+  font-size: 9px;
+  letter-spacing: .06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(120,180,255,.16);
+  color: #9cc7ff;
+  flex: none;
+}
+.media-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.media-at {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  opacity: .6;
+  flex: none;
+}
+
+/* ---- search deeper ------------------------------------------------------ */
+.deeper-btn {
+  display: block;
+  margin: 18px auto 8px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.deeper-btn:hover { background: rgba(255,255,255,.10); }
+
+/* ---- scope chips -------------------------------------------------------- */
+#scopes {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 2px;
+  flex-wrap: wrap;
+}
+.scope {
+  font-size: 11px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.13);
+  background: transparent;
+  color: inherit;
+  opacity: .62;
+  cursor: pointer;
+  transition: opacity .12s, background .12s;
+}
+.scope:hover { opacity: .9; }
+.scope.on {
+  opacity: 1;
+  background: rgba(120,180,255,.16);
+  border-color: rgba(120,180,255,.45);
+  color: #bcd9ff;
+}
+
+/* ---- shortcut hint ------------------------------------------------------ */
+#hint {
+  font-size: 10.5px;
+  opacity: .38;
+  padding: 2px 16px 7px;
+  user-select: none;
+}
+#hint kbd {
+  font-family: inherit;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,.16);
+  opacity: .85;
+}
+
+/* ---- empty state -------------------------------------------------------- */
+/* Centred in the area the results will occupy, so the panel does not reflow when
+   the first result arrives. */
+#results { display: flex; flex-direction: column; }
+#results > * { flex: none; }
+.empty-hint {
+  margin: auto;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--fg);
+  opacity: .30;
+  max-width: 420px;
+  user-select: none;
+}
+.empty-hint span { display: block; font-size: 11.5px; opacity: .7; }
 
 /* ---- media results (images and video frames) --------------------------- */
 .group-head {
