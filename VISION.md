@@ -97,44 +97,64 @@ Each item below is a capability that has to be real, not described:
 
 ## Honest state, as of this document
 
-Measured, not intended.
+Measured on this machine, not intended. Numbers are from actual runs.
 
 ### Working
 
 | | |
 |---|---|
-| Exact fragment search | ✅ `InputLayer(shape=(784,))` works |
-| Keyword search (FTS5/BM25) | ✅ 0.002 s at 852,000 documents |
-| Filename and path search | ✅ 0.45 s |
-| Semantic search | ✅ working, **but over 13,336 vectors of 852,000 documents** |
-| PDF text extraction | ✅ 361 PDFs indexed and searchable |
-| Ask a question | ✅ AI panel, grounded, with sources |
-| Metadata queries | ✅ size, extension, date |
-| Query routing | ✅ classifier picks backends, broadens on failure |
-| Desktop app | ✅ Tauri, tray icon, global hotkey |
-| Resumable vector build | ✅ sharded, crash-safe |
-| Cost shown before expensive actions | ✅ code index, folder scope |
+| Exact fragment search | `InputLayer(shape=(784,))` — 0.060 s with the optional code index, ~9 s without |
+| Keyword search (FTS5/BM25) | 0.002 s at 852,000 documents |
+| Filename and path search | 0.45 s |
+| Semantic search (text) | working — 13,336 vectors, 4,488 documents |
+| **Image text (OCR)** | **12,554 images** read; searching inside a screenshot returns it in 83 ms |
+| **Image description (SigLIP2)** | **1,210 images** embedded, 768 dims, 4 MB; *"a red car near a house"* verified 3/4 on known answers |
+| **PDF text** | 386 PDFs, with page numbers — exact on a 39-page document |
+| **Audio** | **44 files**, opt-in; Whisper at 14x realtime, timestamps locate the spoken word |
+| **Video** | **131 files, 1,458 frames**, opt-in; a hit says *"2:50"* |
+| Ask a question | grounded, with citations and page/timestamp |
+| **Context engineering** | 6,000-token budget, duplicate removal, 2-per-document quota |
+| **Multi-hop retrieval** | follows a reference from a result into the file it names |
+| **Reranking** | measured and **rejected**: no gain, 14x slower |
+| Metadata queries | size, extension, date — including *"I did not look"* vs *"nothing matched"* |
+| Query routing | classifier picks backends, broadens when the first pass is empty |
+| Desktop app | Tauri, tray icon, global hotkey |
+| Resumable vector build | sharded, crash-safe, fingerprints per shard |
+| Cost shown before expensive actions | code index, **image index, media transcription**, folder scope |
+| **Packaging** | **85 MB .dmg** that runs on a machine with no Python and no repository |
 
 ### Not built
 
 | | impact |
 |---|---|
-| **Image understanding (OCR)** | 1,295 images are unsearchable — the engine is not installed |
-| **Image captioning** | cannot answer "a screenshot of the pricing table" |
-| **Video understanding** | not started |
-| **Audio transcription** | not started |
-| **Multi-hop agentic retrieval** | single-pass only; no genuine multi-step search |
-| **Context engineering policy** | retrieval is concatenated; no budget or dedupe policy |
-| **Citation back to page/timestamp** | PDFs store page markers but the UI does not surface them |
-| **Sub-folder selection with live cost** | all-or-nothing per root |
-| **Packaging** | the `.app` imports Python from this repo path; it cannot be moved or shared |
+| **Image captioning** | OCR reads text; it cannot describe a picture that has none. SigLIP narrows the gap and does not close it — no counting, no spatial relations |
+| **Video motion** | frames are still images; "the part where it scrolls" is not findable |
+| **Semantic coverage** | vectors cover 4,488 of 852,000 documents — 0.5% |
+| **Code signing** | unsigned, so macOS shows "unidentified developer". Needs a paid Apple account |
+| **Windows and Linux builds** | the scripts exist; nobody has run them on those platforms |
+| **Mobile** | not started, and not started on purpose |
+| **Database connectors** | not started; needs a different security model |
 
 ### The gap in one line
 
-**Text search is production quality. Multimodal is absent. The agent is one
-pass. And the binary cannot leave this machine.**
+**Every modality in the vision is now searchable, and two of them are only half
+understood: images are found by description and not counted, video is found by
+frame and not by motion. Signing is the only thing between this and a stranger
+installing it without a warning dialog.**
 
----
+### What changed since the first draft of this section
+
+The first version said: *"Text search is production quality. Multimodal is
+absent. The agent is one pass. And the binary cannot leave this machine."*
+
+Every clause of that is now false, and each one took a measurement to disprove:
+
+- multimodal was absent because **the libraries were never installed**, not
+  because the code was missing
+- the agent was one pass because **nobody had written the second one**
+- the binary could not leave because **the bundle contained no Python**
+
+⚠️ All three were invisible from the source. They were visible from running it.
 
 ## What "done" looks like
 
