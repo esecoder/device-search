@@ -58,10 +58,13 @@ const Setup = (() => {
   let msgText = "";
   let msgKind = "";
 
+  // Folder sizes, fetched once. See the note in the folders step.
+  const sizesCache = new Map();
+  let sizesAsked = false;
+
   // Folder tree state: which parent is being shown, and which folders are ticked.
   // Kept at module level so a re-render (switching tabs) does not lose the
   // selection the user just made.
-  let treeState = null;
   // ⚠️ AND THE SAME PATTERN A THIRD TIME: whether the text-path fallback is OPEN is state.
   //
   // The picker's failure handler did `inp.style.display = ""` and then called render() — which
@@ -171,154 +174,6 @@ const Setup = (() => {
   // The numbers come from the backend, computed from what is already indexed. A
   // disk walk would take minutes on a home directory and make the checkboxes feel
   // broken.
-  async function renderTree(host) {
-    // Reads the module-level treeState directly rather than taking it as a
-    // parameter. As a parameter it was shadowed on one of the re-render paths
-    // and arrived undefined, which blanked the panel; there is only ever one
-    // tree, so a parameter was never buying anything.
-    if (!treeState) treeState = { parent: null, selected: new Map() };
-    const wrap = document.createElement("div");
-    wrap.className = "tree";
-    host.appendChild(wrap);
-
-    const totals = document.createElement("div");
-    totals.className = "tree-totals";
-
-    async function load(path) {
-      const r = await api("/api/folders" + (path ? "?path=" + encodeURIComponent(path) : ""));
-        // `r.data` guarded, not assumed: reading it directly blanked the whole
-        // setup panel whenever a response carried no body, which is a normal
-        // failure rather than an exceptional one.
-        // api() returns { ok: true, ...body } - the body is spread at the TOP
-        // LEVEL and there is no `data` field. The first version checked r.data,
-        // which was always undefined, so every caller bailed before rendering and
-        // the Code and Media tabs sat on "Checking the cost…" forever.
-        if (!r || !r.ok) return [];
-        if (!treeState.parent) treeState.parent = r.parent || null;
-        return r.folders || [];
-    }
-
-    function fmtBytes(n) {
-      if (n > 1e9) return (n / 1e9).toFixed(1) + " GB";
-      if (n > 1e6) return (n / 1e6).toFixed(0) + " MB";
-      if (n > 1e3) return (n / 1e3).toFixed(0) + " KB";
-      return n + " B";
-    }
-
-    function updateTotals() {
-      let files = 0, bytes = 0;
-      for (const f of treeState.selected.values()) { files += f.files; bytes += f.index_bytes; }
-      // Measured crawl rate is about 1,500 files per second on text, and embedding
-      // is a separate, much slower job that is not started here.
-      const mins = Math.max(files / 1500 / 60, 0);
-      totals.textContent = treeState.selected.size
-        ? `${treeState.selected.size} folder${treeState.selected.size > 1 ? "s" : ""} · `
-          + `${files.toLocaleString()} files · about ${fmtBytes(bytes)} of index · `
-          + `about ${mins < 1 ? "under a minute" : Math.round(mins) + " minutes"} to crawl`
-        : "Nothing selected yet.";
-    }
-
-    async function renderList() {
-      wrap.innerHTML = "";
-      let folders = await load(treeState.parent);
-
-      // ON A FRESH INSTALL THERE IS NOTHING TO LIST, BECAUSE NOTHING IS INDEXED.
-      //
-      // The tree is built from the database, which is empty the first time the app
-      // opens - so a new user saw "index a folder first" with no way to do it. The
-      // setup panel is the only UI they have, and it was telling them to use
-      // something that does not exist.
-      //
-      // The suggested folders come from /api/roots and are checked for existence
-      // there, so this offers Documents/Desktop/Downloads on the first run and
-      // stops offering them once real data exists.
-      if (!folders.length) {
-        const r = await api("/api/roots");
-        const suggested = (r && r.suggested) || [];
-        folders = suggested.filter((f) => f.exists).map((f) => ({
-          name: f.name,
-          path: f.path,
-          files: f.files || 0,
-          text_bytes: f.text_bytes || 0,
-          index_bytes: f.index_bytes || 0,
-          excluded: false,
-          reason: "",
-          suggested: true,
-        }));
-        if (!folders.length) {
-          wrap.textContent = "No folders available. Index a folder with the command line: "
-                           + "ds setup --roots ~/Documents && ds index";
-          return;
-        }
-        const note = document.createElement("div");
-        note.className = "setup-sub";
-        note.textContent = "These are the folders people usually start with. "
-                         + "Nothing is indexed yet, so there are no costs to show until "
-                         + "you pick one and it is crawled.";
-        host.insertBefore(note, wrap);
-      }
-      for (const f of folders) {
-        const row = document.createElement("label");
-        row.className = "tree-row" + (f.excluded ? " excluded" : "");
-
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = treeState.selected.has(f.path);
-        if (f.excluded) {
-          cb.disabled = true;
-          cb.title = "Excluded by default: " + f.reason;
-        }
-        cb.onchange = () => {
-          if (cb.checked) treeState.selected.set(f.path, f);
-          else treeState.selected.delete(f.path);
-          updateTotals();
-        };
-
-        const name = document.createElement("span");
-        name.className = "tree-name";
-        name.textContent = f.name;
-
-        const cost = document.createElement("span");
-        cost.className = "tree-cost";
-        cost.textContent = `${f.files.toLocaleString()} files · ${fmtBytes(f.index_bytes)}`;
-
-        row.appendChild(cb); row.appendChild(name); row.appendChild(cost);
-        wrap.appendChild(row);
-      }
-    }
-
-    host.appendChild(totals);
-
-    const actions = document.createElement("div");
-    actions.style.marginTop = "10px";
-    const save = document.createElement("button");
-    save.className = "setup-btn";
-    save.textContent = "Apply folder selection";
-    save.onclick = async () => {
-      const paths = [...treeState.selected.keys()];
-      if (!paths.length) return;
-      save.disabled = true;
-      save.textContent = "Applying…";
-      const r = await api("/api/roots", { method: "POST", body: { paths, mode: "explicit" } });
-      if (!r.ok) {
-        save.disabled = false;
-        save.textContent = "Apply folder selection";
-        const m = el("setup-msg");
-        if (m) { m.textContent = r.error || "Could not save the selection."; m.className = "setup-msg err"; }
-        return;
-      }
-      // Removing a folder is a separate, deliberate action because it deletes
-      // rows. Naming it here means the user sees that applying a narrower
-      // selection also forgets what is no longer in it.
-      save.textContent = "Saved — indexing will start for these folders";
-    };
-    actions.appendChild(save);
-    host.appendChild(actions);
-
-    await renderList();
-    updateTotals();
-    return { render: renderList, updateTotals };
-  }
 
   // Pictures, video and audio. Each is a separate index with its own cost,
   // because they fail in different ways and take wildly different times:
@@ -367,8 +222,33 @@ const Setup = (() => {
         actEl.appendChild(b);
       };
 
-      mk("Index pictures", "images", !d.image_index_built);
-      mk("Transcribe and index video", "media", !d.video_index_built);
+      // ONE ACTION, TWO KINDS OF MEDIA, AND SAY SO.
+      //
+      // The button read "Transcribe and index video", so a user with 44 audio
+      // files had no way to know their recordings were covered by it. Audio is
+      // transcribed by the same run; the label now says both.
+      //
+      // And when a button is disabled because the work is already done, the reason
+      // is on screen rather than in a tooltip. "Index pictures" greyed out with no
+      // explanation reads as broken, not as finished.
+      if (d.image_index_built) {
+        const done = document.createElement("div");
+        done.className = "setup-sub";
+        done.textContent = "Pictures are already indexed — search finds them by description.";
+        actEl.appendChild(done);
+      } else {
+        mk(`Index ${d.images.toLocaleString()} pictures`, "images", true);
+      }
+
+      if (d.video_index_built) {
+        const done = document.createElement("div");
+        done.className = "setup-sub";
+        done.textContent = "Video frames are already indexed.";
+        actEl.appendChild(done);
+      } else {
+        mk(`Transcribe ${d.audio.toLocaleString()} audio files and `
+           + `${d.video.toLocaleString()} videos`, "media", true);
+      }
     })();
     return;
   }
@@ -443,10 +323,14 @@ const Setup = (() => {
     msg.className = "setup-msg";
     host.appendChild(msg);
 
-    if (!treeState) {
-      treeState = { parent: null, selected: new Map() };
-      renderTree(host);
-    }
+    // There used to be a SECOND folder list here: a tree of subfolders with their
+    // own costs, alongside the list below. Two lists, two independent selections,
+    // and the tree only rendered while its state was empty - so it appeared on the
+    // first open and was missing on every visit after.
+    //
+    // The list below is the one that works: it owns the checkbox state, the remove
+    // button and the whole-device option. The cost information moves onto those
+    // rows instead.
     // ⚠️ DRAWN FROM STATE on every render, so a message set before a render is still there after it.
     paintNote();
 
@@ -462,6 +346,23 @@ const Setup = (() => {
     // be drawn FROM that state, not from a different list that happens to overlap with it.
     const list = document.createElement("div");
     list.className = "setup-list" + (wholeDevice ? " disabled" : "");
+
+    // Sizes for the rows below, fetched once and cached at module scope.
+    //
+    // This render function is NOT async, so the request cannot be awaited here.
+    // It starts in the background and re-renders when it lands, guarded by
+    // `sizesAsked` so the re-render cannot start another one - which would be an
+    // infinite loop rather than a slow panel.
+    const sizes = sizesCache;
+    if (!sizesAsked) {
+      sizesAsked = true;
+      api("/api/folders").then((fr) => {
+        for (const f of (fr && fr.folders) || []) {
+          sizesCache.set(f.path, f.index_bytes || 0);
+        }
+        if (sizesCache.size) render();
+      }).catch(() => { /* the list still works without sizes */ });
+    }
 
     const cands = new Map();          // path -> { label, count, known }
     for (const s of roots.suggested) {
@@ -483,7 +384,7 @@ const Setup = (() => {
 
     for (const [path, meta] of cands) {
       list.appendChild(row(path, meta.label, chosen.has(path), meta.count,
-                           !meta.known));
+                           !meta.known, sizes.get(path) || 0));
     }
     // ⚠️ A COUNT OF WHAT IS ABOUT TO BE INDEXED. "Index these folders" gave no sense of whether
     // that is thirty seconds or three hours, and the only way to find out was to start it.
@@ -637,7 +538,7 @@ const Setup = (() => {
     host.appendChild(foot);
   }
 
-  function row(path, label, checked, count, removable) {
+  function row(path, label, checked, count, removable, sizeBytes) {
     const d = document.createElement("label");
     d.className = "setup-row";
     const cb = document.createElement("input");
@@ -655,7 +556,15 @@ const Setup = (() => {
     t.textContent = label;
     const p = document.createElement("span");
     p.className = "setup-path";
-    p.textContent = count ? `${path}  ·  ${count.toLocaleString()} indexed` : path;
+    // The line carries the path and whatever is known about what it costs. The old
+    // tree showed a size; it is here now that there is one list instead of two.
+    const bits = [path];
+    if (count) bits.push(`${count.toLocaleString()} indexed`);
+    if (sizeBytes) {
+      const mb = sizeBytes / 1e6;
+      bits.push(mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+    }
+    p.textContent = bits.join("  ·  ");
     d.append(cb, t, p);
     // ⚠️ A REMOVE AFFORDANCE, BECAUSE UNTICKING IS NOT REMOVING. Untick a folder you picked by
     // mistake and it stays in the list for ever — there is no way back to the list you started
