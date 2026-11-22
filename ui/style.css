@@ -176,7 +176,24 @@ kbd {
   font-family: var(--mono); font-size: 10.5px; color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.setup-add { display: flex; gap: 8px; margin-bottom: 16px; }
+.setup-add { display: flex; gap: 8px; margin-bottom: 16px; align-items: stretch; }
+/* Every button in this row, not only the one with a class. "or type a path" was
+   created with no class at all and rendered as a browser default - a grey box
+   beside a blue one, which reads as the grey one being disabled. */
+.setup-add button {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .06);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.setup-add button:hover { background: rgba(255, 255, 255, .12); }
 .setup-add input {
   flex: 1; background: rgba(255,255,255,0.06); border: 1px solid var(--sep);
   border-radius: 7px; color: var(--fg); padding: 7px 10px; font-size: 13px; outline: 0;
@@ -544,7 +561,9 @@ kbd {
   font-size: 12.5px;
   line-height: 1.7;
   color: var(--fg);
-  opacity: .30;
+  /* .30 of an already-muted colour is invisible on this background - the hint was
+     rendering and could not be read. */
+  opacity: .55;
   max-width: 420px;
   user-select: none;
 }
@@ -697,4 +716,39 @@ kbd {
   opacity: .55;         /* was .38, which was below comfortable reading */
   white-space: nowrap;
   flex: none;
+}
+
+
+/* ---- action buttons ------------------------------------------------------
+   These had NO rule at all. `.setup-btn` is used by "Build it", "Index pictures",
+   "Transcribe and index video" and "Apply folder selection", and every one of them
+   was rendering as a browser-default grey button - which on a dark panel reads as
+   disabled. A primary action has to look like one. */
+.setup-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 7px 16px;
+  margin: 8px 8px 0 0;
+  border-radius: 7px;
+  border: 1px solid rgba(120, 180, 255, .45);
+  background: rgba(120, 180, 255, .18);
+  color: #cfe4ff;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.setup-btn:hover:not(:disabled) {
+  background: rgba(120, 180, 255, .30);
+  border-color: rgba(120, 180, 255, .70);
+}
+.setup-btn:active:not(:disabled) { background: rgba(120, 180, 255, .38); }
+/* Disabled is DIMMER BUT STILL SHAPED, so "already built" does not look like
+   "broken control". */
+.setup-btn:disabled {
+  opacity: .38;
+  cursor: default;
+  border-color: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .05);
+  color: inherit;
 }

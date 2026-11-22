@@ -286,27 +286,43 @@ def estimate_folder(path: str, budget_s: float = 1.5) -> dict:
 
 
 def counts_by_ext(store) -> dict:
-    """Files and bytes per extension, computed by SQLite.
+    """Files and bytes per extension.
 
-    The three settings tabs each need counts of videos, images or audio. The first
-    version pulled ALL 865,000 rows into Python and filtered with `Path(p).suffix`
-    - measured at 9 seconds per request, which is why the tabs sat on
-    "Checking the cost…" and looked broken.
+    ⚠️ THE FIRST VERSION TRIED TO DO THIS IN SQL AND WAS WRONG.
 
-    `substr(path, instr(path, '.'))` is wrong for paths with several dots, so the
-    extension is taken as everything after the LAST dot using replace() arithmetic
-    in SQL. Still one pass, still hundreds of rows out instead of a million.
+        lower(substr(path, length(path) - length(replace(path,'.','')) + 1))
+
+    That computes a position from the NUMBER of dots, not from where the last one
+    is, so it returned fragments of the path from wherever the arithmetic landed.
+    The end result: every count was zero, and the Media tab said "0 pictures, 0
+    video, 0 audio" on a machine with 12,554 images and 131 videos.
+
+    SQLite has no `reverse()` and no regex, so "after the last dot" is genuinely
+    awkward in SQL. One pass over (path, size) in Python is correct, takes about
+    two seconds for 865,000 rows, and is cached for a minute - which is the right
+    trade for a number that only changes when the index does.
     """
     out: dict[str, dict] = {}
-    for ext, n, total in store.conn.execute(
-        "SELECT lower(substr(path, "
-        "        length(path) - length(replace(path, '.', '')) + 1)) AS e, "
-        "       COUNT(*), COALESCE(SUM(size),0) "
-        "FROM documents WHERE COALESCE(is_dir,0)=0 AND instr(path,'.')>0 "
-        "GROUP BY e").fetchall():
-        if ext.startswith("."):
-            out[ext] = {"files": n, "bytes": total}
+    for path, size in store.conn.execute(
+            "SELECT path, COALESCE(size,0) FROM documents "
+            "WHERE COALESCE(is_dir,0)=0"):
+        dot = path.rfind(".")
+        slash = path.rfind("/")
+        if dot < 0 or dot < slash:      # no dot, or a dot inside a directory name
+            continue
+        ext = path[dot:].lower()
+        if len(ext) > 12:               # not an extension, part of a long filename
+            continue
+        e = out.setdefault(ext, {"files": 0, "bytes": 0})
+        e["files"] += 1
+        e["bytes"] += size
     return out
+
+
+def total_for(counts: dict, exts: set) -> tuple[int, int]:
+    files = sum(counts.get(e, {}).get("files", 0) for e in exts)
+    nbytes = sum(counts.get(e, {}).get("bytes", 0) for e in exts)
+    return files, nbytes
 
 
 _COUNT_CACHE: dict = {"at": 0.0, "data": {}}
@@ -1134,10 +1150,14 @@ class Handler(BaseHTTPRequestHandler):
                 n_video, video_bytes = total_for(counts, VIDEO_EXTS)
                 IMG = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
                 n_img, _ = total_for(counts, IMG)
-                # ~1 frame per 10s at 3 MB/s of video is the measured average of this
-                # corpus (131 files, 1,458 frames from about 4 hours of screen
-                # recording). Derived from bytes, so it costs nothing to compute.
-                frames = max(int(video_bytes / 3_000_000 / 10), 0)
+                # ~0.19 MB per second of video, MEASURED on this corpus: 2.80 GB
+                # across 131 recordings that produced 1,458 frames at one per 10s.
+                #
+                # The first constant was 3 MB/s, guessed from "screen recording" -
+                # which gave 93 frames where the truth is 1,458. Frames are only a
+                # time estimate here, so the cost of being wrong was a wildly
+                # optimistic "2 minutes" for a job that takes seven.
+                frames = max(int(video_bytes / 190_000 / 10), 0)
                 self._send(200, {
                     "images": n_img,
                     "image_index_built": (INDEX_DIR / "images" / "image_vectors.npy").exists(),
