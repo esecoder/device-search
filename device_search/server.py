@@ -785,7 +785,7 @@ class Engine:
                     covered = len(vs.man.done_doc_ids)
                     whole = ENGINE.store.count()
                     reason = (
-                        f"Meaning-search covers {covered:,} of {whole:,} documents, "
+                        f"Semantic-search covers {covered:,} of {whole:,} documents, "
                         f"and {len(plan['invalid_shards'])} of {len(vs.man.shards)} "
                         f"of its shards are out of date. Exact, keyword and filename "
                         f"results are unaffected."
