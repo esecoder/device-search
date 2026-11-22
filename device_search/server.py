@@ -774,9 +774,22 @@ class Engine:
                     reason = (f"the embedding policy changed ({plan['policy_changed']}) — "
                               f"every vector is rebuilt")
                 else:
-                    reason = (f"{len(plan['invalid_shards'])} of {len(vs.man.shards)} vector "
-                              f"shards no longer match their documents "
-                              f"({plan['will_reembed']:,} documents)")
+                    # TWO DIFFERENT FACTS, AND THE FIRST MESSAGE MERGED THEM.
+                    #
+                    # "1 of 23 shards no longer match (861,276 documents)" reads as
+                    # though 861,276 documents have wrong vectors. They do not: the
+                    # vectors cover `covered` documents, and 861,276 is what a
+                    # rebuild to cover the whole index WOULD cost. One is a
+                    # staleness fact, the other a coverage fact, and the reader
+                    # cannot act on either when they are run together.
+                    covered = len(vs.man.done_doc_ids)
+                    whole = ENGINE.store.count()
+                    reason = (
+                        f"Meaning-search covers {covered:,} of {whole:,} documents, "
+                        f"and {len(plan['invalid_shards'])} of {len(vs.man.shards)} "
+                        f"of its shards are out of date. Exact, keyword and filename "
+                        f"results are unaffected."
+                    )
                 stale = {"stale": True, "severity": "outdated",
                          "invalid_shards": len(plan["invalid_shards"]),
                          "documents": plan["will_reembed"], "reason": reason}
@@ -1167,6 +1180,10 @@ class Handler(BaseHTTPRequestHandler):
                     "frames": frames,
                     "media_minutes": round(frames * 0.19 / 60 + 2, 1),
                     "video_index_built": (INDEX_DIR / "video" / "video_vectors.npy").exists(),
+                    # So the tab can say "indexing, 40% done, 12 minutes left"
+                    # instead of "Running in the background" and then silence.
+                    "building": dict(ENGINE.media_build_state),
+                    "status": read_status(INDEX_DIR),
                 })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
@@ -1244,6 +1261,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             state.update({"running": True, "kind": kind, "error": None, "finished": False})
 
+            from .vectors import write_status
+
             def _run():
                 try:
                     if kind == "images":
@@ -1252,9 +1271,29 @@ class Handler(BaseHTTPRequestHandler):
                         rows = [(i, p) for i, p in ENGINE.store.conn.execute(
                             "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")]
                         items = [(i, p) for i, p in rows if Path(p).suffix.lower() in IMG]
+                        # Progress goes into the SAME status file the crawl uses,
+                        # so the existing banner shows it without the interface
+                        # needing a second progress mechanism.
+                        total = len(items)
+                        t0 = time.time()
+
+                        def _say(done, rate):
+                            left = (total - done) / max(rate, 1e-6)
+                            write_status(
+                                INDEX_DIR, stage="images", finished=False,
+                                documents_total=total, documents_done=done,
+                                elapsed_seconds=round(time.time() - t0),
+                                percent=round(done / max(total, 1) * 100, 1),
+                                eta_seconds=int(left))
+                            state["done"] = done
+                            state["total"] = total
+
                         idx = ImageIndex()
-                        idx.embed_images(items)
+                        idx.embed_images(items, on_progress=_say)
                         idx.save(INDEX_DIR / "images")
+                        write_status(INDEX_DIR, stage="images", finished=True,
+                                     documents_total=total, documents_done=total,
+                                     percent=100.0, elapsed_seconds=round(time.time() - t0))
                         ENGINE._img_index = None      # force a reload on the next search
                     else:
                         import os

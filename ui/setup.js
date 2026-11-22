@@ -249,6 +249,35 @@ const Setup = (() => {
         mk(`Transcribe ${d.audio.toLocaleString()} audio files and `
            + `${d.video.toLocaleString()} videos`, "media", true);
       }
+
+      // WHILE A BUILD IS RUNNING, SAY HOW FAR ALONG IT IS.
+      //
+      // The button used to change to "Running in the background" and then nothing
+      // happened on screen for the next forty-six minutes. The status is already
+      // written by the build; this reads it back and updates the line in place.
+      if (d.building && d.building.running) {
+        const prog = document.createElement("div");
+        prog.className = "setup-sub";
+        actEl.appendChild(prog);
+        const tick = async () => {
+          const rr = await api("/api/media");
+          if (!rr.ok) return;
+          const b = (rr.building) || {};
+          const st = (rr.status) || {};
+          if (b.running && st.documents_total) {
+            const done = st.documents_done || 0;
+            const total = st.documents_total || 1;
+            const mins = Math.round((st.eta_seconds || 0) / 60);
+            prog.textContent = `Indexing ${done.toLocaleString()} of `
+                             + `${total.toLocaleString()} (${Math.round(done / total * 100)}%)`
+                             + (mins > 0 ? ` — about ${mins} min left` : "");
+            setTimeout(tick, 3000);
+          } else {
+            prog.textContent = "Finished. Reopen this tab to see the new counts.";
+          }
+        };
+        setTimeout(tick, 1500);
+      }
     })();
     return;
   }

@@ -94,7 +94,8 @@ class ImageIndex:
         return self._txt
 
     # ------------------------------------------------------------------ build
-    def embed_images(self, items, batch: int = 32, progress_every: int = 50):
+    def embed_images(self, items, batch: int = 32, progress_every: int = 50,
+                     on_progress=None):
         """items: iterable of (doc_id, path). Returns the number embedded.
 
         Images that cannot be opened are skipped rather than failing the build:
@@ -146,6 +147,14 @@ class ImageIndex:
                 if done and done % progress_every < batch:
                     rate = done / max(time.time() - t0, 1e-6)
                     print(f"  … {done:,} images embedded ({rate:.1f}/s)", flush=True)
+                    # Reported to the caller so a background build can say how far
+                    # it has got. Without this the button said "Running in the
+                    # background" and then nothing, for forty-six minutes.
+                    if on_progress:
+                        try:
+                            on_progress(done, rate)
+                        except Exception:
+                            pass
 
         flush()
 

@@ -303,17 +303,44 @@ function applyIndexState(h) {
   if ($("activity")) $("activity").textContent = "";
 
   if (h.stale && h.stale.stale) {
-    // ⚠️ THE APP REPAIRS ITSELF, SO THE MESSAGE SAYS SO RATHER THAN ASKING THE USER ANYTHING.
-    // An index that is about to be fixed automatically is a different situation from one that
-    // cannot be fixed, and only the second needs the user to care or to act.
+    const reason = (h.stale.reason || "").trim();
     const rep = h.auto_repair || {};
+    const sev = h.stale.severity || "";
+
+    // A COVERAGE GAP IS NOT A FAULT, AND IT MUST NOT NAG FOREVER.
+    //
+    // The banner used to say "Some results may be out of date." on every poll, for
+    // ever, and ignored h.stale.reason entirely. On this machine the reason is that
+    // meaning-search covers 4,488 of 865,519 documents - a fact about how much was
+    // ever embedded, not a fault that will clear. A warning that never clears is
+    // one the user learns to stop reading, which is how a REAL one gets missed.
+    //
+    // So: say what is actually true, and let it be put away. The dismissal is per
+    // session and per reason, so a different staleness shows up again.
+    if (h.stale.severity === "outdated" && reason) {
+      if (sessionStorage.getItem("staleDismissed") === reason) {
+        bar.className = "";
+        return;
+      }
+      show("warn", `${reason}  (dismiss)`, null);
+      const b = document.getElementById("banner");
+      if (b) {
+        b.style.cursor = "pointer";
+        b.onclick = () => {
+          sessionStorage.setItem("staleDismissed", reason);
+          bar.className = "";
+        };
+      }
+      return;
+    }
+
     if (rep.enabled && rep.failures) {
       show("warn", "Some results may be out of date. The automatic fix is not working — "
                  + "details are in ~/.device-search/daemon.log", null);
     } else if (rep.enabled) {
       show("warn", "Some results may be out of date — updating shortly.", null);
     } else {
-      show("warn", "Some results may be out of date.", null);
+      show("warn", reason || "Some results may be out of date.", null);
     }
     return;
   }
