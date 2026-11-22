@@ -44,7 +44,12 @@ html, body {
   border-bottom: 1px solid var(--sep);
   -webkit-app-region: drag;      /* the header is draggable, the input is not */
 }
-#icon { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
+/* The mark's own viewBox is 256, so the stroke scales with the element: 8 in
+   source units is about 1px at 24px. Sized slightly larger than a plain glyph
+   because the V of handles uses the lower half of the box. */
+#icon { width: 26px; height: 26px; flex: none; fill: none; color: var(--dim);
+        stroke: currentColor; stroke-width: 10; stroke-linecap: round;
+        stroke-linejoin: round; }
 #q {
   flex: 1; border: 0; outline: 0; background: transparent;
   color: var(--fg); font-size: 20px; font-weight: 400;

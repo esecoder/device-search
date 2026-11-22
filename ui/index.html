@@ -18,15 +18,17 @@
 
   <div id="box">
     <div id="searchrow">
-      <svg id="icon" viewBox="0 0 24 24" aria-hidden="true">
-        <!-- The same mark as the app icon: an outer lens with a handle going
-             down-right, and a smaller lens inside it whose handle breaks out
-             down-left, so the two handles form a V. A single magnifier here and
-             a two-lens icon in the dock would be two different products. -->
-        <circle cx="10" cy="9.5" r="6.2" />
-        <line x1="14.6" y1="14.1" x2="21.2" y2="20.7" />
-        <circle cx="11.4" cy="10.9" r="2.6" />
-        <line x1="9.5" y1="12.8" x2="2.6" y2="20.6" />
+      <svg id="icon" viewBox="0 0 256 256" aria-hidden="true">
+        <!-- The owner's mark, drawn from the same geometry as assets/mark.svg:
+             two concentric lenses and two tapered handles forming a V. -->
+        <circle cx="128" cy="100" r="70" />
+        <circle cx="128" cy="100" r="58" />
+        <g transform="translate(128 100) rotate(90)">
+          <path d="M69 -10 H134 A10 10 0 0 1 134 10 H69 Z" fill="currentColor" stroke="none" />
+        </g>
+        <g transform="translate(128 100) rotate(45)">
+          <path d="M57 -10 H134 A10 10 0 0 1 134 10 H57 Z" fill="currentColor" stroke="none" />
+        </g>
       </svg>
       <input id="q" type="text" autocomplete="off" spellcheck="false"
              placeholder="Search or ask a question for anything on this device… " />

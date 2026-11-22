@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none" stroke="{{INK}}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="128" cy="100" r="70"/>
+  <!-- inner lens (nearly as large, concentric) -->
+  <circle cx="128" cy="100" r="58"/>
+
+  <!-- outer lens handle: straight down, filled -->
+  <g transform="translate(128 100) rotate(90)">
+    <path d="M69 -10 H134 A10 10 0 0 1 134 10 H69 Z" fill="{{INK}}"/>
+  </g>
+  <!-- inner lens handle: 45 degrees from the outer handle, filled -->
+  <g transform="translate(128 100) rotate(45)">
+    <path d="M57 -10 H134 A10 10 0 0 1 134 10 H57 Z" fill="{{INK}}"/>
+  </g>
+</svg>

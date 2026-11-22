@@ -7,14 +7,17 @@ Spotlight owns that shape. A menu-bar item and a dock icon that both look like a
 lens are read as Spotlight at a glance, and being mistaken for a system feature is
 worse than being unfamiliar: the user stops looking for what the app actually does.
 
-THE SHAPE: TWO LENSES, HANDLES FORMING A V.
+THE SHAPE: TWO CONCENTRIC LENSES, HANDLES FORMING A V.
 
-An outer lens with a handle going down-right, and inside its glass a second, smaller
-lens whose handle breaks out down-left. The two handles meet at the bottom of the
-mark and separate, which is what distinguishes this from a single magnifier.
+Drawn by the project owner in assets/mark.svg: an outer ring at r=70 and an inner
+one at r=58, concentric, with two tapered filled handles at 90 and 45 degrees. The
+handles separate downward into a V, which is what distinguishes this from a single
+magnifier.
 
-It reads as "search inside what you searched" - which is what the app does: it looks
-inside files, inside pictures, inside recordings.
+The SVG's geometry lives in assets/mark.svg with the colour left as {{INK}}, so the
+same drawing produces a light mark for the dark app icon and a black one for the
+menu bar. The original file carried 8 KB of C2PA provenance metadata that renders
+nothing; it is stripped rather than shipped in every build.
 
 WHY THIS AND NOT THE EARLIER ATTEMPTS
 
@@ -61,21 +64,43 @@ def rounded_mask(size: int, radius: int) -> Image.Image:
     return m
 
 
-def _lens(d, cx, cy, r, stroke, handle_to, colour, inner_colour=None):
-    """A circle plus a handle from its rim toward `handle_to`."""
-    import math
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=colour, width=stroke)
+def _render_mark(ink: str, px: int, weight: int = 8) -> Image.Image:
+    """Rasterise assets/mark.svg at `px`, in `ink`, on a transparent ground.
 
-    # The handle starts on the rim, not at the centre: a line drawn from the centre
-    # would be hidden behind the glass and leave a stub.
-    ang = math.atan2(handle_to[1] - cy, handle_to[0] - cx)
-    x0 = cx + math.cos(ang) * (r + stroke * 0.15)
-    y0 = cy + math.sin(ang) * (r + stroke * 0.15)
-    d.line([(x0, y0), handle_to], fill=colour, width=stroke)
+    Done through headless Chrome because it is the only SVG renderer on a stock
+    macOS machine that handles transforms and arcs correctly. Drawsvg and cairosvg
+    are not dependencies of this project and are not worth adding for one file.
+    """
+    import subprocess
+    import tempfile
+
+    tpl = (ROOT / "assets" / "mark.svg").read_text(encoding="utf-8")
+    svg = tpl.replace("{{INK}}", ink).replace('stroke-width="8"',
+                                               f'stroke-width="{weight}"')
+    work = Path(tempfile.mkdtemp())
+    (work / "mark.svg").write_text(svg, encoding="utf-8")
+    (work / "page.html").write_text(
+        f'<!doctype html><html><body style="margin:0;background:transparent">'
+        f'<img src="mark.svg" style="display:block;width:{px}px;height:{px}px">'
+        f"</body></html>", encoding="utf-8")
+
+    chrome = Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+    if not chrome.exists():
+        chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    if not chrome.exists():
+        raise SystemExit("  no Chrome or Edge to rasterise the SVG")
+
+    out = work / "out.png"
+    subprocess.run([str(chrome), "--headless", "--disable-gpu", "--hide-scrollbars",
+                    f"--window-size={px},{px}",
+                    "--default-background-color=00000000",
+                    f"--screenshot={out}", f"file://{work / 'page.html'}"],
+                   capture_output=True)
+    return Image.open(out).convert("RGBA").resize((px, px), Image.LANCZOS)
 
 
 def draw_app_icon(size: int = 1024) -> Image.Image:
-    """Dock/Finder icon: two lenses on a rounded ground."""
+    """Dock/Finder icon: the owner's mark in pale ink on a rounded ground."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     grad = Image.new("RGBA", (size, size))
     gd = ImageDraw.Draw(grad)
@@ -85,38 +110,53 @@ def draw_app_icon(size: int = 1024) -> Image.Image:
                 fill=tuple(int(GROUND_TOP[i] * (1 - t) + GROUND_BOTTOM[i] * t)
                            for i in range(3)) + (255,))
     img.paste(grad, (0, 0), rounded_mask(size, int(size * 0.225)))
-    d = ImageDraw.Draw(img)
 
-    stroke = int(size * 0.058)
-    # Same geometry as the tray icon, so the two read as the same mark.
-    _lens(d, 0.44 * size, 0.40 * size, 0.300 * size, stroke,
-          (0.92 * size, 0.90 * size), SLAB)
-    # The inner lens is accented: at dock size there is room for a focal point,
-    # and it is the difference between "a magnifier" and "a magnifier with
-    # something in it".
-    _lens(d, 0.47 * size, 0.43 * size, 0.100 * size, int(stroke * 0.85),
-          (0.10 * size, 0.92 * size), ACCENT)
+    # FIT BY THE INK'S ACTUAL BOUNDS, not by its viewBox.
+    #
+    # The SVG's handles are rotated paths that extend BELOW y=256: the drawing is
+    # not centred in its own 256x256 box. Trusting the box put the mark small and
+    # up-left, with the V clipped at the bottom edge.
+    #
+    # Rendering large, measuring the alpha bounding box, and scaling that box into
+    # the icon centres it whatever the source file does.
+    canvas = int(size * 0.74)          # the mark occupies 74% of the tile
+    big = _render_mark("#ECE9F5", size)
+    box = big.getbbox()
+    if box:
+        big = big.crop(box)
+    # Keep the aspect ratio: a lens with a V handle is taller than it is wide.
+    w, h = big.size
+    scale = canvas / max(w, h)
+    big = big.resize((max(int(w * scale), 1), max(int(h * scale), 1)), Image.LANCZOS)
+    img.paste(big, ((size - big.width) // 2, (size - big.height) // 2), big)
     return img
 
 
 def draw_tray_icon(size: int = 44) -> Image.Image:
-    """Menu-bar icon: the same two lenses, black + alpha only.
+    """Menu-bar icon: the same mark, black on transparent.
 
-    Drawn at 2x (44) so Retina screens do not upscale a 22px bitmap. The stroke is
-    the thinnest that still survives being downsampled to 22 - measured by looking
-    at the render, not by arithmetic.
+    macOS masks menu-bar template images to a single colour, so any hue is
+    discarded - black plus alpha is the only thing that survives. Rendered at twice
+    the target size and downsampled, because a 22px raster of a 70px ring aliases.
     """
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    # These numbers were chosen by rendering three spacings at 22px and looking at
-    # them side by side. The first attempt put the inner circle 0.03 from the outer
-    # ring, which downsampled into one blob; 0.045 keeps them separate.
-    stroke = max(int(size * 0.085), 2)
-    _lens(d, 0.44 * size, 0.40 * size, 0.300 * size, stroke,
-          (0.92 * size, 0.90 * size), (0, 0, 0, 255))
-    _lens(d, 0.47 * size, 0.43 * size, 0.100 * size, max(int(stroke * 0.85), 2),
-          (0.10 * size, 0.92 * size), (0, 0, 0, 255))
-    return img
+    # Same fitting as the app icon, for the same reason.
+    # A HEAVIER STROKE FOR THE MENU BAR.
+    #
+    # The source is stroke-width 8 in a 256 box, which is 0.69px once the mark is
+    # 22px tall - the double ring collapses into one faint line. 14 lands at about
+    # 1.5px, which is what the surrounding system icons use. Judged by rendering at
+    # the real size.
+    big = _render_mark("#000000", size * 2, weight=14)
+    box = big.getbbox()
+    if box:
+        big = big.crop(box)
+    target = int(size * 0.92)
+    w, h = big.size
+    scale = target / max(w, h)
+    big = big.resize((max(int(w * scale), 1), max(int(h * scale), 1)), Image.LANCZOS)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(big, ((size - big.width) // 2, (size - big.height) // 2), big)
+    return out
 
 
 def main() -> int:
