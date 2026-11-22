@@ -7,24 +7,25 @@ Spotlight owns that shape. A menu-bar item and a dock icon that both look like a
 lens are read as Spotlight at a glance, and being mistaken for a system feature is
 worse than being unfamiliar: the user stops looking for what the app actually does.
 
-THE SHAPE: A FRAME WITH A DOT INSIDE.
+THE SHAPE: TWO LENSES, HANDLES FORMING A V.
 
-A rounded square outline containing a filled dot. It reads as "something is in
-here, and this marks it" - the idea of a search without the shape of one.
+An outer lens with a handle going down-right, and inside its glass a second, smaller
+lens whose handle breaks out down-left. The two handles meet at the bottom of the
+mark and separate, which is what distinguishes this from a single magnifier.
 
-THREE SHAPES WERE TRIED AND REJECTED BY RENDERING THEM AT 22 PIXELS, which is the
-only size the menu bar ever uses:
+It reads as "search inside what you searched" - which is what the app does: it looks
+inside files, inside pictures, inside recordings.
 
-  a magnifying glass      reads as Spotlight - the one thing this must not be
-                          confused with
-  three stacked bars      a HAMBURGER MENU. In a menu bar that means "open a menu
-                          here", which is actively misleading
-  a 2x2 grid, one lit     clear at 176px, mush at 22. Outlines at 3px in a 44px
-                          icon become 1.5px after downsampling and the cells
-                          dissolve; thickened, they merge into four blobs
+WHY THIS AND NOT THE EARLIER ATTEMPTS
 
-Two elements survive 22px. Four do not. That is the whole constraint, and it is
-only visible by looking at the render rather than at the arithmetic.
+  a single magnifier     indistinguishable from Spotlight at a glance
+  three stacked bars     a HAMBURGER MENU; in a menu bar that means "open a menu"
+  2x2 grid, one lit      clear at 176px, mush at 22 - outlines dissolve when the
+                         44px source is downsampled, and thickening merges them
+  a frame with a dot     legible, but said nothing about searching
+
+TWO lenses are distinctive where ONE is not, and the V of handles is a shape no
+system icon uses.
 
     app icon      rounded square, warm ground, three pale slabs, one accent dot
     tray icon     same three slabs in BLACK + ALPHA ONLY, because macOS menu-bar
@@ -60,8 +61,21 @@ def rounded_mask(size: int, radius: int) -> Image.Image:
     return m
 
 
+def _lens(d, cx, cy, r, stroke, handle_to, colour, inner_colour=None):
+    """A circle plus a handle from its rim toward `handle_to`."""
+    import math
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=colour, width=stroke)
+
+    # The handle starts on the rim, not at the centre: a line drawn from the centre
+    # would be hidden behind the glass and leave a stub.
+    ang = math.atan2(handle_to[1] - cy, handle_to[0] - cx)
+    x0 = cx + math.cos(ang) * (r + stroke * 0.15)
+    y0 = cy + math.sin(ang) * (r + stroke * 0.15)
+    d.line([(x0, y0), handle_to], fill=colour, width=stroke)
+
+
 def draw_app_icon(size: int = 1024) -> Image.Image:
-    """The dock/Finder icon: ground, frame, dot."""
+    """Dock/Finder icon: two lenses on a rounded ground."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     grad = Image.new("RGBA", (size, size))
     gd = ImageDraw.Draw(grad)
@@ -71,35 +85,37 @@ def draw_app_icon(size: int = 1024) -> Image.Image:
                 fill=tuple(int(GROUND_TOP[i] * (1 - t) + GROUND_BOTTOM[i] * t)
                            for i in range(3)) + (255,))
     img.paste(grad, (0, 0), rounded_mask(size, int(size * 0.225)))
-
     d = ImageDraw.Draw(img)
-    margin = int(size * 0.26)
-    stroke = int(size * 0.075)
-    d.rounded_rectangle([margin, margin, size - margin, size - margin],
-                        radius=int(size * 0.10), outline=SLAB, width=stroke)
-    r = int(size * 0.115)
-    c = size // 2
-    d.ellipse([c - r, c - r, c + r, c + r], fill=ACCENT)
+
+    stroke = int(size * 0.058)
+    # Same geometry as the tray icon, so the two read as the same mark.
+    _lens(d, 0.44 * size, 0.40 * size, 0.300 * size, stroke,
+          (0.92 * size, 0.90 * size), SLAB)
+    # The inner lens is accented: at dock size there is room for a focal point,
+    # and it is the difference between "a magnifier" and "a magnifier with
+    # something in it".
+    _lens(d, 0.47 * size, 0.43 * size, 0.100 * size, int(stroke * 0.85),
+          (0.10 * size, 0.92 * size), ACCENT)
     return img
 
 
 def draw_tray_icon(size: int = 44) -> Image.Image:
-    """The menu-bar icon: black + alpha only, because macOS masks it.
+    """Menu-bar icon: the same two lenses, black + alpha only.
 
     Drawn at 2x (44) so Retina screens do not upscale a 22px bitmap. The stroke is
-    a little over one pixel at 22px, which is the thinnest that stays solid after
-    downsampling.
+    the thinnest that still survives being downsampled to 22 - measured by looking
+    at the render, not by arithmetic.
     """
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-
-    margin = int(size * 0.16)
-    stroke = max(int(size * 0.105), 2)
-    d.rounded_rectangle([margin, margin, size - margin, size - margin],
-                        radius=int(size * 0.13), outline=(0, 0, 0, 255), width=stroke)
-    r = max(int(size * 0.155), 2)
-    c = size // 2
-    d.ellipse([c - r, c - r, c + r, c + r], fill=(0, 0, 0, 255))
+    # These numbers were chosen by rendering three spacings at 22px and looking at
+    # them side by side. The first attempt put the inner circle 0.03 from the outer
+    # ring, which downsampled into one blob; 0.045 keeps them separate.
+    stroke = max(int(size * 0.085), 2)
+    _lens(d, 0.44 * size, 0.40 * size, 0.300 * size, stroke,
+          (0.92 * size, 0.90 * size), (0, 0, 0, 255))
+    _lens(d, 0.47 * size, 0.43 * size, 0.100 * size, max(int(stroke * 0.85), 2),
+          (0.10 * size, 0.92 * size), (0, 0, 0, 255))
     return img
 
 

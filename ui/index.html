@@ -19,11 +19,17 @@
   <div id="box">
     <div id="searchrow">
       <svg id="icon" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="10.5" cy="10.5" r="6.5" />
-        <line x1="15.2" y1="15.2" x2="21" y2="21" />
+        <!-- The same mark as the app icon: an outer lens with a handle going
+             down-right, and a smaller lens inside it whose handle breaks out
+             down-left, so the two handles form a V. A single magnifier here and
+             a two-lens icon in the dock would be two different products. -->
+        <circle cx="10" cy="9.5" r="6.2" />
+        <line x1="14.6" y1="14.1" x2="21.2" y2="20.7" />
+        <circle cx="11.4" cy="10.9" r="2.6" />
+        <line x1="9.5" y1="12.8" x2="2.6" y2="20.6" />
       </svg>
       <input id="q" type="text" autocomplete="off" spellcheck="false"
-             placeholder="Search files, or describe a picture, video or recording…" />
+             placeholder="Search or ask a question for anything on this device… " />
       <kbd id="esc">esc</kbd>
     </div>
 

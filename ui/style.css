@@ -44,7 +44,7 @@ html, body {
   border-bottom: 1px solid var(--sep);
   -webkit-app-region: drag;      /* the header is draggable, the input is not */
 }
-#icon { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
+#icon { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
 #q {
   flex: 1; border: 0; outline: 0; background: transparent;
   color: var(--fg); font-size: 20px; font-weight: 400;
@@ -166,15 +166,12 @@ kbd {
 /* ⚠️ THE AI SECTION. Visually separate from the folders, because it is a different kind of
    decision: folders change what is searched, this changes what LEAVES the machine. */
 .setup-ai { margin-top: 14px; border-top: 1px solid var(--sep); padding-top: 12px; }
-.setup-ai-head { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .setup-ai-row { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: center;
                 margin-bottom: 6px; font-size: 12px; color: var(--dim); }
 .setup-ai-row input {
   background: rgba(255,255,255,0.06); border: 1px solid var(--sep); border-radius: 6px;
   padding: 6px 8px; color: var(--fg); font-size: 12px; font-family: inherit; width: 100%;
 }
-.setup-ai-foot { display: flex; gap: 8px; margin-top: 10px; }
-.setup-ai-foot button { font-size: 12px; padding: 5px 10px; }
 
 /* ⚠️ THE MESSAGE SLOT INSIDE THE PANEL. The banner is UNDER the overlay, so anything the user
    must read while the panel is open has to be drawn on the panel itself. */
@@ -499,4 +496,58 @@ kbd {
   border-radius: 3px;
   border: 1px solid rgba(255,255,255,.16);
   opacity: .85;
+}
+
+/* ---- empty state -------------------------------------------------------- */
+.empty-state {
+  padding: 18px 18px 10px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.empty-title {
+  font-size: 14px;
+  opacity: .85;
+  margin-bottom: 5px;
+}
+.empty-sub {
+  font-size: 12px;
+  opacity: .45;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+.empty-example {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  color: inherit;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+/* The rows had no border and no background, so they read as three lines of body
+   text rather than three things you can click. A hairline border and a faint fill
+   are the whole difference - judged by rendering it, not by reading the CSS. */
+.empty-example:hover {
+  background: rgba(255,255,255,.075);
+  border-color: rgba(255,255,255,.16);
+}
+.empty-say {
+  font-size: 13px;
+  opacity: .92;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.empty-what {
+  font-size: 10.5px;
+  opacity: .55;         /* was .38, which was below comfortable reading */
+  white-space: nowrap;
+  flex: none;
 }

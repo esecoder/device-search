@@ -511,6 +511,60 @@ function render() {
   }
 }
 
+  // WHAT THIS CAN DO, SHOWN WHERE SOMEONE LOOKS BEFORE THEY TYPE.
+  //
+  // The placeholder cannot carry this: one line of grey text is read once and
+  // never again, and naming three media types in it makes it a sentence nobody
+  // finishes. The EMPTY STATE is the right place - it is on screen exactly when
+  // the user is deciding what to type, and it disappears the moment they do.
+  //
+  // Each example is also a button. Naming a capability and making the user type
+  // the example themselves is a demonstration they have to perform.
+  if (!results.length && !answer && !($("q") && $("q").value.trim())) {
+    const examples = [
+      { q: "InputLayer(shape=(784,))", label: "find an exact line" },
+      { q: "how do I configure the embedding dimension", label: "ask a question" },
+      { q: "a bar chart on a white background", label: "describe a picture" },
+    ];
+    const wrap = document.createElement("div");
+    wrap.className = "empty-state";
+
+    // No heading. The placeholder above already says "Search or ask a question for
+    // anything on this device", and repeating it one line lower is a sentence the
+    // user reads twice and learns nothing from the second time.
+    const sub = document.createElement("div");
+    sub.className = "empty-sub";
+    sub.textContent = "Files, PDFs, screenshots, video and audio — by text, by "
+                    + "meaning, or by describing what you are looking for.";
+    wrap.appendChild(sub);
+
+    for (const ex of examples) {
+      const row = document.createElement("button");
+      row.className = "empty-example";
+
+      const say = document.createElement("span");
+      say.className = "empty-say";
+      say.textContent = ex.q;
+
+      const what = document.createElement("span");
+      what.className = "empty-what";
+      what.textContent = ex.label;
+
+      row.appendChild(say);
+      row.appendChild(what);
+      row.onclick = () => {
+        const input = $("q");
+        if (!input) return;
+        input.value = ex.q;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      wrap.appendChild(row);
+    }
+
+    box.appendChild(wrap);
+  }
+
+
 function renderInner() {
   const box = $("results");
   box.textContent = "";
