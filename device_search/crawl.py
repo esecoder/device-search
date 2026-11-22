@@ -19,7 +19,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import (MAX_FILE_BYTES, MAX_LINE_BYTES, MEDIA_EXTS, SKIP_DIR_NAMES,
+from .config import (AUDIO_EXTS, VIDEO_EXTS, MAX_FILE_BYTES, MAX_LINE_BYTES,
+                     MEDIA_EXTS, SKIP_DIR_NAMES,
                      is_text_file, lang_of)
 from .extract import extract
 
@@ -256,7 +257,11 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                     stats.skip(reason, str(p), st.st_size)
                     continue
                 ext = p.suffix.lower()
-                if ext in MEDIA_EXTS:
+                # Audio and video belong here too. is_text_file routes them as
+                # "av_media", but this branch tested MEDIA_EXTS, so they fell into
+                # the else below, were read as text, failed, and were counted as
+                # read_failed - 105 media files, none of them visible in any count.
+                if ext in MEDIA_EXTS or ext in AUDIO_EXTS or ext in VIDEO_EXTS:
                     # ⚠️ MEDIA GOES THROUGH extract(), WHICH IS SLOW (OCR is ~1-2s a file).
                     # ⚠️ AND AN IMAGE WITH NO TEXT IS NOT AN ERROR — it is the common case for
                     # photos, and it gets its own counter so a user can see the difference
@@ -264,6 +269,18 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                     text, method = extract(p)
                     stats.media_seen += 1
                     if not text.strip():
+                        # AN UNTRANSCRIBED RECORDING IS STILL WORTH RECORDING.
+                        #
+                        # Dropping it as media_no_text would make the file invisible: stats
+                        # could not say "you have 105 recordings that are not searchable",
+                        # and the user would have no reason to run the media step. The row
+                        # exists, with the reason in `method`, so the number is countable.
+                        if method in ("audio_skipped", "audio_empty", "audio_silent",
+                                      "audio_unavailable") or method.startswith("audio_error"):
+                            stats.skipped_audio = getattr(stats, 'skipped_audio', 0) + 1
+                            yield FileDoc(str(p), st.st_mtime, st.st_size, "audio", "",
+                                         0, method)
+                            continue
                         stats.skip("media_no_text")
                         continue
                     stats.media_indexed += 1

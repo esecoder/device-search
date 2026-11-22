@@ -204,6 +204,84 @@ def cmd_deep_index(args) -> int:
     return 0
 
 
+def cmd_media(args) -> int:
+    """Transcribe audio and embed video frames, showing the cost first."""
+    import os
+    from .config import AUDIO_EXTS, VIDEO_EXTS
+    from .video import DEFAULT_INTERVAL, duration_seconds, estimate_frames
+
+    store = Store(DB_PATH)
+    rows = [(i, p) for i, p in store.conn.execute(
+        "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")]
+    audio = [(i, p) for i, p in rows if Path(p).suffix.lower() in AUDIO_EXTS]
+    video = [(i, p) for i, p in rows if Path(p).suffix.lower() in VIDEO_EXTS]
+
+    if not audio and not video:
+        print("  no audio or video in the index yet.")
+        print("  index a folder first:  ds index")
+        return 0
+
+    # Measured rates: Whisper tiny at ~14x realtime, SigLIP at ~0.19 s per frame.
+    # Both are estimates from this machine; the point is that they are the right
+    # order of magnitude, not that they are to the second.
+    audio_secs = 0.0
+    for _i, p in audio + video:
+        d = duration_seconds(Path(p))
+        if d:
+            audio_secs += d
+    frames = 0
+    for _i, p in video:
+        frames += estimate_frames(Path(p), args.interval)
+
+    transcribe_min = audio_secs / 14.0 / 60.0
+    frame_min = frames * 0.19 / 60.0
+    total_min = transcribe_min + frame_min
+    disk_mb = frames * 768 * 4 / 1e6
+
+    print("=" * 70)
+    print("MEDIA")
+    print("=" * 70)
+    print()
+    print(f"  audio files        : {len(audio):>9,}")
+    print(f"  video files        : {len(video):>9,}")
+    print(f"  audio to transcribe: {audio_secs/3600:>9.1f} hours")
+    print(f"  frames to embed    : {frames:>9,}   (one every {args.interval:.0f}s)")
+    print()
+    print(f"  estimated time     : {total_min:>9.0f} minutes")
+    print(f"                        ({transcribe_min:.0f} min transcribing, "
+          f"{frame_min:.0f} min embedding)")
+    print(f"  disk for frames    : {disk_mb:>9.0f} MB")
+    print()
+    print("  Transcription is the slow part and it cannot be undone cheaply, so it")
+    print("  only runs when you say so. Whisper downloads ~75 MB on first use.")
+    print()
+    if not args.yes:
+        try:
+            reply = input("  Do it? [y/N] ")
+        except EOFError:
+            reply = ""
+        if reply.strip().lower() not in ("y", "yes"):
+            print("  Cancelled. Nothing was written.")
+            return 0
+
+    # The crawl reads this at extraction time, so setting it here is enough.
+    os.environ["TRANSCRIBE_MEDIA"] = "1"
+    print()
+    print("  re-indexing with transcription enabled...")
+    from .crawl import walk
+    from .config import ensure_index_dir
+    ensure_index_dir()
+    roots = store.get_meta("roots") or []
+    if not roots:
+        print("  no roots configured; run `ds setup` first")
+        return 1
+    docs = list(walk([Path(r) for r in roots], known=store.known_state()))
+    if docs:
+        store.add_many(docs)
+    print(f"  wrote {len(docs):,} documents")
+    return 0
+
+
 def cmd_images(args) -> int:
     """Build the image index: match a written description to a picture."""
     from .image_search import ImageIndex
@@ -956,6 +1034,12 @@ def main(argv=None) -> int:
     p.add_argument("--vacuum", action="store_true", help="shrink the database afterwards")
     p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     p.set_defaults(fn=cmd_forget)
+
+    p = sub.add_parser("media", help="transcribe audio and embed video frames (shows the cost first)")
+    p.add_argument("--interval", type=float, default=10.0,
+                   help="seconds between sampled video frames (default 10)")
+    p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    p.set_defaults(fn=cmd_media)
 
     p = sub.add_parser("images", help="build the image index (describe a picture to find it)")
     p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")

@@ -98,7 +98,16 @@ MODES = {
 #   - a binary file decoded as utf-8 produces megabytes of replacement characters
 #   - a symlink loop never terminates
 # So they are enforced in BOTH modes, and reported as "skipped: N", never silently.
-MAX_FILE_BYTES = 2 * 1024 * 1024          # 2 MB of text per file is plenty for search
+MAX_FILE_BYTES = 2 * 1024 * 1024
+
+# A SEPARATE, MUCH LARGER LIMIT FOR MEDIA.
+#
+# 2 MB is right for text: a source file that size is unusual and a huge one is
+# usually generated. It is wrong for video, where a one-minute screen recording is
+# 1.5 MB and a real one is tens of megabytes. With the text limit applied, 79 media
+# files were skipped as too_large before the extractor ever saw them - the
+# transcription code was unreachable for exactly the files it exists for.
+MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024          # 2 MB of text per file is plenty for search
 MAX_LINE_BYTES = 4000                     # minified JS / single-line dumps
 SKIP_DIR_NAMES = {
     # Version-control internals: thousands of compressed binary blobs, no searchable text.
@@ -234,7 +243,12 @@ SENSITIVE_PATH_HINTS = (
 
 def is_text_file(path: Path, size: int) -> tuple[bool, str]:
     """Decide whether to index a file, and why not. ⚠️ Returns the REASON so stats can report it."""
-    if size > MAX_FILE_BYTES:
+    # The media limit applies before the text one, because the extension decides
+    # which ceiling is relevant and checking the text limit first rejects every
+    # real video.
+    _ext = path.suffix.lower()
+    _is_media = _ext in AUDIO_EXTS or _ext in VIDEO_EXTS or _ext in MEDIA_EXTS
+    if size > (MAX_MEDIA_BYTES if _is_media else MAX_FILE_BYTES):
         return False, "too_large"
     name = path.name.lower()
     ext = path.suffix.lower()
