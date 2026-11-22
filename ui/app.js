@@ -322,10 +322,21 @@ function applyIndexState(h) {
         bar.className = "";
         return;
       }
-      show("warn", `${reason}  (dismiss)`, null);
+      // The message is its own element and the dismissal is a separate one, so the
+      // action does not read as the last three words of the sentence.
+      show("warn", reason, null);
+      const txt = document.getElementById("banner-text");
+      if (txt) {
+        const x = document.createElement("span");
+        x.textContent = "  Dismiss";
+        x.style.cssText = "margin-left:10px; opacity:.65; text-decoration:underline;"
+                        + " text-underline-offset:2px; white-space:nowrap;";
+        txt.appendChild(x);
+      }
       const b = document.getElementById("banner");
       if (b) {
         b.style.cursor = "pointer";
+        b.title = "click to hide this for now";
         b.onclick = () => {
           sessionStorage.setItem("staleDismissed", reason);
           bar.className = "";

@@ -75,11 +75,22 @@ kbd {
 /* ⚠️ ONE LINE, AND IT STAYS ONE LINE. The message this replaces was three lines of jargon that
    wrapped, mentioned a terminal command, and cost more vertical space than the results it was
    describing. */
-#banner { display: none; padding: 9px 18px 10px; font-size: 12px; line-height: 1.35; }
+#banner { display: none; padding: 9px 18px 10px; font-size: 12px; line-height: 1.45; }
 #banner.show { display: block; }
 #banner.info { background: rgba(10, 132, 255, 0.16); color: #9fd0ff; }
 #banner.warn { background: rgba(255, 159, 10, 0.16); color: #ffc46b; }
-#banner-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* WRAPS. It was `nowrap` with an ellipsis, which is right for "12% done, 8
+   minutes left" and wrong for an explanation - the staleness reason was cut off
+   mid-sentence, and a warning the user cannot finish reading is one they cannot
+   act on. The banner grows; the results area below shrinks, because #results is
+   the flexible child. */
+#banner-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
 #banner-bar {
   display: none; height: 3px; margin-top: 6px; border-radius: 2px;
   background: rgba(255,255,255,0.14); overflow: hidden;
