@@ -133,7 +133,7 @@ const Setup = (() => {
     const tabs = document.createElement("div");
     tabs.className = "setup-tabs";
     for (const [id, label] of [["folders", "Folders"], ["ai", "AI (optional)"],
-                               ["code", "Code search (optional)"]]) {
+                               ["code", "Code search"], ["media", "Media"]]) {
       const t = document.createElement("button");
       t.className = "setup-tab" + (step === id ? " on" : "");
       t.textContent = label;
@@ -146,6 +146,7 @@ const Setup = (() => {
     h.className = "setup-title";
     h.textContent = step === "ai" ? "Connect a model to ask questions"
                  : step === "code" ? "Faster code-fragment search"
+                 : step === "media" ? "Pictures, video and audio"
                                    : "What should be searchable?";
     host.appendChild(h);
 
@@ -313,6 +314,58 @@ const Setup = (() => {
     await renderList();
     updateTotals();
     return { render: renderList, updateTotals };
+  }
+
+  // Pictures, video and audio. Each is a separate index with its own cost,
+  // because they fail in different ways and take wildly different times:
+  // images are seconds, transcription is minutes.
+  if (step === "media") {
+    const box = document.createElement("div");
+    box.className = "media-step";
+    box.innerHTML = "<p>Making pictures and video findable by <em>what they show</em> "
+                  + "needs an index built from the images themselves. Audio needs "
+                  + "transcription. None of it is required for text search.</p>"
+                  + "<div id='media-cost' class='setup-sub'>Checking…</div>"
+                  + "<div id='media-actions'></div>";
+    host.appendChild(box);
+
+    const costEl = box.querySelector("#media-cost");
+    const actEl = box.querySelector("#media-actions");
+
+    (async () => {
+      const r = await api("/api/media");
+      if (!r.ok || !r.data) { costEl.textContent = r.error || "Could not read the cost."; return; }
+      const d = r.data;
+      const lines2 = [];
+      lines2.push(d.image_index_built
+        ? `Pictures: ${d.images.toLocaleString()} indexed.`
+        : `Pictures: ${d.images.toLocaleString()} found, about ${d.image_minutes} min to index.`);
+      lines2.push(d.video_index_built
+        ? `Video: ${d.video.toLocaleString()} files, ${d.frames.toLocaleString()} frames indexed.`
+        : `Video and audio: ${d.video.toLocaleString()} video, ${d.audio.toLocaleString()} audio, `
+          + `about ${d.media_minutes} min for ${d.frames.toLocaleString()} frames.`);
+      costEl.innerHTML = lines2.join("<br>");
+
+      const mk = (label, kind, enabled) => {
+        const b = document.createElement("button");
+        b.className = "setup-btn";
+        b.textContent = label;
+        b.disabled = !enabled;
+        if (!enabled) b.title = "already built";
+        b.onclick = async () => {
+          b.disabled = true;
+          b.textContent = "Starting…";
+          const s2 = await api("/api/build-media", { method: "POST", body: { kind } });
+          if (!s2.ok) { b.disabled = false; b.textContent = label; return; }
+          b.textContent = "Running in the background";
+        };
+        actEl.appendChild(b);
+      };
+
+      mk("Index pictures", "images", !d.image_index_built);
+      mk("Transcribe and index video", "media", !d.video_index_built);
+    })();
+    return;
   }
 
   // The code-fragment index is the one optional piece that can use more disk than the

@@ -17,6 +17,7 @@ const invoke = window.__TAURI__?.core?.invoke;
 let TOKEN = null;
 let PORT = 8734;
 let results = [];
+let media = [];
 let answer = null;
 // ⚠️ WHETHER THE ROUTER CALLED THIS A QUESTION, AND WHY THERE IS NO ANSWER IF SO. Kept as
 // state rather than decided at render time, because the server is the thing that classified it
@@ -52,6 +53,7 @@ let shown = PAGE;
 let aiReady = false;
 // ⚠️ SET BY THE BUTTON, CONSUMED BY THE NEXT QUERY. See the note in run().
 let wantsRerank = false;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
+let wantsDeep = false;        // one-shot, like wantsRerank
 let sel = 0;
 let timer = null;
 
@@ -406,16 +408,22 @@ async function run(q) {
   // seconds to every search from then on, and the user would blame the app rather than the mode.
   const rr = wantsRerank ? "&rerank=1" : "";
   wantsRerank = false;
+  // Same one-shot pattern as re-ranking: consumed by this query and
+  // cleared, so the next keystroke goes back to the fast path.
+  const dd = wantsDeep ? "&deep=1" : "";
+  wantsDeep = false;
+  if (dd) setStatus("", "searching deeper…");
   if (rr) setStatus("", "re-ranking…");
   // ⚠⚠️ SHOW THAT WORK IS HAPPENING, FROM THE MOMENT THE KEYSTROKE LANDS.
   // ⚠️ A search that takes two seconds with no feedback reads as broken, and the user presses
   // enter again — which is how a slow search becomes a busy one.
   if ($("busy-overlay")) $("busy-overlay").classList.add("on");
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}`);
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}${dd}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
   // one is a list the user opens and checks, the other is a sentence that must be trusted or
   // verified. Merging them into one array would render them identically.
+  media = r.media || [];
   answer = r.answer || null;
   metaInfo = r.meta || null;
   isQuestion = r.kind === "question";
@@ -642,6 +650,76 @@ function renderInner() {
     }
     box.appendChild(d);
   }
+
+  // PICTURES AND VIDEO, AS THEIR OWN SECTION.
+  //
+  // Not merged into the list below: those rows mean "this file contains what you
+  // typed", these mean "this picture looks like what you described". One numbered
+  // list would imply one ranking, and BM25 and cosine are not on the same scale.
+  if (media && media.length) {
+    const mh = document.createElement("div");
+    mh.className = "group-head";
+    mh.textContent = "LOOKS LIKE THIS";
+    box.appendChild(mh);
+
+    for (const m of media) {
+      const row = document.createElement("div");
+      row.className = "media-row";
+
+      const kind = document.createElement("span");
+      kind.className = "media-kind";
+      kind.textContent = m.kind === "video" ? "VIDEO" : "IMAGE";
+
+      const name = document.createElement("span");
+      name.className = "media-name";
+      name.textContent = m.path.split("/").pop();
+
+      row.appendChild(kind);
+      row.appendChild(name);
+
+      // A video hit is a MOMENT, not a file. "2:50" is the difference between a
+      // citation and a scavenger hunt.
+      if (m.at) {
+        const at = document.createElement("span");
+        at.className = "media-at";
+        at.textContent = m.at;
+        row.appendChild(at);
+      }
+
+      row.title = m.at ? `${m.path} (at ${m.at})` : m.path;
+      row.onclick = () => openPath(m.path);
+      box.appendChild(row);
+    }
+  }
+
+  // A WAY FORWARD WHEN THERE IS NOTHING, OR ALMOST NOTHING.
+  //
+  // A miss used to be final: the list was empty and the only thing on screen was
+  // an explanation. There is always one more thing to try - widen the query to its
+  // two rarest words - and the user should not have to guess the right words
+  // themselves to get it.
+  //
+  // Offered when the result list is thin rather than only when it is empty: three
+  // results for a five-word query is often a near miss, and the difference between
+  // "nothing" and "something close" is not visible in a count.
+  if (results.length < 5) {
+    const deeper = document.createElement("button");
+    deeper.className = "deeper-btn";
+    deeper.textContent = "Search deeper";
+    deeper.title = "Widen the query and include pictures and video";
+    deeper.onclick = () => {
+      // Dispatch the same event the search box emits, rather than calling the
+      // search function directly. `run` is not in scope here - it lives inside the
+      // closure that owns the input handler - and reaching for it produced a call
+      // to a name that does not exist, which fails only when the button is
+      // clicked. The event goes through the existing debounce and state handling
+      // instead of duplicating it.
+      wantsDeep = true;
+      $("q").dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    box.appendChild(deeper);
+  }
+
 
   if (!results.length) return;
 

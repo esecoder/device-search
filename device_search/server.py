@@ -362,6 +362,7 @@ class Engine:
         # AttributeError that only surfaced when the endpoint was called.
         self.last_index: dict = {}
         self.deep_index_state: dict = {}
+        self.media_build_state: dict = {}
         # ⚠️ AUTO-REPAIR, WITH A POLICY RATHER THAN A TRIGGER.
         #
         # The machinery to repair stale vectors has existed for several commits — plan_resume
@@ -419,12 +420,81 @@ class Engine:
                 os.environ["OPENAI_MODEL"] = cfg["model"]
         return cfg
 
+    def media_hits(self, query: str, limit: int = 8):
+        """Images and video frames matching a DESCRIPTION of what they show.
+
+        Separate from the text backends because it is a different question: bge-small
+        embeds characters and has never seen a pixel. SigLIP embeds the image itself
+        into the same space as the sentence, so "a red car near a house" can be
+        compared against a photograph directly.
+
+        Loaded lazily and cached: each index is a `.npy` file and a model load, and
+        most searches never touch them. A missing index returns nothing rather than
+        an error - there is nothing to search yet, which is a normal first-run state.
+        """
+        out = []
+        if not getattr(self, "_img_index", None):
+            try:
+                from .image_search import ImageIndex
+                idx = ImageIndex()
+                if idx.load(INDEX_DIR / "images"):
+                    self._img_index = idx
+                else:
+                    self._img_index = False
+            except Exception:
+                self._img_index = False
+        if self._img_index:
+            try:
+                for doc_id, score in self._img_index.search(query, k=limit):
+                    out.append((doc_id, score, "image", None))
+            except Exception:
+                pass
+
+        if not getattr(self, "_vid_index", None):
+            try:
+                from .video import VideoIndex
+                idx = VideoIndex()
+                if idx.load(INDEX_DIR / "video"):
+                    self._vid_index = idx
+                else:
+                    self._vid_index = False
+            except Exception:
+                self._vid_index = False
+        if self._vid_index:
+            try:
+                for doc_id, ts, score in self._vid_index.search(query, k=limit):
+                    out.append((doc_id, score, "video", ts))
+            except Exception:
+                pass
+        return out
+
     def search(self, query: str, k: int = 10, use_llm: bool = False, ask: bool = False,
-               rerank: bool = False) -> dict:
+               rerank: bool = False, deep: bool = False) -> dict:
         from .agent import search as agent_search
         t0 = time.time()
-        cands, trace = agent_search(query, self.store, semantic=self.semantic,
+        # A DEEPER SEARCH IS A DIFFERENT QUERY, NOT THE SAME ONE LOUDER.
+        #
+        # The first pass answers "does anything contain these words". When it comes
+        # back thin there are two different reasons, and each needs a different
+        # action: the words are too specific, or the file is a picture and has no
+        # words at all. `deep` widens the query AND asks the image and video
+        # indexes, which the ordinary search already does - so the widening is the
+        # part that is new here.
+        search_query = query
+        relaxed = False
+        if deep:
+            words = [w for w in query.split() if len(w) > 2]
+            if len(words) > 2:
+                # The two longest words are the least common in practice; keeping
+                # them and dropping the rest widens recall without reducing the
+                # query to stopwords.
+                search_query = " ".join(sorted(words, key=len, reverse=True)[:2])
+                relaxed = True
+
+        cands, trace = agent_search(search_query, self.store, semantic=self.semantic,
                                     use_llm=use_llm, top_k=k)
+        if deep:
+            trace["deep"] = {"relaxed_to": search_query if relaxed else query}
 
         # ⚠⚠ THE ANSWER, AND IT IS BUILT HERE RATHER THAN IN agent.py ON PURPOSE.
         #
@@ -516,9 +586,36 @@ class Engine:
             except Exception as e:
                 rerank_report = {"error": f"{type(e).__name__}: {e}"}
 
+        # MEDIA RESULTS ARE A SEPARATE TIER, NOT FUSED INTO THE RANKING.
+        #
+        # A BM25 score and a cosine similarity are not on the same scale - BM25 is
+        # unbounded and typically 5-40, cosine here lands around 0.10-0.18 - so
+        # merging them by score puts every text hit above every image, always. That
+        # is not a ranking, it is a type system pretending to be one.
+        #
+        # They also answer different questions: a text hit means the file CONTAINS
+        # what you typed; an image hit means the picture LOOKS like what you
+        # described. Saying so is more useful than a single number.
+        media = []
+        try:
+            for doc_id, score, kind, ts in self.media_hits(query, limit=8):
+                row = self.store.by_id(doc_id)
+                if not row:
+                    continue
+                media.append({
+                    "path": row[1],
+                    "kind": kind,
+                    "score": round(float(score), 4),
+                    "at_seconds": ts,
+                    "at": (f"{int(ts)//60}:{int(ts)%60:02d}" if ts is not None else None),
+                })
+        except Exception as e:
+            trace["media_error"] = f"{type(e).__name__}: {e}"
+
         home = str(Path.home())
         return {
             "rerank": rerank_report,
+            "media": media,
             "answer": answer,
             # ⚠⚠️ THE REASON IS RETURNED, NOT KEPT IN THE TRACE.
             #
@@ -530,6 +627,10 @@ class Engine:
             # ⚠️ AN EMPTY FILTER RESULT IS AN ANSWER, AND IT HAS TO BE SAID OUT LOUD. Without this
             # the user sees an empty list and cannot tell it from "the search is broken".
             "meta": trace.get("meta", {}),
+            # What the deep pass actually did. "Search deeper" has to be able to
+            # show what it changed, or it is indistinguishable from a re-run of the
+            # same query that happened to return something this time.
+            "deep": trace.get("deep"),
             "query": query,
             "took_ms": int((time.time() - t0) * 1000),
             "kind": trace["plan"]["kind"],
@@ -932,9 +1033,10 @@ class Handler(BaseHTTPRequestHandler):
                 # fails with a reason rather than an empty box when no key is configured.
                 ask = (q.get("ask") or ["0"])[0] == "1"
                 rerank = (q.get("rerank") or ["0"])[0] == "1"
+                deep = (q.get("deep") or ["0"])[0] == "1"
                 ENGINE._llm_env()
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask,
-                                              rerank=rerank))
+                                              rerank=rerank, deep=deep))
             elif url.path == "/api/deep-index":
                 # The interface needs the cost before it asks, for the same reason the
                 # command line does: this is the only step that can use more disk than
@@ -950,6 +1052,29 @@ class Handler(BaseHTTPRequestHandler):
                     "estimated_minutes": round(max(files / 975 / 60, 0.1), 1),
                     "free_gb": round(shutil.disk_usage(INDEX_DIR).free / 1e9, 1),
                     "built": ENGINE.store.trigram_ready(),
+                })
+            elif url.path == "/api/media":
+                # The cost of the two media jobs, for the same reason the code
+                # index shows its cost: both take minutes and one of them writes
+                # gigabytes, so neither may start without the number being visible.
+                from .config import AUDIO_EXTS, VIDEO_EXTS
+                from .video import DEFAULT_INTERVAL, estimate_frames
+                rows = [(i, p) for i, p in ENGINE.store.conn.execute(
+                    "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")]
+                audio = [(i, p) for i, p in rows if Path(p).suffix.lower() in AUDIO_EXTS]
+                video = [(i, p) for i, p in rows if Path(p).suffix.lower() in VIDEO_EXTS]
+                imgs = [(i, p) for i, p in rows
+                        if Path(p).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}]
+                frames = sum(estimate_frames(Path(p), DEFAULT_INTERVAL) for _i, p in video)
+                self._send(200, {
+                    "images": len(imgs),
+                    "image_index_built": (INDEX_DIR / "images" / "image_vectors.npy").exists(),
+                    "image_minutes": round(len(imgs) * 0.22 / 60, 1),
+                    "audio": len(audio),
+                    "video": len(video),
+                    "frames": frames,
+                    "media_minutes": round(frames * 0.19 / 60 + 2, 1),
+                    "video_index_built": (INDEX_DIR / "video" / "video_vectors.npy").exists(),
                 })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
@@ -1007,6 +1132,58 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             return
         path_q = urlparse(self.path)
+
+        if path_q.path == "/api/build-media":
+            """Start an image or media build in a thread."""
+            import json as _json
+            import threading
+            body = {}
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n:
+                    body = _json.loads(self.rfile.read(n) or b"{}")
+            except Exception:
+                pass
+            kind = (body or {}).get("kind") or "images"
+
+            state = ENGINE.media_build_state
+            if state.get("running"):
+                self._send(200, {"started": False, "reason": "already running"})
+                return
+            state.update({"running": True, "kind": kind, "error": None, "finished": False})
+
+            def _run():
+                try:
+                    if kind == "images":
+                        from .image_search import ImageIndex
+                        IMG = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+                        rows = [(i, p) for i, p in ENGINE.store.conn.execute(
+                            "SELECT id, path FROM documents WHERE COALESCE(is_dir,0)=0")]
+                        items = [(i, p) for i, p in rows if Path(p).suffix.lower() in IMG]
+                        idx = ImageIndex()
+                        idx.embed_images(items)
+                        idx.save(INDEX_DIR / "images")
+                        ENGINE._img_index = None      # force a reload on the next search
+                    else:
+                        import os
+                        os.environ["TRANSCRIBE_MEDIA"] = "1"
+                        from .cli import cmd_index
+                        # Re-index with transcription on; the crawl reads the
+                        # environment at extraction time.
+                        class _A:
+                            no_semantic = True
+                            rebuild = False
+                            yes = True
+                        cmd_index(_A())
+                    state["finished"] = True
+                except Exception as exc:
+                    state["error"] = f"{type(exc).__name__}: {exc}"
+                finally:
+                    state["running"] = False
+
+            threading.Thread(target=_run, daemon=True).start()
+            self._send(200, {"started": True, "kind": kind})
+            return
 
         if path_q.path == "/api/deep-index":
             # Started in a thread so the request returns immediately and the interface can
