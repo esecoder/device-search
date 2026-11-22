@@ -24,10 +24,21 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
-/// ⚠️ NOT Cmd+Space — that is Spotlight's, and **overriding a well-known system shortcut in an
-/// open-source app is a hostile default.** Cmd+Shift+Space is unclaimed and adjacent to the
-/// muscle memory people already have.
-const HOTKEY: &str = "CmdOrCtrl+Shift+Space";
+/// The global shortcut, and the reason it is not the obvious one.
+///
+/// NOT Cmd+Space - that is Spotlight's, and overriding a well-known system shortcut
+/// in an open-source app is a hostile default.
+///
+/// NOT Cmd+Shift+Space either, which is what this shipped with. That is macOS's
+/// EMOJI PICKER. Measured: pressing it opened the emoji panel, so the app's own
+/// shortcut was unreachable on a stock system - the feature existed and could not
+/// be invoked.
+///
+/// Control+Option+Space is unclaimed by the system and by the launchers people
+/// commonly run (Alfred and Raycast take Option+Space).
+///
+/// Override without rebuilding: DEVICE_SEARCH_HOTKEY='Ctrl+Alt+Space'
+const HOTKEY: &str = "Ctrl+Alt+Space";
 
 /// Handle to the Python daemon, if this process started it.
 /// ⚠️ Held so it can be killed on exit. Orphaned daemons holding a port are the classic
@@ -333,6 +344,21 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 let w2 = w.clone();
                 w.on_window_event(move |ev| {
+                    // CLOSING THE WINDOW MUST NOT QUIT THE APP.
+                    //
+                    // With no handler, Tauri's default applies: the window is destroyed
+                    // and, being the last one, the process exits. The tray icon goes
+                    // with it, so the user who clicked the red button has no way back
+                    // except relaunching from the Finder - and the whole point of a
+                    // menu-bar tool is that closing it hides it.
+                    //
+                    // Spotlight does the same thing: dismissing it puts it away, it
+                    // does not uninstall the feature.
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                        api.prevent_close();
+                        let _ = w2.hide();
+                        return;
+                    }
                     if let tauri::WindowEvent::Focused(false) = ev {
                         // ⚠️ UNLESS A DIALOG IS UP. Hiding the parent of a modal dialog closes the
                         // dialog too, so focus loss caused by our own picker must not hide anything.

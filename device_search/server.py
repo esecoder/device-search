@@ -469,7 +469,8 @@ class Engine:
         return out
 
     def search(self, query: str, k: int = 10, use_llm: bool = False, ask: bool = False,
-               rerank: bool = False, deep: bool = False) -> dict:
+               rerank: bool = False, deep: bool = False,
+               scope: str = "all") -> dict:
         from .agent import search as agent_search
         t0 = time.time()
         # A DEEPER SEARCH IS A DIFFERENT QUERY, NOT THE SAME ONE LOUDER.
@@ -599,6 +600,15 @@ class Engine:
         media = []
         try:
             for doc_id, score, kind, ts in self.media_hits(query, limit=8):
+                # The scope NARROWS. "Documents" means the caller does not want
+                # pictures in the list, which is the only job a filter has - it
+                # never enables a backend, because every backend already ran.
+                if scope == "text":
+                    continue
+                if scope == "image" and kind != "image":
+                    continue
+                if scope in ("video", "audio") and kind != "video":
+                    continue
                 row = self.store.by_id(doc_id)
                 if not row:
                     continue
@@ -1034,9 +1044,10 @@ class Handler(BaseHTTPRequestHandler):
                 ask = (q.get("ask") or ["0"])[0] == "1"
                 rerank = (q.get("rerank") or ["0"])[0] == "1"
                 deep = (q.get("deep") or ["0"])[0] == "1"
+                scope = (q.get("scope") or ["all"])[0]
                 ENGINE._llm_env()
                 self._send(200, ENGINE.search(query, k=k, use_llm=llm, ask=ask,
-                                              rerank=rerank, deep=deep))
+                                              rerank=rerank, deep=deep, scope=scope))
             elif url.path == "/api/deep-index":
                 # The interface needs the cost before it asks, for the same reason the
                 # command line does: this is the only step that can use more disk than

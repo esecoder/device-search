@@ -54,6 +54,7 @@ let aiReady = false;
 // ⚠️ SET BY THE BUTTON, CONSUMED BY THE NEXT QUERY. See the note in run().
 let wantsRerank = false;      // ⚠️ a sentence the user will believe, unlike a list they can check       // flattened, in display order
 let wantsDeep = false;        // one-shot, like wantsRerank
+let scope = "all";            // which kinds to show; narrowing, not a mode
 let sel = 0;
 let timer = null;
 
@@ -418,7 +419,7 @@ async function run(q) {
   // ⚠️ A search that takes two seconds with no feedback reads as broken, and the user presses
   // enter again — which is how a slow search becomes a busy one.
   if ($("busy-overlay")) $("busy-overlay").classList.add("on");
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}${dd}`);
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&k=25${aiReady ? "&ask=1" : ""}${rr}${dd}&scope=${encodeURIComponent(scope)}`);
   if (!r.ok) { setStatus("err", r.error); results = []; render(); return; }
   // ⚠️ THE ANSWER IS KEPT SEPARATE FROM THE RESULTS, because it is a different kind of thing:
   // one is a list the user opens and checks, the other is a sentence that must be trusted or
@@ -907,3 +908,41 @@ document.addEventListener("visibilitychange", () => {
 });
 
 boot();
+
+// ---- scope chips --------------------------------------------------------
+//
+// Shown only when a media index exists. A "Pictures" filter on a machine with no
+// indexed images is a button that always returns nothing, which teaches the user
+// that the feature is broken rather than that it is empty.
+(async function initScopes() {
+  const bar = document.getElementById("scopes");
+  if (!bar) return;
+
+  try {
+    const r = await api("/api/media");
+    const d = (r && r.data) || {};
+    const hasMedia = Boolean(d.image_index_built || d.video_index_built);
+    if (!hasMedia) return;                 // stay hidden: nothing to filter
+    bar.style.display = "";
+    // Hide the individual chips whose index does not exist, so "Video" is not
+    // offered before any video has been indexed.
+    for (const b of bar.querySelectorAll(".scope")) {
+      const sc = b.dataset.scope;
+      if (sc === "image" && !d.image_index_built) b.style.display = "none";
+      if ((sc === "video" || sc === "audio") && !d.video_index_built) b.style.display = "none";
+    }
+  } catch (e) {
+    return;
+  }
+
+  for (const b of bar.querySelectorAll(".scope")) {
+    b.onclick = () => {
+      scope = b.dataset.scope;
+      for (const o of bar.querySelectorAll(".scope")) o.classList.toggle("on", o === b);
+      // Re-run the current query under the new scope. Dispatching the input event
+      // rather than calling the search function keeps one code path for state.
+      const q = document.getElementById("q");
+      if (q && q.value.trim()) q.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+  }
+})();

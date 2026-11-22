@@ -23,8 +23,32 @@
         <line x1="15.2" y1="15.2" x2="21" y2="21" />
       </svg>
       <input id="q" type="text" autocomplete="off" spellcheck="false"
-             placeholder="Search or ask a question for anything on this device… " />
+             placeholder="Search files, or describe a picture, video or recording…" />
       <kbd id="esc">esc</kbd>
+    </div>
+
+    <!-- THE SHORTCUT HAS TO BE VISIBLE SOMEWHERE.
+         A global hotkey nobody is told about is a feature nobody has. This is the
+         first screen, it costs one small line, and it doubles as the answer to
+         "how do I get back here after closing it". -->
+    <div id="hint">
+      Open from anywhere with <kbd>⌃⌥Space</kbd> · closing this window hides it, it does not quit
+    </div>
+
+    <!-- SCOPES, AND WHY THEY ARE FILTERS RATHER THAN MODES.
+         Searching everything is the default and needs no switch: typing "a red car"
+         already queries the image and video indexes, because you cannot know in
+         advance whether the thing you want is a file or a photograph.
+         These chips NARROW a search that is already running, so a user who has
+         found that images crowd out documents can say so in one click.
+         They only appear once a media index exists - offering "Pictures" before
+         any image has been indexed is offering a filter that matches nothing. -->
+    <div id="scopes" style="display:none">
+      <button class="scope on" data-scope="all">Everything</button>
+      <button class="scope" data-scope="text">Documents</button>
+      <button class="scope" data-scope="image">Pictures</button>
+      <button class="scope" data-scope="video">Video</button>
+      <button class="scope" data-scope="audio">Audio</button>
     </div>
 
     <!-- ⚠️ STATUS IS ALWAYS VISIBLE, EVEN WHEN EMPTY. The whole failure mode this project
