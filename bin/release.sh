@@ -127,8 +127,14 @@ echo
 echo "  tagging v$VERSION"
 git add -A
 git commit -q -m "Release $VERSION" || echo "    (nothing to commit)"
-git tag -f "v$VERSION" >/dev/null
-echo "    v$VERSION"
+# AN ANNOTATED TAG, NOT A LIGHTWEIGHT ONE.
+#
+# `git tag -f name` creates a lightweight tag, and `git push --follow-tags` only
+# pushes ANNOTATED ones. The first release pushed its commit and silently left the
+# tag behind - `git ls-remote --tags origin` was empty afterwards, and the version
+# marker existed only on the machine that cut it.
+git tag -f -a "v$VERSION" -m "DeviceSearch $VERSION" >/dev/null
+echo "    v$VERSION (annotated)"
 
 echo
 echo "=============================================================="

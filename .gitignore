@@ -30,3 +30,7 @@ node_modules/
 build/
 dist/
 *.spec
+
+# Indices and caches that must never be committed
+*.pyc
+.DS_Store
