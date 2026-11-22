@@ -24,7 +24,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$HERE/src-tauri/target/release/device-search.app"
 OUT="$HERE/dist"
 
-VERSION="$(cd "$HERE" && git describe --tags --always 2>/dev/null || echo "0.1")"
+# THE VERSION COMES FROM VERSION, NOT FROM A COMMIT HASH.
+#
+# `git describe --tags --always` was used here, and there were no tags - so it fell
+# back to the short hash and every installer was named after a commit. Nine of them
+# accumulated, all reporting 0.1.0, distinguishable only by a hash nobody reads.
+# Tagging is part of ./bin/release.sh; this script just reads the number.
+VERSION="$(tr -d '[:space:]' < "$HERE/VERSION" 2>/dev/null || echo "0.0.0")"
+if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "  VERSION is '$VERSION', which is not MAJOR.MINOR.PATCH" >&2
+    exit 1
+fi
 DMG="$OUT/device-search-$VERSION-macos-arm64.dmg"
 
 if [ ! -d "$APP" ]; then
