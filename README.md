@@ -507,6 +507,45 @@ db_acl.php      7.35s -> 0.81s
 
 ---
 
+## Install
+
+**There is nothing to build.** Download the disk image from the releases page:
+
+```
+https://github.com/esecoder/device-search/releases/latest
+```
+
+1. Open the `.dmg` and **drag the app onto the Applications folder** in the window.
+2. The first time, **right-click the app → Open → Open**. macOS will say it is from
+   an unidentified developer, because it is not signed with a paid Apple
+   certificate. You only do this once.
+3. The app opens **in the menu bar**. Press **`⌃⌥Space`** or click the icon.
+
+**It is 85 MB and self-contained** — it does not need Python, Homebrew, or anything
+else installed.
+
+### Verifying the download
+
+Each release includes `SHA256SUMS-<version>.txt`:
+
+```bash
+shasum -a 256 -c SHA256SUMS-0.1.0.txt
+```
+
+⚠️ **This is an unsigned build.** The checksum proves the file arrived intact; it
+does not prove who made it. Signing needs an Apple Developer account, and the
+commands are further down this file.
+
+### Other platforms
+
+| | |
+|---|---|
+| **macOS (Apple Silicon)** | available as a release asset |
+| **macOS (Intel)** | must be built on an Intel machine; see below |
+| **Windows / Linux** | the scripts exist and have never been run on either |
+
+---
+
 ## Building a copy you can send to someone
 
 Three steps, and the third is the only one that needs an account you may not have.

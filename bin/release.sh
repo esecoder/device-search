@@ -23,7 +23,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
 VERSION_FILE="$HERE/VERSION"
-NEW_VERSION="${1:-}"
+PUBLISH=0
+ARGS=()
+for a in "$@"; do
+    case "$a" in
+        --publish) PUBLISH=1 ;;
+        *) ARGS+=("$a") ;;
+    esac
+done
+NEW_VERSION="${ARGS[0]:-}"
 
 if [ -n "$NEW_VERSION" ]; then
     printf '%s\n' "$NEW_VERSION" > "$VERSION_FILE"
@@ -137,11 +145,52 @@ git tag -f -a "v$VERSION" -m "DeviceSearch $VERSION" >/dev/null
 echo "    v$VERSION (annotated)"
 
 echo
+# A CHECKSUM BESIDE THE IMAGE.
+#
+# An unsigned, un-notarised download has nothing vouching for it. A SHA-256 printed
+# here and in the release notes at least lets a cautious user confirm the file
+# arrived intact - and it costs one line to produce.
+SUMS="dist/SHA256SUMS-${VERSION}.txt"
+( cd dist && shasum -a 256 "$(basename "$DMG")" > "$(basename "$SUMS")" )
+echo
+echo "  checksum: $(cat "$SUMS")"
+
+# PUBLISHING.
+#
+# The image is deliberately NOT in git: an 85 MB binary in a repository is fetched
+# by every clone forever. A GitHub Release is the right home - it is free, the URL
+# is stable, and the file is attached to the tag rather than to the history.
+if [ "$PUBLISH" = "1" ]; then
+    echo
+    echo "  publishing to GitHub Releases"
+    if command -v gh >/dev/null 2>&1; then
+        gh release create "v$VERSION" "$DMG" "$SUMS" \
+            --title "DeviceSearch $VERSION" \
+            --notes-file "$HERE/CHANGELOG.md" 2>&1 | sed 's/^/    /'
+        echo "    done"
+    elif [ -n "${GITHUB_TOKEN:-}" ]; then
+        echo "    gh is not installed; using the API with GITHUB_TOKEN"
+        "$HERE/.venv/bin/python" "$HERE/bin/publish_release.py" \
+            "$VERSION" "$DMG" "$SUMS" 2>&1 | sed 's/^/    /'
+    else
+        echo "    ⚠️  cannot publish: neither gh nor GITHUB_TOKEN is available"
+        echo "        either install gh (brew install gh && gh auth login)"
+        echo "        or set GITHUB_TOKEN and run: ./bin/release.sh --publish"
+        PUBLISH_FAILED=1
+    fi
+fi
+
+echo
 echo "=============================================================="
 echo "RELEASED $VERSION"
 echo "=============================================================="
 echo "  image : $DMG  ($(du -sh "$DMG" | cut -f1))"
 echo "  tag   : v$VERSION"
+if [ "$PUBLISH" != "1" ]; then
+    echo
+    echo "  ⚠️  NOT PUBLISHED. The image exists only on this machine."
+    echo "      Users cannot download it until you run:  ./bin/release.sh --publish"
+fi
 echo
 echo "  ⚠️  UNSIGNED. A recipient must right-click -> Open the first time."
 echo "      Codesigning needs an Apple Developer account; see README."
