@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -33,6 +34,21 @@ from pathlib import Path
 
 REPO = "esecoder/device-search"
 API = "https://api.github.com"
+
+
+def _ssl_ctx():
+    """The certifi bundle, because python.org builds ship without one.
+
+    Measured here: bare urlopen raised CERTIFICATE_VERIFY_FAILED on the GitHub API
+    - "unable to get local issuer certificate". The same failure hit the model
+    client and the downloader earlier in this project; it is a property of the
+    interpreter, not of the endpoint.
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
 
 
 def _req(method: str, url: str, token: str, data: bytes | None = None,
@@ -44,7 +60,7 @@ def _req(method: str, url: str, token: str, data: bytes | None = None,
     if data is not None:
         req.add_header("Content-Type", content_type)
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=120, context=_ssl_ctx()) as r:
             body = r.read()
             return r.status, (json.loads(body) if body else {})
     except urllib.error.HTTPError as e:
