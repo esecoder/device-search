@@ -72,6 +72,19 @@ Only lexical hits count as "found". Semantic hits are offered as leads, labelled
 
 ---
 
+## How it works
+
+**[ARCHITECTURE.md](ARCHITECTURE.md)** explains the whole system: what a query does
+on its way through, why there are four retrieval backends rather than one, how the
+context budget is spent, and which decisions were made from a measurement rather
+than a guess.
+
+It is written to be read before explaining the project to anyone, and ends with a
+five-minute spoken version.
+
+---
+
+
 ## Install
 
 ```bash
