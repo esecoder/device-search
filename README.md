@@ -72,6 +72,15 @@ Only lexical hits count as "found". Semantic hits are offered as leads, labelled
 
 ---
 
+## What it covers
+
+**[AI-STACK.md](AI-STACK.md)** maps the project area by area — data curation,
+retrieval, multimodal inference, evaluation, systems, packaging — with the file that
+demonstrates each claim, and an explicit list of what it does *not* cover.
+
+---
+
+
 ## How it works
 
 **[ARCHITECTURE.md](ARCHITECTURE.md)** explains the whole system: what a query does
