@@ -4,15 +4,15 @@
 <meta charset="utf-8" />
 <title>DeviceSearch</title>
 <!--
-  ⚠️ NO FRAMEWORK, NO BUILD STEP. This is a search box, a result list and a settings line.
+  NO FRAMEWORK, NO BUILD STEP. This is a search box, a result list and a settings line.
   React would add a toolchain, a lockfile and a dependency tree to render about 40 elements.
-  ⚠️ And a build step would mean the packaged app contains code nobody can read directly —
+  And a build step would mean the packaged app contains code nobody can read directly —
   which defeats the point of a project meant to be legible.
 -->
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- ⚠️ A DRAG REGION. The window is frameless, so without this it cannot be moved at all —
+  <!-- A DRAG REGION. The window is frameless, so without this it cannot be moved at all —
        and macOS users expect to be able to reposition a floating search box. -->
   <div id="drag"></div>
 
@@ -59,22 +59,22 @@
       <button class="scope" data-scope="audio">Audio</button>
     </div>
 
-    <!-- ⚠️ STATUS IS ALWAYS VISIBLE, EVEN WHEN EMPTY. The whole failure mode this project
+    <!-- STATUS IS ALWAYS VISIBLE, EVEN WHEN EMPTY. The whole failure mode this project
          keeps recording is a tool that looks like it is working while measuring nothing.
          If the daemon is down or the index is partial, that has to be on screen. -->
-    <!-- ⚠️ ABOVE the results, not below them. A caveat underneath a list reads as a footnote;
+    <!-- ABOVE the results, not below them. A caveat underneath a list reads as a footnote;
          the same sentence above it qualifies what follows. -->
-    <!-- ⚠️ ONE COMPONENT SHOWS STATUS, NOT THREE. banner + status + setup used to stack above
+    <!-- ONE COMPONENT SHOWS STATUS, NOT THREE. banner + status + setup used to stack above
          the results, and each one that appeared pushed the list further down the window. -->
     <div id="banner">
       <div id="banner-text"></div>
-      <!-- ⚠️ A REAL BAR, driven by the daemon's own percentage. A spinner says "something is
+      <!-- A REAL BAR, driven by the daemon's own percentage. A spinner says "something is
            happening"; a bar says "12% done, 8 minutes left", and only the second tells a user
            whether to wait or go and do something else. -->
       <div id="banner-bar"><div id="banner-fill"></div></div>
     </div>
 
-    <!-- ⚠⚠️ THE STATUS LINE IS A ROW, AND THE RE-RANK BUTTON LIVES AT ITS RIGHT-HAND END.
+    <!-- THE STATUS LINE IS A ROW, AND THE RE-RANK BUTTON LIVES AT ITS RIGHT-HAND END.
          It belongs beside "routed as ..." because it is an action ON those results — a
          footer link said nothing about what it would act on, and it was visible even with
          nothing on screen to re-rank. -->
@@ -84,8 +84,8 @@
             style="display:none">re-rank <kbd>⌘⇧R</kbd></span>
     </div>
 
-    <!-- ⚠⚠️ THE SPINNER IS AN OVERLAY, NOT A DOT IN THE STATUS ROW.
-         The user could not see it. ⚠️ It sits over the PREVIOUS results at low opacity, which
+    <!-- THE SPINNER IS AN OVERLAY, NOT A DOT IN THE STATUS ROW.
+         The user could not see it. It sits over the PREVIOUS results at low opacity, which
          says "these are still here, and something is happening to them" — rather than a
          blank window that reads as a hang. -->
     <div id="busy-overlay"><div class="spin"></div></div>
@@ -96,11 +96,11 @@
       <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       <span><kbd>⌘↵</kbd> reveal</span>
-      <!-- ⚠⚠ ONE DOOR, CALLED WHAT IT IS. There were two footer links — "folders" and "AI" —
+      <!-- ONE DOOR, CALLED WHAT IT IS. There were two footer links — "folders" and "AI" —
            which asked the user to know which of two places held the thing they wanted. Both
            live behind this now. -->
       <span id="settings" title="folders and AI (⌘,)">Settings</span>
-      <!-- ⚠️ THE AI STATE, VISIBLE WITHOUT BEING OPENED. It appears only when a model is
+      <!-- THE AI STATE, VISIBLE WITHOUT BEING OPENED. It appears only when a model is
            connected, and clicking it opens Settings on the model step — so the answer to "is
            this using my API key?" is one glance and one click, not a menu hunt. -->
       <span id="aipill" title="your model is connected — click to change it"
@@ -110,20 +110,20 @@
     </div>
   </div>
 
-<!-- ⚠️⚠️ SETUP IS AN OVERLAY, AND THAT IS A BUG FIX RATHER THAN A STYLE CHOICE.
+<!-- SETUP IS AN OVERLAY, AND THAT IS A BUG FIX RATHER THAN A STYLE CHOICE.
      It used to be a `flex: 1` sibling between the status line and the results, so whenever it
      was shown it took HALF THE WINDOW — and when it was shown but EMPTY, because /api/roots
      failed or had not answered, that half was a blank box that pushed every result down.
-     ⚠️ An overlay cannot affect the layout of what it covers. That is the whole point. -->
+     An overlay cannot affect the layout of what it covers. That is the whole point. -->
 <div id="setup-overlay"><div id="setup"></div></div>
 
-<!-- ⚠⚠ ITS OWN OVERLAY, SEPARATE FROM THE FOLDER PANEL. "What should be searchable?" is a
+<!-- ITS OWN OVERLAY, SEPARATE FROM THE FOLDER PANEL. "What should be searchable?" is a
      question about the disk; "which model?" is a question about what leaves the machine.
      Sharing one panel made connecting an API look like a routine step on the way to picking
      folders. -->
 
 
-<!-- ⚠️ setup.js loads FIRST: app.js calls Setup.open() during boot. -->
+<!-- setup.js loads FIRST: app.js calls Setup.open() during boot. -->
 <script src="setup.js"></script>
 <script src="ai.js"></script>
 <script src="app.js"></script>

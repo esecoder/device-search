@@ -2,12 +2,12 @@
 
 Almost every provider imitates OpenAI's /chat/completions. Anthropic does not:
 
-    OpenAI        POST {base}/chat/completions
+    OpenAI POST {base}/chat/completions
                   Authorization: Bearer KEY
                   {"model":..., "messages":[{"role":"user","content":"..."}], "max_tokens":N}
                   reply.choices[0].message.content
 
-    Anthropic     POST {base}/v1/messages
+    Anthropic POST {base}/v1/messages
                   x-api-key: KEY
                   anthropic-version: 2023-06-01
                   {"model":..., "messages":[{"role":"user","content":"..."}], "max_tokens":N}

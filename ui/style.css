@@ -1,5 +1,5 @@
 /* style.css — the Spotlight-shaped look.
-   ⚠️ Transparent window + rounded panel is what makes it read as a floating search box rather
+   Transparent window + rounded panel is what makes it read as a floating search box rather
    than a small application window. The `body` must stay transparent or the rounded corners
    show as opaque squares on macOS. */
 
@@ -20,14 +20,14 @@
 
 html, body {
   height: 100%;
-  background: transparent;    /* ⚠️ required for the rounded corners to render */
+  background: transparent; /* required for the rounded corners to render */
   overflow: hidden;
   font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--fg);
-  -webkit-user-select: none;  /* ⚠️ a search box is not a document; selected text looks broken */
+  -webkit-user-select: none; /* a search box is not a document; selected text looks broken */
 }
 
-/* ⚠️ The frameless window's drag handle. It sits above everything and is invisible. */
+/* The frameless window's drag handle. It sits above everything and is invisible. */
 #drag { position: fixed; inset: 0 0 auto 0; height: 14px; -webkit-app-region: drag; z-index: 5; }
 
 #box {
@@ -48,7 +48,7 @@ html, body {
   display: flex; align-items: center; gap: 12px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--sep);
-  -webkit-app-region: drag;      /* the header is draggable, the input is not */
+  -webkit-app-region: drag; /* the header is draggable, the input is not */
 }
 /* The mark's own viewBox is 256, so the stroke scales with the element: 8 in
    source units is about 1px at 24px. Sized slightly larger than a plain glyph
@@ -59,7 +59,7 @@ html, body {
 #q {
   flex: 1; border: 0; outline: 0; background: transparent;
   color: var(--fg); font-size: 20px; font-weight: 400;
-  -webkit-app-region: no-drag;   /* ⚠️ otherwise the drag region swallows every click */
+  -webkit-app-region: no-drag; /* otherwise the drag region swallows every click */
   -webkit-user-select: text;
 }
 #q::placeholder { color: var(--dim); font-size: 18px; }
@@ -70,9 +70,9 @@ kbd {
 }
 
 /* ------------------------------------------------------------------- banner */
-/* ⚠️ HIDDEN BY DEFAULT, and shown only when the daemon says something is wrong. A persistent
+/* HIDDEN BY DEFAULT, and shown only when the daemon says something is wrong. A persistent
    banner trains the user to ignore the space it occupies, so an empty banner occupies none. */
-/* ⚠️ ONE LINE, AND IT STAYS ONE LINE. The message this replaces was three lines of jargon that
+/* ONE LINE, AND IT STAYS ONE LINE. The message this replaces was three lines of jargon that
    wrapped, mentioned a terminal command, and cost more vertical space than the results it was
    describing. */
 #banner { display: none; padding: 9px 18px 10px; font-size: 12px; line-height: 1.45; }
@@ -98,7 +98,7 @@ kbd {
 #banner-bar.show { display: block; }
 #banner-fill { height: 100%; width: 0%; background: #0a84ff; transition: width 0.4s linear; }
 
-/* ⚠️ THE OVERLAY. An absolutely positioned panel cannot push a sibling down, which is exactly
+/* THE OVERLAY. An absolutely positioned panel cannot push a sibling down, which is exactly
    the property the previous layout was missing. */
 #setup-overlay {
   display: none; position: absolute; inset: 0; z-index: 20;
@@ -111,7 +111,7 @@ kbd {
 #status { padding: 0 18px; font-size: 12px; color: var(--dim); }
 #status:not(:empty) { padding: 10px 18px; border-bottom: 1px solid var(--sep); }
 #status .warn { color: #ffd60a; }
-#status .err  { color: #ff453a; }
+#status .err { color: #ff453a; }
 
 /* ------------------------------------------------------------------ results */
 #results { flex: 1; overflow-y: auto; padding: 6px 0; }
@@ -122,7 +122,7 @@ kbd {
   padding: 10px 18px 4px; font-size: 11px; font-weight: 600;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim);
 }
-/* ⚠️ THE TWO TIERS MUST NOT LOOK ALIKE. A semantic hit is not evidence the thing exists —
+/* THE TWO TIERS MUST NOT LOOK ALIKE. A semantic hit is not evidence the thing exists —
    measured, a garbage query scored 0.649 and a real one 0.632, so no threshold separates them.
    If both lists rendered identically the UI would assert something the backend refuses to. */
 .group.meaning { color: #ff9f0a; }
@@ -142,7 +142,7 @@ kbd {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;
 }
 .row .via { font-size: 11px; color: var(--dim); text-align: right; white-space: nowrap; }
-/* ⚠️ OCR-derived hits are marked. "found in scan.pdf" and "found in scan.pdf via OCR" are
+/* OCR-derived hits are marked. "found in scan.pdf" and "found in scan.pdf via OCR" are
    different claims about reliability and the user is entitled to know which one they got. */
 .tag-ocr { color: #ff9f0a; }
 
@@ -178,7 +178,7 @@ kbd {
 .setup-row:hover { background: rgba(255,255,255,0.05); }
 .setup-name {
   grid-column: 2; grid-row: 1;
-  padding-right: 26px;           /* clear of the remove button */
+  padding-right: 26px; /* clear of the remove button */
   font-weight: 500; font-size: 12.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -216,14 +216,14 @@ kbd {
   border-radius: 7px; padding: 8px 14px; font-size: 13px; cursor: pointer;
 }
 .setup-foot button.primary { background: #0a84ff; border-color: #0a84ff; font-weight: 600; }
-/* ⚠️ The picker is the PRIMARY action now — typing a path is the fallback, not the default,
+/* The picker is the PRIMARY action now — typing a path is the fallback, not the default,
    and the styling should say which one the user is expected to use. */
 .setup-add button.pick { background: #0a84ff; border-color: #0a84ff; font-weight: 600; }
 .setup-add button.pick:disabled { opacity: 0.6; }
 .setup-list.disabled { opacity: 0.4; pointer-events: none; }
 .setup-row.whole { margin-top: 6px; border-top: 1px solid var(--sep); padding-top: 12px; }
 
-/* ⚠️ THE AI SECTION. Visually separate from the folders, because it is a different kind of
+/* THE AI SECTION. Visually separate from the folders, because it is a different kind of
    decision: folders change what is searched, this changes what LEAVES the machine. */
 .setup-ai { margin-top: 14px; border-top: 1px solid var(--sep); padding-top: 12px; }
 .setup-ai-row { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: center;
@@ -233,18 +233,18 @@ kbd {
   padding: 6px 8px; color: var(--fg); font-size: 12px; font-family: inherit; width: 100%;
 }
 
-/* ⚠️ THE MESSAGE SLOT INSIDE THE PANEL. The banner is UNDER the overlay, so anything the user
+/* THE MESSAGE SLOT INSIDE THE PANEL. The banner is UNDER the overlay, so anything the user
    must read while the panel is open has to be drawn on the panel itself. */
 .setup-msg { font-size: 12px; line-height: 1.45; min-height: 0; }
 .setup-msg:not(:empty) { margin-bottom: 10px; padding: 8px 10px; border-radius: 6px; }
 .setup-msg.warn { background: rgba(255, 159, 10, 0.16); color: #ffc46b; }
-.setup-msg.err  { background: rgba(255, 69, 58, 0.16);  color: #ff8a80; }
+.setup-msg.err { background: rgba(255, 69, 58, 0.16); color: #ff8a80; }
 
-/* ⚠️ WHAT IS ABOUT TO BE INDEXED. "Index these folders" gave no sense of whether that is thirty
+/* WHAT IS ABOUT TO BE INDEXED. "Index these folders" gave no sense of whether that is thirty
    seconds or three hours, and the only way to find out was to start it. */
 .setup-est { font-size: 12px; color: var(--dim); margin: 10px 0 0; }
 
-/* ⚠️ UNTICKING IS NOT REMOVING. Untick a folder you picked by mistake and it stayed in the list
+/* UNTICKING IS NOT REMOVING. Untick a folder you picked by mistake and it stayed in the list
    for ever, with no way back to the list you started with. */
 .setup-x {
   /* Placed explicitly: the row is now a 2-column grid for the name/path stack, and
@@ -269,7 +269,7 @@ kbd {
 #settings { cursor: pointer; text-decoration: underline dotted; }
 #settings:hover { color: var(--fg); }
 
-/* ⚠⚠ THE ANSWER. Visually distinct from the result rows, because it is a different KIND of
+/* THE ANSWER. Visually distinct from the result rows, because it is a different KIND of
    output: a sentence the user will believe, sitting above a list they can check. Styling it
    like a result row would invite the same trust for both. */
 .answer {
@@ -286,7 +286,7 @@ kbd {
   font-size: 11px; color: #9fd0ff; background: rgba(255,255,255,0.07); cursor: pointer;
 }
 .answer-cite:hover { background: rgba(255,255,255,0.15); }
-/* ⚠️ The answer toggle is off by default and must LOOK off — it uploads snippets, and a
+/* The answer toggle is off by default and must LOOK off — it uploads snippets, and a
    switch whose state is ambiguous is one people leave on by accident. */
 #askbtn {
   font-size: 11px; padding: 3px 8px; border-radius: 5px; cursor: pointer;
@@ -294,7 +294,7 @@ kbd {
 }
 #askbtn.on { background: #0a84ff; border-color: #0a84ff; color: #fff; }
 
-/* ⚠⚠ THE MODEL PANEL HAS ITS OWN OVERLAY, SIZED LIKE THE FOLDER ONE BUT VISUALLY DISTINCT.
+/* THE MODEL PANEL HAS ITS OWN OVERLAY, SIZED LIKE THE FOLDER ONE BUT VISUALLY DISTINCT.
    Same layout primitives, different purpose — and it must not look like a step inside the
    folder chooser, which is what it was. */
 #ai-overlay {
@@ -310,13 +310,13 @@ kbd {
   background: rgba(255,255,255,0.06); border: 1px solid var(--sep); border-radius: 6px;
   padding: 6px 8px; color: var(--fg); font-size: 12px; font-family: inherit; width: 100%;
 }
-/* ⚠️ AN UNAVAILABLE PROVIDER IS DIMMED BUT STILL VISIBLE. Hiding it would leave a user who
+/* AN UNAVAILABLE PROVIDER IS DIMMED BUT STILL VISIBLE. Hiding it would leave a user who
    HAS Ollama wondering why it is not offered; showing it dimmed with "not running" tells
    them the app looked and did not find it, which is a different and more useful fact. */
 .setup-row.ai-prov.unavailable { opacity: 0.5; }
 .setup-ai-form { margin: 12px 0 0; }
 
-/* ⚠⚠ THE STEP TABS. Two decisions, one panel. The tab is what keeps them visibly distinct —
+/* THE STEP TABS. Two decisions, one panel. The tab is what keeps them visibly distinct —
    merging their controls into one list is what made connecting an API look like a checkbox
    next to Documents. */
 .setup-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
@@ -326,18 +326,18 @@ kbd {
 }
 .setup-tab.on { background: rgba(255,255,255,0.10); color: var(--fg); border-color: transparent; }
 
-/* ⚠️ THE AI PILL. Visible only when a model is connected, because a status light that is
+/* THE AI PILL. Visible only when a model is connected, because a status light that is
    always on tells you nothing. Clicking it is the shortest path to changing it. */
 #aipill {
   color: #30d158; cursor: pointer; font-weight: 600;
 }
 #aipill:hover { text-decoration: underline; }
 
-/* ⚠️ AN EXPLANATION, NOT AN ERROR. It is the app accounting for itself rather than failing:
+/* AN EXPLANATION, NOT AN ERROR. It is the app accounting for itself rather than failing:
    neutral styling, because "I cannot count folders" is a limit and not a fault. */
-/* ⚠⚠️ VISIBLE, NOT SUBTLE. The first version was grey text on grey — and the user reported not
+/* VISIBLE, NOT SUBTLE. The first version was grey text on grey — and the user reported not
    noticing it, which is the correct response to a message styled to be ignorable.
-   ⚠️ It is an OPPORTUNITY, not a warning: nothing is broken, a feature is one click away. So
+   It is an OPPORTUNITY, not a warning: nothing is broken, a feature is one click away. So
    it gets the accent colour and a button, and nothing that reads as an error. */
 .answer.note {
   background: rgba(10, 132, 255, 0.16);
@@ -351,11 +351,11 @@ kbd {
 }
 .answer-cta:hover { background: #3395ff; }
 
-/* ⚠️ THE STATUS ROW: the trace on the left, the action on the right. The button aligns to
+/* THE STATUS ROW: the trace on the left, the action on the right. The button aligns to
    the right edge so it does not shift when the trace text changes length. */
 #statusrow { display: flex; align-items: center; gap: 10px; }
 #statusrow #status { flex: 1; }
-/* ⚠⚠️ THE RE-RANK BUTTON WAS GREY-ON-GREY AND THE USER COULD NOT FIND IT. A control nobody
+/* THE RE-RANK BUTTON WAS GREY-ON-GREY AND THE USER COULD NOT FIND IT. A control nobody
    notices is a control that does not exist — the feature was built and unreachable, which is
    the same failure as the AI panel being terminal-only. */
 #rerank {
@@ -370,27 +370,27 @@ kbd {
   background: rgba(255,255,255,0.12); padding: 0 3px; border-radius: 3px;
 }
 
-/* ⚠⚠️ THE SELECTED ROW MUST FILL THE FULL WIDTH **WHEN SCROLLED SIDEWAYS**.
+/* THE SELECTED ROW MUST FILL THE FULL WIDTH **WHEN SCROLLED SIDEWAYS**.
    The highlight was sized to the container, so a long path pushed it off to the left and the
-   blue bar stopped halfway across. ⚠️ The row has to be as wide as its CONTENT and at least as
+   blue bar stopped halfway across. The row has to be as wide as its CONTENT and at least as
    wide as the box: `min-width: 100%` with `width: max-content` is what does both. */
 #results .row {
   box-sizing: border-box;
   min-width: 100%;
   width: max-content;
 }
-/* ⚠️ THE SNIPPET IS NOT ALLOWED TO WIDEN THE ROW. Without this a long path stretches the row
+/* THE SNIPPET IS NOT ALLOWED TO WIDEN THE ROW. Without this a long path stretches the row
    and the highlight runs past the right edge of the visible area instead of stopping at it. */
 #results .row .name, #results .row .snip { max-width: 100%; }
-/* ⚠️ AND THE RE-RANK BUTTON NEEDS ROOM FROM THE EDGE. It sat flush against the window
+/* AND THE RE-RANK BUTTON NEEDS ROOM FROM THE EDGE. It sat flush against the window
    border, which reads as clipped rather than placed. */
 #rerank { margin-right: 10px; }
 #statusrow { padding-right: 2px; }
 
-/* ⚠⚠️ THE WORKING INDICATOR. A search that takes two seconds with no feedback reads as
+/* THE WORKING INDICATOR. A search that takes two seconds with no feedback reads as
    broken, and the user presses enter again — which is how a slow search becomes a busy one.
-   ⚠️ It sits in the status row where the trace will appear, so nothing moves when it resolves. */
-/* ⚠️ THE OVERLAY: centred, translucent, and OVER the old list rather than replacing it. */
+   It sits in the status row where the trace will appear, so nothing moves when it resolves. */
+/* THE OVERLAY: centred, translucent, and OVER the old list rather than replacing it. */
 #busy-overlay {
   display: none; position: absolute; inset: 0; z-index: 5;
   align-items: center; justify-content: center;
@@ -402,7 +402,7 @@ kbd {
   border: 3px solid rgba(255,255,255,0.25); border-top-color: #0a84ff;
   animation: ds-spin 0.7s linear infinite;
 }
-/* ⚠️ THE SHOW-MORE ROW. Neutral, because it is navigation rather than a result. */
+/* THE SHOW-MORE ROW. Neutral, because it is navigation rather than a result. */
 .more {
   padding: 9px 14px; font-size: 12px; color: var(--dim); cursor: pointer;
   text-align: center; border-top: 1px solid var(--sep);
@@ -410,11 +410,11 @@ kbd {
 .more:hover { color: var(--fg); background: rgba(255,255,255,0.05); }
 @keyframes ds-spin { to { transform: rotate(360deg); } }
 
-/* ⚠⚠️ THE INDETERMINATE BAR FOR A SCAN. Motion without a claim.
-   ⚠️ It says "working" and refuses to say "this much", because during a scan the second thing
+/* THE INDETERMINATE BAR FOR A SCAN. Motion without a claim.
+   It says "working" and refuses to say "this much", because during a scan the second thing
    is not knowable — and the last time the app claimed it, it showed 100% from a different run
    and held it for the whole crawl.
-   ⚠️ A window with nothing moving, while a prompt is up and the disk is being walked, reads
+   A window with nothing moving, while a prompt is up and the disk is being walked, reads
    as hung. This is the difference between "working" and "finished", which the user could not
    previously tell apart. */
 #banner-bar.moving #banner-fill {
@@ -422,8 +422,8 @@ kbd {
   animation: ds-slide 1.15s ease-in-out infinite;
 }
 @keyframes ds-slide {
-  0%   { margin-left: 0; }
-  50%  { margin-left: 70%; }
+  0% { margin-left: 0; }
+  50% { margin-left: 70%; }
   100% { margin-left: 0; }
 }
 
@@ -724,7 +724,7 @@ kbd {
 }
 .empty-what {
   font-size: 10.5px;
-  opacity: .55;         /* was .38, which was below comfortable reading */
+  opacity: .55; /* was .38, which was below comfortable reading */
   white-space: nowrap;
   flex: none;
 }

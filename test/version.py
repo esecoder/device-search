@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parent.parent
 def main() -> int:
     version_file = ROOT / "VERSION"
     if not version_file.exists():
-        print("  FAIL  no VERSION file")
+        print(" FAIL no VERSION file")
         return 1
     v = version_file.read_text().strip()
     if not re.fullmatch(r"\d+\.\d+\.\d+", v):
-        print(f"  FAIL  VERSION is {v!r}, not MAJOR.MINOR.PATCH")
+        print(f" FAIL VERSION is {v!r}, not MAJOR.MINOR.PATCH")
         return 1
-    print(f"  VERSION file      : {v}")
+    print(f" VERSION file : {v}")
 
     seen = {}
 
@@ -41,16 +41,16 @@ def main() -> int:
     bad = []
     for where, got in seen.items():
         ok = got == v
-        print(f"  {where:<18}: {got}  {'OK' if ok else '<- MISMATCH'}")
+        print(f" {where:<18}: {got} {'OK' if ok else '<- MISMATCH'}")
         if not ok:
             bad.append(where)
 
     print()
     if bad:
-        print(f"  FAIL  {', '.join(bad)} disagrees with VERSION")
-        print("        run ./bin/release.sh, which syncs all three")
+        print(f" FAIL {', '.join(bad)} disagrees with VERSION")
+        print(" run ./bin/release.sh, which syncs all three")
         return 1
-    print(f"  PASS  every version string is {v}")
+    print(f" PASS every version string is {v}")
     return 0
 
 

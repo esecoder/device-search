@@ -26,7 +26,7 @@ def main() -> int:
         if "__pycache__" not in p.parts
     )
     if not files:
-        print("  FAIL  no Python files found")
+        print(" FAIL no Python files found")
         return 1
 
     failures = []
@@ -39,11 +39,11 @@ def main() -> int:
     if failures:
         for path, exc in failures:
             rel = path.relative_to(ROOT)
-            print(f"  FAIL  {rel}:{exc.lineno}: {exc.msg}")
-        print(f"\n  {len(failures)} of {len(files)} files do not parse")
+            print(f" FAIL {rel}:{exc.lineno}: {exc.msg}")
+        print(f"\n {len(failures)} of {len(files)} files do not parse")
         return 1
 
-    print(f"  PASS  all {len(files)} Python files parse")
+    print(f" PASS all {len(files)} Python files parse")
     return 0
 
 

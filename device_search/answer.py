@@ -1,24 +1,24 @@
 """
 answer.py — turn retrieved results into an answer, with the citations kept.
 
-===============================================================================
-⚠️⚠️ THE HALF THAT DID NOT EXIST
-===============================================================================
+
+THE HALF THAT DID NOT EXIST
+
 `llm_rerank` reorders results using a model. Nothing ever SYNTHESISED an answer from
 them — so the project had retrieval and re-ranking and no generation, which is the part a
 user recognises as "asking a question".
 
-⚠️ AND IT IS THE PART THAT NEEDS THE MOST RESTRAINT, NOT THE MOST CAPABILITY.
+AND IT IS THE PART THAT NEEDS THE MOST RESTRAINT, NOT THE MOST CAPABILITY.
 
-    retrieval   returns a list the user can open and check
-    answering   returns a SENTENCE, and a sentence is believed
+    retrieval returns a list the user can open and check
+    answering returns a SENTENCE, and a sentence is believed
 
-⚠️ A search tool that says "no results" is honestly empty. One that says "the retry logic is
+A search tool that says "no results" is honestly empty. One that says "the retry logic is
 in RetryMiddleware.php" when nothing in the results says that is a tool that has started
 inventing things about the user's own files — and they have no way to tell, because it looks
 exactly like the correct answers.
 
-⚠️ SO THREE RULES ARE ENFORCED HERE RATHER THAN REQUESTED IN A PROMPT:
+SO THREE RULES ARE ENFORCED HERE RATHER THAN REQUESTED IN A PROMPT:
 
   1. EVERY CLAIM CARRIES A CITATION. The model is asked to tag each sentence with the source
      it came from, and a sentence whose tag names a source that was not provided is DROPPED.
@@ -32,7 +32,7 @@ exactly like the correct answers.
      index over `~` contains SSH keys. Anything matching a secret pattern is dropped before
      the request is built, and the drop is reported.
 
-⚠️ AND THE ANSWER IS ALWAYS SHOWN WITH ITS SOURCES, so the user can check it. An answer
+AND THE ANSWER IS ALWAYS SHOWN WITH ITS SOURCES, so the user can check it. An answer
 without its evidence is a claim.
 """
 
@@ -45,7 +45,7 @@ import urllib.request
 
 from .config import find_secrets
 
-# ⚠️ HOW MUCH CONTEXT IS SENT. This is a device search answering a question about a file, not
+# HOW MUCH CONTEXT IS SENT. This is a device search answering a question about a file, not
 # a report. Six documents at 1,200 characters is ~2,000 tokens — enough to answer, small
 # enough that the model attends to all of it rather than losing the middle, and cheap.
 MAX_SOURCES = 8
@@ -88,20 +88,20 @@ def estimate_tokens(text: str) -> int:
     if not text:
         return 0
     try:
-        from .semantic import _TOKENIZER      # set once the model has loaded
+        from .semantic import _TOKENIZER # set once the model has loaded
         if _TOKENIZER is not None:
             return len(_TOKENIZER.encode(text, add_special_tokens=False))
     except Exception:
         pass
     return int(len(text) / CHARS_PER_TOKEN) + 1
 
-# ⚠️ THE REFUSAL SENTENCE IS DEFINED HERE AND CHECKED BELOW, so the set of things that count as
+# THE REFUSAL SENTENCE IS DEFINED HERE AND CHECKED BELOW, so the set of things that count as
 # "no answer" is explicit rather than whatever the model happens to phrase.
 REFUSAL = "I could not find that in your files."
 
 
 def _client():
-    """⚠️ The key comes from the environment. Identical to agent.py's helper on purpose — one
+    """The key comes from the environment. Identical to agent.py's helper on purpose — one
     convention for how this project reaches an API, not two that drift apart."""
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
@@ -262,7 +262,7 @@ def ask(query: str, sources, client=None) -> dict:
         return {"answer": "", "citations": [], "refused": False,
                 "error": "the model returned no content"}
 
-    # ⚠️⚠️ THE CITATION CHECK, AND IT IS THE POINT OF THIS MODULE.
+    # THE CITATION CHECK, AND IT IS THE POINT OF THIS MODULE.
     #
     # A model asked to cite will sometimes cite a source that does not exist — [7] when six
     # were provided — and that is the failure that makes an answer untrustworthy, because the
@@ -287,10 +287,10 @@ def ask(query: str, sources, client=None) -> dict:
     refused = text.strip().strip('"').startswith(REFUSAL[:30])
     out = {"answer": text, "citations": citations, "refused": refused, "error": ""}
     if unknown:
-        # ⚠️ THE WHOLE ANSWER IS FLAGGED, NOT JUST THE OFFENDING SENTENCE. A sentence that
+        # THE WHOLE ANSWER IS FLAGGED, NOT JUST THE OFFENDING SENTENCE. A sentence that
         # cites a source that does not exist is not a citation error; it is evidence the model
         # is not grounding its output in what it was given.
         out["invented_citations"] = unknown
     if not citations and not refused:
-        out["uncited"] = True      # ⚠️ an answer with no sources is an assertion, not a result
+        out["uncited"] = True # an answer with no sources is an assertion, not a result
     return out

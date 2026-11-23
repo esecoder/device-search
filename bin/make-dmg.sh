@@ -9,12 +9,12 @@
 # and an Applications folder on the other, which is the drag-to-install gesture
 # every macOS user already knows.
 #
-# ⚠️ IT DOES NOT SOLVE THE THIRD. Signing and notarisation need an Apple Developer
+# IT DOES NOT SOLVE THE THIRD. Signing and notarisation need an Apple Developer
 # account ($99/year) and credentials that cannot be invented, so this produces an
 # UNSIGNED image. The README explains what the user will see and how to get past
 # it. Do not describe this as a finished consumer installer until it is signed.
 #
-#   ./bin/make-dmg.sh
+# ./bin/make-dmg.sh
 #
 # Requires: the .app built by bin/make-app.sh, and the daemon built by
 # bin/build-sidecar.sh.
@@ -32,14 +32,14 @@ OUT="$HERE/dist"
 # Tagging is part of ./bin/release.sh; this script just reads the number.
 VERSION="$(tr -d '[:space:]' < "$HERE/VERSION" 2>/dev/null || echo "0.0.0")"
 if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "  VERSION is '$VERSION', which is not MAJOR.MINOR.PATCH" >&2
+    echo " VERSION is '$VERSION', which is not MAJOR.MINOR.PATCH" >&2
     exit 1
 fi
 DMG="$OUT/device-search-$VERSION-macos-arm64.dmg"
 
 if [ ! -d "$APP" ]; then
-    echo "  no app at $APP" >&2
-    echo "  build it first: ./bin/make-app.sh" >&2
+    echo " no app at $APP" >&2
+    echo " build it first: ./bin/make-app.sh" >&2
     exit 1
 fi
 
@@ -47,8 +47,8 @@ fi
 # repository it was built in works on the build machine and nowhere else, and the
 # failure is a blank window with no message.
 if [ ! -x "$APP/Contents/MacOS/device-search-daemon" ]; then
-    echo "  the bundle has no daemon, so it will only run on this machine" >&2
-    echo "  build it first: ./bin/build-sidecar.sh && ./bin/make-app.sh" >&2
+    echo " the bundle has no daemon, so it will only run on this machine" >&2
+    echo " build it first: ./bin/build-sidecar.sh && ./bin/make-app.sh" >&2
     exit 1
 fi
 
@@ -68,7 +68,7 @@ ln -s /Applications "$STAGE/Applications"
 # is a security dialog that explains nothing.
 cat > "$STAGE/READ ME FIRST.txt" <<'TXT'
 device-search
-=============
+
 
 TO INSTALL
   Drag the app onto the Applications folder in this window.
@@ -82,7 +82,7 @@ FIRST LAUNCH
   You only have to do this once. After that it opens normally.
 
 WHAT IT DOES
-  It builds a search index inside   ~/.device-search   on your own machine.
+  It builds a search index inside ~/.device-search on your own machine.
   Nothing is uploaded anywhere unless you connect a model in Settings.
 
 FIRST RUN
@@ -91,9 +91,9 @@ FIRST RUN
   whole home directory.
 TXT
 
-echo "  staging complete"
+echo " staging complete"
 
-# ⚠️ THE SIZE IS STATED EXPLICITLY, AND IT HAS TO BE.
+# THE SIZE IS STATED EXPLICITLY, AND IT HAS TO BE.
 #
 # Without -size, hdiutil estimates the image size from the source folder and
 # failed with "No space left on device" on an 87 MB bundle with 157 GB free. It
@@ -113,11 +113,11 @@ hdiutil create -volname "device-search" \
     "$DMG" >/dev/null
 
 SIZE=$(du -sh "$DMG" | cut -f1)
-echo "  built: $DMG  ($SIZE)"
+echo " built: $DMG ($SIZE)"
 echo
-echo "  ⚠️  UNSIGNED. A recipient will see 'unidentified developer' and must"
-echo "      right-click -> Open the first time. Codesigning needs an Apple"
-echo "      Developer account; the commands are in the README."
+echo " UNSIGNED. A recipient will see 'unidentified developer' and must"
+echo " right-click -> Open the first time. Codesigning needs an Apple"
+echo " Developer account; the commands are in the README."
 echo
-echo "  verify the contents without installing:"
-echo "      hdiutil attach '$DMG' && ls /Volumes/device-search"
+echo " verify the contents without installing:"
+echo " hdiutil attach '$DMG' && ls /Volumes/device-search"

@@ -1,44 +1,44 @@
 """
 codegraph.py — structural code retrieval: symbols and the graph between them.
 
-===============================================================================
-⚠️ WHY CODE NEEDS A DIFFERENT RETRIEVER, AND IT IS NOT A SEMANTIC ONE
-===============================================================================
+
+WHY CODE NEEDS A DIFFERENT RETRIEVER, AND IT IS NOT A SEMANTIC ONE
+
 Measured on this machine's corpus: 4,886 code files, 40.4 MB, **80% of all text**.
 Embedding them costs 80% of the index time and buys very little.
 
-⚠️ BECAUSE A DENSE VECTOR OF SOURCE CODE CARRIES ALMOST NO SIGNAL.
+BECAUSE A DENSE VECTOR OF SOURCE CODE CARRIES ALMOST NO SIGNAL.
 
-    def commit(self): 
+    def commit(self):
         self.conn.commit()
 
 What would that embed to? "commit" appears in version control, in database work, in
 psychology. The vector is an average of all of them and describes none of them.
 
-⚠️ AND THE QUERIES PEOPLE ACTUALLY TYPE FOR CODE ARE NOT MEANING-BASED:
+AND THE QUERIES PEOPLE ACTUALLY TYPE FOR CODE ARE NOT MEANING-BASED:
 
-    "where is validate_token called"     -> a NAME and a RELATIONSHIP
-    "what breaks if I change this"       -> a RELATIONSHIP
-    "find retryWithBackoff"              -> a NAME
+    "where is validate_token called" -> a NAME and a RELATIONSHIP
+    "what breaks if I change this" -> a RELATIONSHIP
+    "find retryWithBackoff" -> a NAME
 
 **None of those are "find text with similar meaning".** They are "find this symbol,
 then follow the edges" — which is a graph problem, and the graph is exact.
 
-⚠️ THE HONEST BOUNDARY: this CANNOT answer "find the code that retries with backoff".
+THE HONEST BOUNDARY: this CANNOT answer "find the code that retries with backoff".
 That needs meaning, and `comments.py` handles it by embedding the PROSE INSIDE code
 rather than the code. **The two are complementary, not alternatives.**
 
-===============================================================================
-⚠️ EXTRACTION IS REGEX, NOT A PARSER, AND THAT IS A DELIBERATE TRADE
-===============================================================================
+
+EXTRACTION IS REGEX, NOT A PARSER, AND THAT IS A DELIBERATE TRADE
+
 A real parser means tree-sitter per language — six grammars, a build step, and a
 dependency tree. Measured against what this is FOR:
 
-    what we need      symbol names, and which names appear near other names
-    what a parser     the same, plus types, scopes, overloads, generics
-    accuracy here     ~95% of names, ~85% of edges
+    what we need symbol names, and which names appear near other names
+    what a parser the same, plus types, scopes, overloads, generics
+    accuracy here ~95% of names, ~85% of edges
 
-⚠️ An 85%-accurate graph that runs in 30 seconds beats a 100% graph that needs a
+An 85%-accurate graph that runs in 30 seconds beats a 100% graph that needs a
 toolchain to install — **as long as the inaccuracy is stated rather than hidden.**
 """
 
@@ -51,7 +51,7 @@ from collections import defaultdict
 # =============================================================================
 # WHAT IS A DEFINITION, PER LANGUAGE
 # =============================================================================
-# ⚠️ ORDER MATTERS: the first pattern that matches a line wins, so the more specific
+# ORDER MATTERS: the first pattern that matches a line wins, so the more specific
 # languages are tried before the generic call pattern.
 DEF_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("python", re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(")),
@@ -78,7 +78,7 @@ LANG_OF_EXT = {".py": "python", ".php": "php", ".js": "js", ".jsx": "js", ".ts":
                ".tsx": "js", ".mjs": "js", ".cjs": "js", ".java": "java",
                ".go": "go", ".rs": "rust"}
 
-# ⚠️ A CALL IS ANY `name(` THAT IS NOT A DEFINITION AND NOT A KEYWORD. The keyword list is
+# A CALL IS ANY `name(` THAT IS NOT A DEFINITION AND NOT A KEYWORD. The keyword list is
 # what stops `if (`, `for (`, `while (` and `function (` from being counted as calls —
 # without it, `if` would be the most-called function in every codebase.
 CALL_RX = re.compile(r"(?<![\w.$>])([A-Za-z_$][\w$]*)\s*\(")
@@ -92,7 +92,7 @@ KEYWORDS = {
     "true", "false", "self", "this", "super", "parent", "require", "include", "import",
     "from", "as", "declare", "namespace", "use", "impl", "struct", "enum", "trait",
     "interface", "extends", "implements", "instanceof", "typeof", "delete", "in",
-    # ⚠️ PHP PRONOUNS. The first list was written from memory of C-like syntax and missed the
+    # PHP PRONOUNS. The first list was written from memory of C-like syntax and missed the
     # control structures PHP actually spells out — `foreach`, `elseif`, and the alternative
     # syntax block-enders that appear on almost every line of a WordPress-style codebase.
     "foreach", "endforeach", "elseif", "endif", "endwhile", "endfor", "endswitch",
@@ -100,28 +100,28 @@ KEYWORDS = {
     "compact", "extract", "defined", "define",
 }
 
-# ⚠️ ABOVE THIS, A NAME IS TOO GENERAL TO IDENTIFY ANYTHING. Chosen from the measured
+# ABOVE THIS, A NAME IS TOO GENERAL TO IDENTIFY ANYTHING. Chosen from the measured
 # distribution rather than picked: `__construct` 707, `setUp` 152, `write` 107, `get` 62 — these
 # are METHODS, and a method name is a convention shared by every class that has one.
 MAX_DEFINITIONS = 25
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS symbols (
-    id      INTEGER PRIMARY KEY,
-    doc_id  INTEGER,
-    path    TEXT NOT NULL,
-    name    TEXT NOT NULL,
-    kind    TEXT NOT NULL,
-    line    INTEGER,
-    sig     TEXT
+    id INTEGER PRIMARY KEY,
+    doc_id INTEGER,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    line INTEGER,
+    sig TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_sym_path ON symbols(path);
 CREATE TABLE IF NOT EXISTS edges (
-    src      INTEGER,          -- symbol id, NULL if the call is at file scope
+    src INTEGER, -- symbol id, NULL if the call is at file scope
     src_path TEXT NOT NULL,
     dst_name TEXT NOT NULL,
-    line     INTEGER
+    line INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_edge_dst ON edges(dst_name);
 CREATE INDEX IF NOT EXISTS idx_edge_src ON edges(src_path);
@@ -137,12 +137,12 @@ def lang_for(path: str) -> str | None:
 
 
 def strip_comments_and_strings(text: str, lang: str) -> str:
-    """⚠️ BLANK OUT COMMENTS AND STRING LITERALS **WITHOUT CHANGING LINE NUMBERS**.
+    """BLANK OUT COMMENTS AND STRING LITERALS **WITHOUT CHANGING LINE NUMBERS**.
 
     Comments contain `// see foo()` in prose, and strings contain SQL and HTML with
     parentheses everywhere. Both would be counted as calls and would drown the real graph.
 
-    ⚠️ REPLACED WITH SPACES, NOT DELETED. Line numbers are how a result cites its source,
+    REPLACED WITH SPACES, NOT DELETED. Line numbers are how a result cites its source,
     so removing a multi-line comment would shift every line number after it and every hit
     would point at the wrong place.
     """
@@ -153,7 +153,7 @@ def strip_comments_and_strings(text: str, lang: str) -> str:
             out = re.sub(r"#[^\n]*", "", out)
     else:
         out = text
-    # ⚠️ Strings second, so a `//` INSIDE a string is not treated as a comment first.
+    # Strings second, so a `//` INSIDE a string is not treated as a comment first.
     out = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', out)
     out = re.sub(r"'(?:\\.|[^'\\\n])*'", "''", out)
     out = re.sub(r"`(?:\\.|[^`\\])*`", "``", out, flags=re.S)
@@ -163,7 +163,7 @@ def strip_comments_and_strings(text: str, lang: str) -> str:
 def extract(path: str, text: str) -> dict:
     """Return {"symbols": [...], "edges": [...]} for one file.
 
-    ⚠️ RETURNS PARTIAL RESULTS RATHER THAN RAISING. A file that fails to parse is one file
+    RETURNS PARTIAL RESULTS RATHER THAN RAISING. A file that fails to parse is one file
     missing from the graph — not a reason to abandon an index of 5,000 others.
     """
     lang = lang_for(path)
@@ -175,7 +175,7 @@ def extract(path: str, text: str) -> dict:
 
     symbols, inside = [], None
     for i, line in enumerate(lines, 1):
-        # ⚠️ INDENTATION IS THE ONLY SCOPE INFORMATION A REGEX HAS. A definition at column 0
+        # INDENTATION IS THE ONLY SCOPE INFORMATION A REGEX HAS. A definition at column 0
         # is file-scope; anything indented belongs to whatever opened before it. It is a
         # guess, and it is the guess that makes edges attachable to a caller.
         indent = len(line) - len(line.lstrip())
@@ -202,18 +202,18 @@ def extract(path: str, text: str) -> dict:
     for i, line in enumerate(lines, 1):
         for m in CALL_RX.finditer(line):
             name = m.group(1)
-            # ⚠️⚠️ TWO SEPARATE `continue`s, NOT ONE NESTED INSIDE THE OTHER.
+            # TWO SEPARATE `continue`s, NOT ONE NESTED INSIDE THE OTHER.
             #
             # This was written as `if name in KEYWORDS or name in defined: if name == inside:
             # continue` — so a keyword only skipped when it ALSO happened to be the enclosing
             # function, and every other keyword fell through to the append. The filter was
             # present, looked reasonable, and did NOTHING.
             #
-            # ⚠️ Measured: `if` had 1,320 edges, `isset` 469, `foreach` 196, `function` 269 —
+            # Measured: `if` had 1,320 edges, `isset` 469, `foreach` 196, `function` 269 —
             # the four most "called" names in the codebase were PHP control structures, and
             # they would have outranked every real function in every graph query.
             #
-            # ⚠️ AND IT WAS FOUND BY LOOKING AT THE OUTPUT rather than the code: the graph
+            # AND IT WAS FOUND BY LOOKING AT THE OUTPUT rather than the code: the graph
             # resolved only 33% of its edges, and the top-called list is not something a
             # broken filter can hide.
             if name in KEYWORDS:
@@ -229,14 +229,14 @@ def extract(path: str, text: str) -> dict:
 # STORAGE
 # =============================================================================
 def _rows(cur) -> list[dict]:
-    """⚠️ WORKS WHETHER OR NOT row_factory IS SET, which matters because this connection is
+    """WORKS WHETHER OR NOT row_factory IS SET, which matters because this connection is
     shared with the document store and that one does not set it."""
     cols = [c[0] for c in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 class CodeGraph:
-    """⚠️ STORED IN THE SAME SQLITE FILE as the documents. A symbol is a property of a
+    """STORED IN THE SAME SQLITE FILE as the documents. A symbol is a property of a
     document, and splitting them across two stores means they can disagree about which files
     exist — which is the exact class of bug the vector manifest already had to be fixed for."""
 
@@ -269,7 +269,7 @@ class CodeGraph:
         return len(r["symbols"])
 
     def remove_path(self, path: str) -> None:
-        """⚠️ Called when a document is deleted or re-indexed. Leaving stale symbols behind
+        """Called when a document is deleted or re-indexed. Leaving stale symbols behind
         means the graph points at files that no longer contain those functions."""
         self.conn.execute("DELETE FROM symbols WHERE path=?", (path,))
         self.conn.execute("DELETE FROM edges WHERE src_path=?", (path,))
@@ -278,7 +278,7 @@ class CodeGraph:
         sym = self.conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
         edg = self.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
         files = self.conn.execute("SELECT COUNT(DISTINCT path) FROM symbols").fetchone()[0]
-        # ⚠️ EDGE RESOLUTION RATE IS THE HONEST QUALITY METRIC for a regex graph. A low number
+        # EDGE RESOLUTION RATE IS THE HONEST QUALITY METRIC for a regex graph. A low number
         # means the extractor is producing noise; a high one means the graph can actually be
         # traversed. Reported rather than assumed.
         res = self.conn.execute(
@@ -295,7 +295,7 @@ class CodeGraph:
             (name, limit)))
 
     def callers_of(self, name: str, limit: int = 40) -> list[dict]:
-        """⚠️ REVERSE EDGES — "what breaks if I change this". The question a graph answers and
+        """REVERSE EDGES — "what breaks if I change this". The question a graph answers and
         text search cannot: the callers of a function are almost never near it in the file."""
         return _rows(self.conn.execute("""
             SELECT e.src_path AS path, s.name AS caller, e.line,
@@ -312,7 +312,7 @@ class CodeGraph:
              ORDER BY e.line LIMIT ?""", (name, limit)))
 
     def search(self, query: str, hops: int = 1, limit: int = 25) -> dict:
-        """⚠️ THE ENTRY POINT, AND THE ORDER MATTERS.
+        """THE ENTRY POINT, AND THE ORDER MATTERS.
 
         A query is turned into candidate NAMES first — the identifiers the user typed — and
         only then does the graph expand. Seeding the graph with its own output would be
@@ -328,13 +328,13 @@ class CodeGraph:
             found = self.find(n)
             if not found:
                 continue
-            # ⚠️⚠️ A NAME DEFINED IN HUNDREDS OF FILES CARRIES NO INFORMATION.
+            # A NAME DEFINED IN HUNDREDS OF FILES CARRIES NO INFORMATION.
             #
             # Measured on this corpus: `__construct` is defined 707 times, `write` 107, `get` 62.
             # `callers_of("write")` would return hundreds of hits from unrelated files —
             # technically correct, completely useless, and it would bury the real answer.
             #
-            # ⚠️ THE GRAPH IS FOR DISTINCTIVE NAMES: `validate_token`, `ERR_CONN_4421`,
+            # THE GRAPH IS FOR DISTINCTIVE NAMES: `validate_token`, `ERR_CONN_4421`,
             # `Money::allocate`. It is the WRONG TOOL for `get`, and saying so is more useful
             # than returning 200 rows and letting the user conclude the graph is broken.
             distinct = self.conn.execute(
@@ -348,7 +348,7 @@ class CodeGraph:
                 if key not in seen:
                     seen.add(key)
                     hits.append({**f, "relation": "defines", "via": n})
-        # ⚠️ EXPANSION IS OPT-IN BY DEPTH, and depth 1 is the default because the interesting
+        # EXPANSION IS OPT-IN BY DEPTH, and depth 1 is the default because the interesting
         # answers are almost always one hop away. Deeper runs return large neighbourhoods that
         # are technically correct and useless to read.
         for n in names:

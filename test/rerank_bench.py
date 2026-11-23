@@ -10,7 +10,7 @@ it, search for those terms, and the document they came from is the relevant one.
 That makes the ground truth automatic and impossible to grade generously - the
 answer is defined by where the words came from, not by my judgement.
 
-    ./.venv/bin/python test/rerank_bench.py            # 40 queries
+    ./.venv/bin/python test/rerank_bench.py # 40 queries
     ./.venv/bin/python test/rerank_bench.py --n 100
 """
 
@@ -97,13 +97,13 @@ def main() -> int:
             break
 
     if skipped:
-        print(f"  skipped {skipped} sampled documents whose own terms did not retrieve them")
+        print(f" skipped {skipped} sampled documents whose own terms did not retrieve them")
 
     if not queries:
-        print("  no usable documents for a benchmark")
+        print(" no usable documents for a benchmark")
         return 1
 
-    print(f"  {len(queries)} queries, {args.top_n} candidates reranked, k={args.k}")
+    print(f" {len(queries)} queries, {args.top_n} candidates reranked, k={args.k}")
     print()
 
     reranker = Reranker()
@@ -136,33 +136,33 @@ def main() -> int:
         load_seconds = reranker.load_seconds
 
         if not scores or len(scores) != len(head):
-            after.append(ids)            # failed to score: keep the order
+            after.append(ids) # failed to score: keep the order
             continue
 
         order = sorted(range(len(head)), key=lambda j: -scores[j])
         after.append([head[j] for j in order] + ids[args.top_n:])
 
         if i % 10 == 0:
-            print(f"  … {i}/{len(queries)}", flush=True)
+            print(f" … {i}/{len(queries)}", flush=True)
 
     result = evaluate(before, after, relevant, k=args.k)
 
     print()
-    print(f"  model            : {reranker.model_name}")
-    print(f"  load (first use) : {load_seconds:.1f}s")
-    print(f"  retrieve total   : {t_retrieve:.1f}s  ({t_retrieve/len(queries)*1000:.0f} ms/query)")
-    print(f"  rerank total     : {t_rerank:.1f}s  ({t_rerank/len(queries)*1000:.0f} ms/query)")
+    print(f" model : {reranker.model_name}")
+    print(f" load (first use) : {load_seconds:.1f}s")
+    print(f" retrieve total : {t_retrieve:.1f}s ({t_retrieve/len(queries)*1000:.0f} ms/query)")
+    print(f" rerank total : {t_rerank:.1f}s ({t_rerank/len(queries)*1000:.0f} ms/query)")
     print()
-    print(f"  {'':>14}{'before':>10}{'after':>10}{'delta':>10}")
-    print(f"  {'MRR':>14}{result['mrr_before']:>10.4f}{result['mrr_after']:>10.4f}{result['d_mrr']:>+10.4f}")
-    print(f"  {'nDCG@'+str(args.k):>14}{result['ndcg_before']:>10.4f}{result['ndcg_after']:>10.4f}{result['d_ndcg']:>+10.4f}")
+    print(f" {'':>14}{'before':>10}{'after':>10}{'delta':>10}")
+    print(f" {'MRR':>14}{result['mrr_before']:>10.4f}{result['mrr_after']:>10.4f}{result['d_mrr']:>+10.4f}")
+    print(f" {'nDCG@'+str(args.k):>14}{result['ndcg_before']:>10.4f}{result['ndcg_after']:>10.4f}{result['d_ndcg']:>+10.4f}")
     print()
-    print(f"  verdict: {result['verdict']}")
+    print(f" verdict: {result['verdict']}")
 
     # The verdict is advisory and the exit code carries it, so this can gate a
     # release rather than printing a number nobody reads.
     if not result["ok"]:
-        print("  ⚠️  reranking is NOT justified on this corpus at these settings")
+        print(" reranking is NOT justified on this corpus at these settings")
         return 1
     return 0
 

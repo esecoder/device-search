@@ -2,28 +2,28 @@
  * test/setup.test.js — the setup modal, tested by DRIVING IT, not by reading it.
  *
  * ============================================================================
- * ⚠️⚠️ WHY THIS FILE EXISTS
+ * WHY THIS FILE EXISTS
  * ============================================================================
  * Three rounds of bugs in this one panel were missed by reading the source, and the
  * "verification" that replaced reading was worse: regex assertions over the file text that
  *
- *     - PASSED while two of three bugs were present, and
- *     - FAILED while the code was correct,
+ * - PASSED while two of three bugs were present, and
+ * - FAILED while the code was correct,
  *
  * in the same day. A regex over source text proves a string exists somewhere. It cannot
  * prove that clicking a button produces a row.
  *
- * ⚠️ SO EVERY TEST HERE ASSERTS ON THE RENDERED DOM AFTER AN ACTION. Never on the source,
+ * SO EVERY TEST HERE ASSERTS ON THE RENDERED DOM AFTER AN ACTION. Never on the source,
  * never on an internal variable. If the test passes and the feature is broken, the test is
  * wrong — and the way to notice is that the assertion names something a USER would see.
  *
  * ============================================================================
- * ⚠️ THE HARNESS, AND THE PART THAT IS EASY TO GET WRONG
+ * THE HARNESS, AND THE PART THAT IS EASY TO GET WRONG
  * ============================================================================
  * setup.js is not a module. It declares `const Setup = (...)()` at top level and reads
  * `api`, `invoke`, `setBanner` and `startPolling` from the global scope.
  *
- * ⚠️ A top-level `const` in eval does NOT become a property of the window — so loading it
+ * A top-level `const` in eval does NOT become a property of the window — so loading it
  * and then reading `window.Setup` returns undefined and every test fails for a reason that
  * has nothing to do with the code. The file is therefore evaluated with an explicit
  * `window.Setup = Setup;` appended.
@@ -47,15 +47,15 @@ const failures = [];
 function check(label, cond, detail) {
   if (cond) {
     passed++;
-    console.log(`  PASS  ${label}`);
+    console.log(` PASS ${label}`);
   } else {
     failed++;
     failures.push(label);
-    console.log(`  FAIL  ${label}${detail ? "\n          " + detail : ""}`);
+    console.log(` FAIL ${label}${detail ? "\n " + detail : ""}`);
   }
 }
 
-// ⚠️ EVERY WAIT IS A REAL TICK, NOT A GUESS. refresh() is async and render() happens in its
+// EVERY WAIT IS A REAL TICK, NOT A GUESS. refresh() is async and render() happens in its
 // continuation; asserting before it resolves tests the previous frame.
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -71,8 +71,8 @@ function makeEnv(opts = {}) {
   const dom = new JSDOM(HTML, { url: "http://localhost/", runScripts: "outside-only" });
   const { window } = dom;
 
-  const calls = [];          // every api() call, in order
-  const notes = [];          // setBanner / note output
+  const calls = []; // every api() call, in order
+  const notes = []; // setBanner / note output
 
   window.api = async (p, o = {}) => {
     calls.push({ path: p, method: o.method || "GET", body: o.body });
@@ -99,20 +99,20 @@ function makeEnv(opts = {}) {
   window.setBanner = (cls, msg) => notes.push({ cls, msg });
   window.startPolling = () => {};
   window.Polling = { start: () => {} };
-  // ⚠️ AI IS STUBBED because the panel now renders it as a step. The tests are about the
+  // AI IS STUBBED because the panel now renders it as a step. The tests are about the
   // folder step, and reaching into the model step would make them fail for reasons unrelated
   // to what they check.
   window.AI = { renderInto: () => {}, announce: () => {},
                 state: () => ({ configured: false, model: "" }), reload: () => {} };
 
-  // ⚠️ see the header: the explicit export is what makes this loadable at all
+  // see the header: the explicit export is what makes this loadable at all
   window.eval(SETUP_JS + "\n;window.Setup = Setup;");
 
   return { dom, window, doc: window.document, calls, notes,
            $: (id) => window.document.getElementById(id) };
 }
 
-// ⚠️ THE QUERY HELPERS READ THE RENDERED DOM. `rows` counts what the user can see, and it is
+// THE QUERY HELPERS READ THE RENDERED DOM. `rows` counts what the user can see, and it is
 // the number the original bug made wrong.
 const rows = (env) => [...env.doc.querySelectorAll("#setup .setup-row:not(.whole)")];
 const rowPaths = (env) => rows(env).map((r) => r.querySelector(".setup-path").textContent);
@@ -125,7 +125,7 @@ const overlayShown = (env) => env.$("setup-overlay").classList.contains("show");
 
 // ===========================================================================
 async function main() {
-  console.log("\n  setup modal — driving the real DOM\n");
+  console.log("\n setup modal — driving the real DOM\n");
 
   // ------------------------------------------------------------------ 1
   {
@@ -136,7 +136,7 @@ async function main() {
     check("existing folders are pre-ticked", boxes(env).every((b) => b.checked));
   }
 
-  // ------------------------------------------------------------------ 2  ⚠️ THE ORIGINAL BUG
+  // ------------------------------------------------------------------ 2 THE ORIGINAL BUG
   {
     const env = makeEnv();
     await env.window.Setup.open(); await tick();
@@ -144,9 +144,9 @@ async function main() {
     env.doc.querySelector("#setup .setup-add button.pick").click();
     await tick(); await tick();
     const after = rows(env).length;
-    check("⚠️ a PICKED folder appears as a row in the DOM",
+    check("a PICKED folder appears as a row in the DOM",
           after === before + 1, `rows ${before} -> ${after}`);
-    check("⚠️ and it is ticked",
+    check("and it is ticked",
           boxes(env).some((b) => b.checked) && rows(env).length === 3);
     check("the picked path is what the picker returned",
           rowPaths(env).some((p) => p.includes("/home/u/Projects")),
@@ -163,7 +163,7 @@ async function main() {
     check("a picked folder has a remove button", x.length === 1, `found ${x.length}`);
     const before = rows(env).length;
     x[0].click(); await tick();
-    check("⚠️ clicking it REMOVES the row", rows(env).length === before - 1,
+    check("clicking it REMOVES the row", rows(env).length === before - 1,
           `rows ${before} -> ${rows(env).length}`);
     check("suggested folders are NOT removable",
           !rows(env).some((r) => r.querySelector(".setup-x") &&
@@ -177,7 +177,7 @@ async function main() {
     const bs = boxes(env);
     bs.forEach((b) => { b.checked = false; b.dispatchEvent(new env.window.Event("change")); });
     await tick(); await tick();
-    check("⚠️ unticking everything DISABLES the Index button",
+    check("unticking everything DISABLES the Index button",
           goButton(env).disabled === true);
     const b0 = boxes(env)[0];
     b0.checked = true; b0.dispatchEvent(new env.window.Event("change"));
@@ -193,7 +193,7 @@ async function main() {
           /Selected/.test(env.$("setup").textContent),
           env.$("setup").textContent.slice(0, 120));
     const est = env.doc.querySelector("#setup .setup-est");
-    check("⚠️ and it names how many documents are indexed",
+    check("and it names how many documents are indexed",
           est && /5,570/.test(est.textContent), est ? est.textContent : "(no .setup-est)");
   }
 
@@ -204,19 +204,19 @@ async function main() {
     const wcb = env.doc.querySelector("#setup .setup-row.whole input");
     wcb.checked = true; wcb.dispatchEvent(new env.window.Event("change"));
     await tick(); await tick();
-    check("⚠️ entire-device WARNS that the folders are ignored",
+    check("entire-device WARNS that the folders are ignored",
           /ignored/i.test(msg(env)), `message was: "${msg(env)}"`);
     wcb.checked = false; wcb.dispatchEvent(new env.window.Event("change"));
     await tick(); await tick();
     check("and the warning clears when it is unticked", msg(env) === "");
   }
 
-  // ------------------------------------------------------------------ 7  ⚠️ THE HIDDEN-ERROR BUG
+  // ------------------------------------------------------------------ 7 THE HIDDEN-ERROR BUG
   {
     const env = makeEnv({ rootsFails: true });
     await env.window.Setup.open(); await tick();
-    check("⚠️ a failed /api/roots does NOT leave a blank panel", rows(env).length === 0);
-    check("⚠️ it SAYS what failed, in the panel",
+    check("a failed /api/roots does NOT leave a blank panel", rows(env).length === 0);
+    check("it SAYS what failed, in the panel",
           /Could not load/.test(msg(env)), `message was: "${msg(env)}"`);
     check("nothing was written to the (covered) banner",
           env.notes.length === 0, JSON.stringify(env.notes));
@@ -228,8 +228,8 @@ async function main() {
     await env.window.Setup.open(); await tick();
     goButton(env).click();
     await tick(); await tick(); await tick();
-    check("⚠️ a failed index KEEPS THE PANEL OPEN", overlayShown(env));
-    check("⚠️ and shows the reason in the panel",
+    check("a failed index KEEPS THE PANEL OPEN", overlayShown(env));
+    check("and shows the reason in the panel",
           /Could not start indexing/.test(msg(env)), `message was: "${msg(env)}"`);
   }
 
@@ -258,7 +258,7 @@ async function main() {
     goButton(env).click();
     await tick(); await tick(); await tick();
     const rc = env.calls.find((c) => c.path === "/api/roots" && c.method === "POST");
-    check("⚠️ entire-device sends mode:'everything'",
+    check("entire-device sends mode:'everything'",
           rc && rc.body.mode === "everything", JSON.stringify(rc && rc.body));
   }
 
@@ -271,7 +271,7 @@ async function main() {
     q.blur();
     env.window.Setup.close(); await tick();
     check("close() hides the overlay", !overlayShown(env));
-    check("⚠️ close() returns focus to the search box",
+    check("close() returns focus to the search box",
           env.doc.activeElement === q,
           `activeElement is ${env.doc.activeElement && env.doc.activeElement.id}`);
     check("isOpen() is false afterwards", env.window.Setup.isOpen() === false);
@@ -283,7 +283,7 @@ async function main() {
     await env.window.Setup.open(); await tick();
     env.doc.querySelector("#setup .setup-add button.pick").click();
     await tick(); await tick();
-    check("⚠️ a picker failure is REPORTED, not silent",
+    check("a picker failure is REPORTED, not silent",
           /picker could not open/i.test(msg(env)), `message was: "${msg(env)}"`);
     const inp = env.doc.querySelector("#setup .setup-add input");
     check("and the text-path fallback becomes visible",
@@ -298,21 +298,21 @@ async function main() {
     inp.value = "/home/u/Typed";
     inp.dispatchEvent(new env.window.KeyboardEvent("keydown", { key: "Enter" }));
     await tick(); await tick();
-    check("⚠️ a TYPED path becomes a row too",
+    check("a TYPED path becomes a row too",
           rowPaths(env).some((p) => p.includes("/home/u/Typed")),
           rowPaths(env).join(" | "));
   }
 
   // ---------------------------------------------------------------------------
-  console.log(`\n  ${passed} passed, ${failed} failed`);
+  console.log(`\n ${passed} passed, ${failed} failed`);
   if (failed) {
-    console.log("\n  failures:");
-    failures.forEach((f) => console.log(`    - ${f}`));
+    console.log("\n failures:");
+    failures.forEach((f) => console.log(` - ${f}`));
   }
   process.exit(failed ? 1 : 0);
 }
 
 main().catch((e) => {
-  console.error("\n  harness crashed:", e);
+  console.error("\n harness crashed:", e);
   process.exit(2);
 });

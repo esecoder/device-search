@@ -2,22 +2,22 @@
 """
 server.py — the local API the desktop UI talks to.
 
-===============================================================================
-⚠️ WHY A DAEMON AND NOT A SUBPROCESS PER QUERY
-===============================================================================
+
+WHY A DAEMON AND NOT A SUBPROCESS PER QUERY
+
 Measured on this machine:
 
-    python start + open the index   : 0.051s
-    embedding backend ready         : 0.338s
-    query encode, warm              : 0.064s
+    python start + open the index : 0.051s
+    embedding backend ready : 0.338s
+    query encode, warm : 0.064s
 
 A search box that spawns a process per keystroke pays ~0.4s EVERY TIME. A warm daemon pays it
 once. **0.064s feels instant; 0.4s feels broken** — and the same numbers decide why the model
 is loaded at startup rather than lazily on first query.
 
-===============================================================================
-⚠️⚠️ THE SECURITY PROBLEM NOBODY MENTIONS ABOUT LOCAL SERVERS
-===============================================================================
+
+THE SECURITY PROBLEM NOBODY MENTIONS ABOUT LOCAL SERVERS
+
 This endpoint returns THE CONTENTS OF THE USER'S FILES. Binding to 127.0.0.1 is NOT enough:
 
     * ANY process on the machine can reach a localhost port — including a random npm package
@@ -28,14 +28,14 @@ This endpoint returns THE CONTENTS OF THE USER'S FILES. Binding to 127.0.0.1 is 
 
 So three defences, and each one is load-bearing:
 
-    1. BIND 127.0.0.1 ONLY     — never 0.0.0.0. This is necessary and not sufficient.
-    2. A TOKEN, written 0600   — every request must carry it. A random web page cannot read
+    1. BIND 127.0.0.1 ONLY — never 0.0.0.0. This is necessary and not sufficient.
+    2. A TOKEN, written 0600 — every request must carry it. A random web page cannot read
                                  the token file, so it cannot use the API even if it can reach it.
-    3. HOST HEADER CHECK       — reject anything whose Host is not localhost/127.0.0.1. This is
+    3. HOST HEADER CHECK — reject anything whose Host is not localhost/127.0.0.1. This is
                                  what actually stops DNS rebinding, because the rebinding trick
                                  depends on sending the attacker's hostname.
 
-⚠️ AND THE TOKEN IS NOT IN THE URL. Query strings land in logs and shell history.
+AND THE TOKEN IS NOT IN THE URL. Query strings land in logs and shell history.
 """
 
 from __future__ import annotations
@@ -62,22 +62,22 @@ IDS_PATH = INDEX_DIR / "vectors.ids.npy"
 TOKEN_PATH = INDEX_DIR / "api.token"
 DEFAULT_PORT = 8734
 
-# ⚠️ AN ALLOWLIST, NOT A WILDCARD. These are the origins the webview can actually have:
-#   tauri://localhost       macOS and Linux, Tauri's custom scheme
-#   http://tauri.localhost  Windows
-#   http://127.0.0.1:<port> a browser pointed directly at the daemon, for debugging
-# ⚠️ A wildcard would let any web page the user visits read their indexed file contents.
-# ⚠️ THE POLICY NUMBERS, stated here so they are arguable rather than buried:
-#   300s  how often to LOOK for drift. Cheap — a manifest read and a COUNT(*) .
-#   900s  how often to ACT. A repair is minutes of CPU, so acting on every glance
-#         at the disk would keep a working machine permanently busy.
+# AN ALLOWLIST, NOT A WILDCARD. These are the origins the webview can actually have:
+# tauri://localhost macOS and Linux, Tauri's custom scheme
+# http://tauri.localhost Windows
+# http://127.0.0.1:<port> a browser pointed directly at the daemon, for debugging
+# A wildcard would let any web page the user visits read their indexed file contents.
+# THE POLICY NUMBERS, stated here so they are arguable rather than buried:
+# 300s how often to LOOK for drift. Cheap — a manifest read and a COUNT(*) .
+# 900s how often to ACT. A repair is minutes of CPU, so acting on every glance
+# at the disk would keep a working machine permanently busy.
 REPAIR_CHECK_EVERY = 300
-# ⚠️ HOW LONG AFTER STARTUP BEFORE THE FIRST LOOK. Long enough that the daemon has bound its
+# HOW LONG AFTER STARTUP BEFORE THE FIRST LOOK. Long enough that the daemon has bound its
 # port and can serve searches while the repair runs; short enough that a user opening a stale
 # app sees it start fixing itself rather than wonder whether it noticed.
 REPAIR_FIRST_CHECK = 20
 REPAIR_COOLDOWN = 900
-# ⚠️ HOW LONG TO WAIT BEFORE RETRYING A FAILED REPAIR. Separate from the success cooldown,
+# HOW LONG TO WAIT BEFORE RETRYING A FAILED REPAIR. Separate from the success cooldown,
 # because "it worked, do not do it again soon" and "it broke, try again shortly" are different
 # instructions and sharing one number means a one-off failure costs 15 minutes of staleness.
 REPAIR_FAIL_BACKOFF = 120
@@ -92,18 +92,18 @@ ALLOWED_ORIGINS = {
 # =============================================================================
 # THE ENGINE, LOADED ONCE
 # =============================================================================
-# ⚠️⚠️ WHERE AN API KEY LIVES, AND WHY IT IS NOT IN THE ENVIRONMENT.
+# WHERE AN API KEY LIVES, AND WHY IT IS NOT IN THE ENVIRONMENT.
 #
 # The CLI reads OPENAI_API_KEY from the shell, which is right for a terminal and impossible for
 # a bundled app: the Tauri shell spawns the daemon with no environment at all, so a key set in
 # a shell profile never reaches it. Measured before this existed: `--ask` worked from a
 # terminal and the app had no LLM path whatsoever.
 #
-# ⚠️ SO THE KEY IS A FILE, MODE 0600, IN THE INDEX DIRECTORY — the same place and the same
+# SO THE KEY IS A FILE, MODE 0600, IN THE INDEX DIRECTORY — the same place and the same
 # protection as api.token. 0600 is not decoration: it is the difference between a secret the
 # user owns and a secret every process running as any local user can read.
 #
-# ⚠️ AND THE API NEVER RETURNS IT. GET /api/llm reports whether a key is configured and its
+# AND THE API NEVER RETURNS IT. GET /api/llm reports whether a key is configured and its
 # last four characters. A settings endpoint that echoes a secret turns every browser devtools
 # session and every screenshot into a leak.
 LLM_PATH = INDEX_DIR / "llm.json"
@@ -115,7 +115,7 @@ def llm_settings() -> dict:
         if LLM_PATH.exists():
             import json as _json
             d = _json.loads(LLM_PATH.read_text(encoding="utf-8"))
-            # ⚠️ THE FILE WINS OVER THE ENVIRONMENT for the daemon, because this is the copy
+            # THE FILE WINS OVER THE ENVIRONMENT for the daemon, because this is the copy
             # the user set through the app. The CLI still prefers the environment, so a
             # developer running from a shell is not surprised by a stale saved key.
             return d if isinstance(d, dict) else {}
@@ -129,24 +129,24 @@ def save_llm_settings(d: dict) -> None:
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     tmp = LLM_PATH.with_suffix(".tmp")
     tmp.write_text(_json.dumps(d), encoding="utf-8")
-    # ⚠️ 0600 BEFORE THE RENAME, not after. Creating the file readable and tightening it
+    # 0600 BEFORE THE RENAME, not after. Creating the file readable and tightening it
     # afterwards leaves a window in which it is world-readable, and on a crash the window
     # never closes.
     os.chmod(tmp, 0o600)
     os.replace(tmp, LLM_PATH)
 
 
-# ⚠⚠️ PROVIDER PRESETS, BECAUSE ASKING FOR THREE FIELDS IS ASKING FOR TWO TOO MANY.
+# PROVIDER PRESETS, BECAUSE ASKING FOR THREE FIELDS IS ASKING FOR TWO TOO MANY.
 #
 # The first version of this screen wanted an API key, an endpoint AND a model name. That is a
 # form built by someone who already knows the answers: it asks a user to recall that DeepSeek's
 # endpoint is `api.deepseek.com` and that its model is called `deepseek-chat`, and to get both
 # right with no feedback until something fails.
 #
-# ⚠️ NOBODY KNOWS THAT, AND NOBODY SHOULD HAVE TO. Choosing which company you pay is one
+# NOBODY KNOWS THAT, AND NOBODY SHOULD HAVE TO. Choosing which company you pay is one
 # decision. Everything else is a lookup.
 #
-# ⚠️ `local` ENTRIES HAVE NO KEY AT ALL — that is the point of them. A local model is the
+# `local` ENTRIES HAVE NO KEY AT ALL — that is the point of them. A local model is the
 # option for someone who does not want their files leaving the machine, and a key field would
 # contradict the only reason to choose it.
 PROVIDERS = [
@@ -173,7 +173,7 @@ PROVIDERS = [
 
 
 def local_models(probe: str) -> list:
-    """⚠️ ASK THE LOCAL SERVER WHAT IS INSTALLED, RATHER THAN ASKING THE USER TO SPELL IT.
+    """ASK THE LOCAL SERVER WHAT IS INSTALLED, RATHER THAN ASKING THE USER TO SPELL IT.
 
     Someone running Ollama already has models — they downloaded them. Making them type the name
     from memory is asking them to repeat work they have already done, and to get it exactly
@@ -190,7 +190,7 @@ def local_models(probe: str) -> list:
                 d = json.load(r)
         except Exception:
             continue
-        # ⚠️ Ollama answers with {"models":[{"name":...}]}, LM Studio and the OpenAI shape use
+        # Ollama answers with {"models":[{"name":...}]}, LM Studio and the OpenAI shape use
         # {"data":[{"id":...}]}. Both are accepted because the difference is theirs, not ours.
         out = [m.get("name") for m in (d.get("models") or []) if m.get("name")]
         out += [m.get("id") for m in (d.get("data") or []) if m.get("id")]
@@ -200,13 +200,13 @@ def local_models(probe: str) -> list:
 
 
 def llm_probe(timeout: int = 25) -> dict:
-    """⚠⚠ A SAVED KEY IS NOT A WORKING KEY, AND THE UI CANNOT TELL THE DIFFERENCE.
+    """A SAVED KEY IS NOT A WORKING KEY, AND THE UI CANNOT TELL THE DIFFERENCE.
 
     Wrong key, wrong base URL, no credit, a model name that does not exist, and a network that
     blocks the endpoint all look identical from the settings form until the first real question
     fails — and then the failure is attributed to the app rather than to the key.
 
-    ⚠️ SO THIS MAKES ONE TINY REQUEST AND REPORTS WHAT CAME BACK. It asks for a single word,
+    SO THIS MAKES ONE TINY REQUEST AND REPORTS WHAT CAME BACK. It asks for a single word,
     which costs a fraction of a cent and proves three things at once: the key authenticates,
     the base URL resolves, and the model name is real.
     """
@@ -288,7 +288,7 @@ def estimate_folder(path: str, budget_s: float = 1.5) -> dict:
 def counts_by_ext(store) -> dict:
     """Files and bytes per extension.
 
-    ⚠️ THE FIRST VERSION TRIED TO DO THIS IN SQL AND WAS WRONG.
+    THE FIRST VERSION TRIED TO DO THIS IN SQL AND WAS WRONG.
 
         lower(substr(path, length(path) - length(replace(path,'.','')) + 1))
 
@@ -308,10 +308,10 @@ def counts_by_ext(store) -> dict:
             "WHERE COALESCE(is_dir,0)=0"):
         dot = path.rfind(".")
         slash = path.rfind("/")
-        if dot < 0 or dot < slash:      # no dot, or a dot inside a directory name
+        if dot < 0 or dot < slash: # no dot, or a dot inside a directory name
             continue
         ext = path[dot:].lower()
-        if len(ext) > 12:               # not an extension, part of a long filename
+        if len(ext) > 12: # not an extension, part of a long filename
             continue
         e = out.setdefault(ext, {"files": 0, "bytes": 0})
         e["files"] += 1
@@ -378,7 +378,7 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
             (prefix + "%",)):
         rest = path[len(prefix):]
         if "/" not in rest:
-            continue                        # a file directly in base, not a folder
+            continue # a file directly in base, not a folder
         child = rest.split("/", 1)[0]
         d = counts.setdefault(child, {"files": 0, "bytes": 0})
         d["files"] += 1
@@ -408,7 +408,7 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
 
 
 class Engine:
-    """⚠️ MODULE-LEVEL STATE IS THE POINT, NOT A SMELL. The whole reason this is a daemon is
+    """MODULE-LEVEL STATE IS THE POINT, NOT A SMELL. The whole reason this is a daemon is
     that loading the model is expensive; a per-request object would defeat it."""
 
     def __init__(self):
@@ -416,32 +416,32 @@ class Engine:
         self.semantic = None
         self.semantic_note = ""
         self._load_errors = []
-        # ⚠️ THE INDEX RUN STATE LIVES ON THE ENGINE, because that is the object the HTTP handler
+        # THE INDEX RUN STATE LIVES ON THE ENGINE, because that is the object the HTTP handler
         # can actually see. Putting it on the server and reading it from the engine was a real
         # AttributeError that only surfaced when the endpoint was called.
         self.last_index: dict = {}
         self.deep_index_state: dict = {}
         self.media_build_state: dict = {}
-        # ⚠️ AUTO-REPAIR, WITH A POLICY RATHER THAN A TRIGGER.
+        # AUTO-REPAIR, WITH A POLICY RATHER THAN A TRIGGER.
         #
         # The machinery to repair stale vectors has existed for several commits — plan_resume
         # finds the invalid shards, drop_shards removes them, the shards are resumable so only
         # those re-embed. What was missing was anything that DECIDED to run it.
         #
-        # ⚠️ AND A NAIVE TRIGGER WOULD BE WRONG. "Repair whenever anything drifted" sounds
+        # AND A NAIVE TRIGGER WOULD BE WRONG. "Repair whenever anything drifted" sounds
         # obviously right and is not: a browser writing cache, an editor writing swap files, any
         # log rotating — each changes a shard, and the index would re-embed CONTINUOUSLY and
         # never settle, competing with every query for CPU.
         #
         # So the trigger is a POLICY, and every clause is load-bearing:
-        #   1. never while another run is active   (two writers on one index)
-        #   2. never more often than the cooldown  (a repair is minutes of CPU)
-        #   3. only when something is actually stale
-        #   4. and it can be switched off entirely
+        # 1. never while another run is active (two writers on one index)
+        # 2. never more often than the cooldown (a repair is minutes of CPU)
+        # 3. only when something is actually stale
+        # 4. and it can be switched off entirely
         self.auto_repair = os.environ.get("DEVICE_SEARCH_AUTO_REPAIR", "1") != "0"
         self._last_repair = 0.0
         self._repair_note = "not needed yet"
-        # ⚠️ THE CHILD IS HELD SO ITS DEATH CAN BE SEEN. A repair that starts and dies silently
+        # THE CHILD IS HELD SO ITS DEATH CAN BE SEEN. A repair that starts and dies silently
         # is indistinguishable from one that is running: the banner says "indexing", the index
         # never changes, and the user waits for a job that no longer exists.
         self._repair_proc = None
@@ -464,7 +464,7 @@ class Engine:
             self._load_errors.append(self.semantic_note)
 
     def _llm_env(self) -> dict:
-        """⚠️ Export the stored key into the environment FOR THIS PROCESS ONLY.
+        """Export the stored key into the environment FOR THIS PROCESS ONLY.
 
         answer.py and agent.py read OPENAI_* from os.environ — a convention the CLI depends on.
         Rather than give them a second code path that only the daemon uses, the daemon loads
@@ -556,25 +556,25 @@ class Engine:
         if deep:
             trace["deep"] = {"relaxed_to": search_query if relaxed else query}
 
-        # ⚠⚠ THE ANSWER, AND IT IS BUILT HERE RATHER THAN IN agent.py ON PURPOSE.
+        # THE ANSWER, AND IT IS BUILT HERE RATHER THAN IN agent.py ON PURPOSE.
         #
         # agent.search() RETRIEVES. Turning a list into a sentence is a different operation with
         # a different failure mode — a sentence is believed, a list is checked — and folding
         # generation into retrieval would mean every caller got a model call whether it wanted
         # one or not.
         #
-        # ⚠️ AND IT IS BEST-EFFORT: a missing key, a failed request or an empty result set leaves
+        # AND IT IS BEST-EFFORT: a missing key, a failed request or an empty result set leaves
         # `answer` absent and the results untouched. Searching must never break because the
         # optional half is unavailable.
         answer = None
-        # ⚠⚠️ THE SERVER DECIDES WHETHER TO ANSWER, NOT THE USER.
+        # THE SERVER DECIDES WHETHER TO ANSWER, NOT THE USER.
         #
-        # The interface used to have an "answer" toggle the user had to find and turn on. ⚠️ That
+        # The interface used to have an "answer" toggle the user had to find and turn on. That
         # is work for something the app can tell from the query: "how does the autoloader work"
         # is a question, "RetryMiddleware" is not. Asking the user to classify their own input
         # before typing it is the opposite of doing the least work.
         #
-        # ⚠️ AND IT IS SAFE BECAUSE THE ANSWER IS NOT THE ONLY OUTPUT. The result list is
+        # AND IT IS SAFE BECAUSE THE ANSWER IS NOT THE ONLY OUTPUT. The result list is
         # returned either way, every claim carries a citation, and the answer renders above its
         # own evidence. A wrong answer is checkable in one glance.
         kind_now = trace.get("plan", {}).get("kind")
@@ -598,7 +598,7 @@ class Engine:
                     "dropped_over_quota": rep["dropped_over_quota"],
                 }
                 if rep["blocked"]:
-                    # ⚠️ THE INTERLOCK IS REPORTED, NOT SILENT. A user whose snippet was withheld
+                    # THE INTERLOCK IS REPORTED, NOT SILENT. A user whose snippet was withheld
                     # needs to know the answer is based on less than everything that matched.
                     trace["secret_blocked"] = rep
                 if srcs:
@@ -620,14 +620,14 @@ class Engine:
             except Exception as e:
                 trace["answer_error"] = f"{type(e).__name__}: {e}"
 
-        # ⚠⚠️ RE-RANKING, AND WHY IT IS A BUTTON RATHER THAN A STEP.
+        # RE-RANKING, AND WHY IT IS A BUTTON RATHER THAN A STEP.
         #
         # A cross-encoder reads (query, document) TOGETHER and orders far better than the
         # bi-encoder that found them — but it is one forward pass PER CANDIDATE, about eight per
-        # second on this CPU. ⚠️ Running it automatically would add five seconds to every
+        # second on this CPU. Running it automatically would add five seconds to every
         # keystroke, which turns a responsive search box into a broken one.
         #
-        # ⚠️ AND IT CANNOT ADD A RESULT. It reorders what retrieval found, so if the answer is
+        # AND IT CANNOT ADD A RESULT. It reorders what retrieval found, so if the answer is
         # not in the list, re-ranking does not find it — only moves the best of what is there to
         # the top. Reported, because a user who clicks it and sees the same files deserves to
         # know that was the expected outcome and not a failure.
@@ -686,14 +686,14 @@ class Engine:
             "rerank": rerank_report,
             "media": media,
             "answer": answer,
-            # ⚠⚠️ THE REASON IS RETURNED, NOT KEPT IN THE TRACE.
+            # THE REASON IS RETURNED, NOT KEPT IN THE TRACE.
             #
             # `answer` was forwarded and `answer_error` was not, so a failed generation came back
             # as `answer: null` with no explanation — which is indistinguishable from "the model
             # was never asked". The user sees a question produce no answer and has no way to find
             # out whether that is a missing key, a bad model name, or a network problem.
             "answer_error": trace.get("answer_error", ""),
-            # ⚠️ AN EMPTY FILTER RESULT IS AN ANSWER, AND IT HAS TO BE SAID OUT LOUD. Without this
+            # AN EMPTY FILTER RESULT IS AN ANSWER, AND IT HAS TO BE SAID OUT LOUD. Without this
             # the user sees an empty list and cannot tell it from "the search is broken".
             "meta": trace.get("meta", {}),
             # What the deep pass actually did. "Search deeper" has to be able to
@@ -711,7 +711,7 @@ class Engine:
                 "path": c.path.replace(home, "~", 1),
                 "full_path": c.path,
                 "line": c.line_no,
-                # ⚠️ `lexical` IS THE TWO-TIER FLAG AND THE UI MUST HONOUR IT. A semantic hit is
+                # `lexical` IS THE TWO-TIER FLAG AND THE UI MUST HONOUR IT. A semantic hit is
                 # not evidence the thing exists; the measured score distributions overlap so
                 # completely that no threshold separates them (a garbage query scored 0.649, a
                 # real one 0.632). The UI must not render the two lists identically.
@@ -723,9 +723,9 @@ class Engine:
         }
 
     def index_status(self) -> dict:
-        """⚠️ WHAT THE UI NEEDS TO SAY "indexing 6% — results are incomplete".
+        """WHAT THE UI NEEDS TO SAY "indexing 6% — results are incomplete".
 
-        ⚠️ THE UI CANNOT COMPUTE THIS ITSELF. Only the daemon knows which documents are in the
+        THE UI CANNOT COMPUTE THIS ITSELF. Only the daemon knows which documents are in the
         index, which are embedded, and whether the vectors still describe the documents. A
         frontend guessing at it would show a confident progress bar attached to nothing.
         """
@@ -733,37 +733,37 @@ class Engine:
         from .config import INDEX_DIR
         vs = VectorStore(INDEX_DIR, dim=384)
         doc_count = self.store.count()
-        # ⚠️ The same fingerprint the manifest stored, recomputed over the CURRENT index, so the
+        # The same fingerprint the manifest stored, recomputed over the CURRENT index, so the
         # comparison is like-for-like.
         row = self.store.conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
         ).fetchone()
-        # ⚠️⚠️ THE PER-SHARD CHECK DECIDES, NOT THE GLOBAL ONE.
+        # THE PER-SHARD CHECK DECIDES, NOT THE GLOBAL ONE.
         #
         # `check_stale` compares a GLOBAL fingerprint — document count, max id, sum of mtimes —
         # against what `finish()` stamped at the end of a run. `plan_resume` compares PER-SHARD
         # fingerprints: which documents each shard actually contains.
         #
-        # ⚠️ AND THEY CAN DISAGREE, WHICH IS WHAT MADE THIS SO CONFUSING. Measured right now:
+        # AND THEY CAN DISAGREE, WHICH IS WHAT MADE THIS SO CONFUSING. Measured right now:
         #
-        #     plan_resume()  -> 3 invalid shards, 750 documents to re-embed
-        #     check_stale()  -> stale: False, "vectors match the index"
+        # plan_resume() -> 3 invalid shards, 750 documents to re-embed
+        # check_stale() -> stale: False, "vectors match the index"
         #
         # Because `finish()` stamps the global fingerprint from the CURRENT store whether or not
         # the shards cover it. So a run that stopped part-way, or a document removed after the
         # shards were written, leaves the coarse check saying "fine" while 750 documents have
         # vectors that describe something else.
         #
-        # ⚠️ THE COARSE CHECK IS A SUMMARY AND IT WAS BEING TRUSTED AS THE ANSWER. The per-shard
+        # THE COARSE CHECK IS A SUMMARY AND IT WAS BEING TRUSTED AS THE ANSWER. The per-shard
         # one is the truth, because it is the one the repair actually acts on.
         stale = vs.check_stale(row[0], row[1], float(row[2] or 0))
         try:
-            # ⚠️ COLUMN INDICES MUST MATCH THE SELECT. This said r[3] for a 3-column query, so it
+            # COLUMN INDICES MUST MATCH THE SELECT. This said r[3] for a 3-column query, so it
             # raised IndexError on every call — and the handler below reported the result as
             # "not stale", which is the worst possible presentation of "the check did not run".
             cur = {r[0]: f"{r[1] or 0:.3f}:{r[2]}" for r in self.store.conn.execute(
                 "SELECT id, mtime, LENGTH(text) FROM documents")}
-            # ⚠️ THE POLICY MUST BE PASSED HERE, OR THE API CANNOT SEE A POLICY CHANGE AT ALL.
+            # THE POLICY MUST BE PASSED HERE, OR THE API CANNOT SEE A POLICY CHANGE AT ALL.
             # It reported "3 of 23 shards no longer match their documents" while the real answer
             # was "every shard was built by a policy we no longer use" — the two are different
             # facts and only the second explains why a trivial-looking drift needs 24 minutes.
@@ -794,14 +794,14 @@ class Engine:
                          "invalid_shards": len(plan["invalid_shards"]),
                          "documents": plan["will_reembed"], "reason": reason}
         except Exception as e:
-            # ⚠️⚠️ A CHECK THAT CANNOT RUN MUST NOT REPORT SUCCESS.
+            # A CHECK THAT CANNOT RUN MUST NOT REPORT SUCCESS.
             #
             # This previously did `stale.setdefault("note", ...)`, which left `stale: False` in
             # place. So an IndexError in the verification produced the SAME ANSWER as a healthy
             # index — **a check that fails silently is not a check**, and this one quietly
             # reported "vectors match the index" while 750 documents had wrong vectors.
             #
-            # ⚠️ UNKNOWN IS NOW ITS OWN ANSWER, and it is treated as stale because the cost of
+            # UNKNOWN IS NOW ITS OWN ANSWER, and it is treated as stale because the cost of
             # being wrong differs wildly: re-embedding a shard wastes CPU, while trusting wrong
             # vectors returns wrong results and says nothing.
             stale = {"stale": True, "severity": "unknown",
@@ -818,7 +818,7 @@ class Engine:
             emb["percent"] = round(emb["documents_embedded"] / emb["documents_total"] * 100, 1)
         else:
             emb["percent"] = 0.0
-        # ⚠️ THE TERMINAL RUN IS THE AUTHORITY WHEN THERE IS ONE. `ds index` in a shell and
+        # THE TERMINAL RUN IS THE AUTHORITY WHEN THERE IS ONE. `ds index` in a shell and
         # `POST /api/index` both write the same status file, so the UI reports either of them
         # identically — including the ETA, which the daemon could never compute on its own.
         from .vectors import read_status
@@ -826,18 +826,18 @@ class Engine:
         return {"indexing": bool(live.get("running")) or run.get("running", False),
                 "live": live, "run": run, "embedding": emb, "stale": stale,
                 "searchable_now": doc_count > 0,
-                # ⚠️ THE USER IS TOLD WHAT THE APP DOES ON ITS OWN. A background job that starts
+                # THE USER IS TOLD WHAT THE APP DOES ON ITS OWN. A background job that starts
                 # itself and is not surfaced is indistinguishable from a machine that got slow.
                 "auto_repair": {"enabled": self.auto_repair,
                                 "last": self._last_repair, "note": self._repair_note,
                                 "failures": self._repair_failures,
-                                # ⚠️ So the UI can say "the repair died" instead of showing a
+                                # So the UI can say "the repair died" instead of showing a
                                 # progress bar for a process that is gone.
                                 "child_alive": (self._repair_proc is not None
                                                 and self._repair_proc.poll() is None)}}
 
     def outdated_reason(self) -> str:
-        """⚠️ "" when the index is current, otherwise WHY it is not — in the user's words.
+        """"" when the index is current, otherwise WHY it is not — in the user's words.
 
         This is the answer to "would a user have to run a command". They should not: the daemon
         can tell that its own index is missing something, and the only thing it needs from the
@@ -851,9 +851,9 @@ class Engine:
             return ""
 
     def maybe_repair(self) -> dict:
-        """Spawn a repair run if the vectors have drifted. ⚠️ Called on a timer, never inline.
+        """Spawn a repair run if the vectors have drifted. Called on a timer, never inline.
 
-        ⚠️ IT SPAWNS A SEPARATE PROCESS, NOT A THREAD. Embedding is CPU-bound and would block or
+        IT SPAWNS A SEPARATE PROCESS, NOT A THREAD. Embedding is CPU-bound and would block or
         starve the request threads that serve searches. A subprocess can also be killed, resumed
         and observed — none of which is true of a thread inside the server.
         """
@@ -863,9 +863,9 @@ class Engine:
         live = read_status(INDEX_DIR)
         if live.get("running"):
             return {"started": False, "reason": "a run is already in progress"}
-        # ⚠️ FIRST: DID THE LAST REPAIR DIE? Checked BEFORE the cooldown, because a repair that
+        # FIRST: DID THE LAST REPAIR DIE? Checked BEFORE the cooldown, because a repair that
         # failed must not be locked out for 15 minutes by the same timer that paces successful
-        # ones. ⚠️ And the failure is surfaced rather than absorbed — the banner must not go on
+        # ones. And the failure is surfaced rather than absorbed — the banner must not go on
         # claiming progress for a process that exited.
         if self._repair_proc is not None:
             code = self._repair_proc.poll()
@@ -876,7 +876,7 @@ class Engine:
                 self._repair_failures += 1
                 self._repair_note = (f"the last repair exited with code {code} "
                                      f"({self._repair_failures} failure(s))")
-                # ⚠️ A SHORT BACKOFF AFTER FAILURE, not the full cooldown. Long enough not to
+                # A SHORT BACKOFF AFTER FAILURE, not the full cooldown. Long enough not to
                 # spin on a broken environment, short enough to recover from a one-off.
                 self._last_repair = time.time() - (REPAIR_COOLDOWN - REPAIR_FAIL_BACKOFF)
 
@@ -887,13 +887,13 @@ class Engine:
                               + (f" — last attempt: {self._repair_note}"
                                  if self._repair_failures else "")}
         st = self.index_status()
-        # ⚠⚠️ "NOT STALE" IS NOT THE SAME AS "UP TO DATE", AND CONFLATING THEM IS THE WHOLE BUG.
+        # "NOT STALE" IS NOT THE SAME AS "UP TO DATE", AND CONFLATING THEM IS THE WHOLE BUG.
         #
         # `stale` answers "have the files changed since the last index". It says nothing about
-        # whether the index CONTAINS EVERYTHING THIS VERSION KNOWS HOW TO EXTRACT. ⚠️ An index with
+        # whether the index CONTAINS EVERYTHING THIS VERSION KNOWS HOW TO EXTRACT. An index with
         # no directories in it is perfectly not-stale and still cannot find a single folder.
         #
-        # ⚠️ SO A FORMAT MISMATCH IS ALSO A REASON TO REBUILD, and the user is told why rather
+        # SO A FORMAT MISMATCH IS ALSO A REASON TO REBUILD, and the user is told why rather
         # than having their CPU spent silently. This is the answer to "would a user have to run a
         # command": no — the daemon notices on its own and rebuilds in the background while search
         # keeps working.
@@ -944,7 +944,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- security --------------------------------------------------------
     def _authorised(self) -> bool:
-        # ⚠️ HOST CHECK FIRST — this is the DNS-rebinding defence. A rebinding attack sends
+        # HOST CHECK FIRST — this is the DNS-rebinding defence. A rebinding attack sends
         # `Host: evil.example.com`, so rejecting non-localhost Host headers stops it before the
         # token is even considered.
         host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
@@ -958,11 +958,11 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def log_message(self, fmt, *args):        # ⚠️ quiet: a daemon logging every poll is noise
+    def log_message(self, fmt, *args): # quiet: a daemon logging every poll is noise
         pass
 
     def _read_body(self) -> str:
-        """⚠️ stdlib http.server does NOT read the body for you, and forgetting this makes every
+        """stdlib http.server does NOT read the body for you, and forgetting this makes every
         POST look like it arrived empty."""
         n = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(n).decode() if n else ""
@@ -972,19 +972,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        # ⚠️⚠️ CORS, AND THE COMMENT THAT WAS HERE FOR SEVERAL ROUNDS WAS WRONG.
+        # CORS, AND THE COMMENT THAT WAS HERE FOR SEVERAL ROUNDS WAS WRONG.
         #
         # It said: "The UI is served from this same origin, so it does not need CORS at all."
-        # ⚠️ THAT IS FALSE. The Tauri webview runs at `tauri://localhost` — a CUSTOM SCHEME,
+        # THAT IS FALSE. The Tauri webview runs at `tauri://localhost` — a CUSTOM SCHEME,
         # not http://127.0.0.1:8734. Different origin, so CORS applies, and omitting the headers
         # blocked the app's OWN interface while curl (which has no origin and no CORS) kept
         # working perfectly. That is why every terminal test I ran said the daemon was healthy.
         #
-        # ⚠️ AND `X-DS-Token` IS WHY IT FAILED OUTRIGHT RATHER THAN PARTIALLY. A custom header
+        # AND `X-DS-Token` IS WHY IT FAILED OUTRIGHT RATHER THAN PARTIALLY. A custom header
         # is not a "simple request", so the browser MUST send an OPTIONS preflight first. There
         # was no do_OPTIONS, so it got 501 and the real request was never sent.
         #
-        # ⚠️ THE ORIGIN IS AN ALLOWLIST, NOT `*`. `Access-Control-Allow-Origin: *` would let ANY
+        # THE ORIGIN IS AN ALLOWLIST, NOT `*`. `Access-Control-Allow-Origin: *` would let ANY
         # web page the user visits read their file contents — the exact threat the Host-header
         # check exists to stop, reopened through a different door.
         self._cors()
@@ -994,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routes ----------------------------------------------------------
     def _cors(self) -> None:
-        """⚠️ EMITTED FROM ONE PLACE, because the preflight and the real response MUST agree.
+        """EMITTED FROM ONE PLACE, because the preflight and the real response MUST agree.
 
         The first version of this fix set these headers inside `_send()` only, so `do_OPTIONS`
         returned a bare `204` with no `Access-Control-Allow-*` at all — and the browser rejects
@@ -1004,21 +1004,21 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin") or ""
         if origin in ALLOWED_ORIGINS:
             self.send_header("Access-Control-Allow-Origin", origin)
-            # ⚠️ Vary matters: without it a cache can serve one origin's response to another.
+            # Vary matters: without it a cache can serve one origin's response to another.
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Headers", "X-DS-Token, Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Max-Age", "600")
 
     def do_OPTIONS(self):
-        """⚠️⚠️ THE PREFLIGHT, AND ITS ABSENCE WAS THE ENTIRE BUG.
+        """THE PREFLIGHT, AND ITS ABSENCE WAS THE ENTIRE BUG.
 
         The webview sends `OPTIONS` before every request carrying `X-DS-Token`. Without this
         handler the stdlib answers **501 Unsupported method**, the browser refuses to send the
         real request, and `fetch` rejects with WebKit's unhelpful "Load failed" — which is what
         the UI displayed as "daemon unreachable (loading failed)".
 
-        ⚠️ It is answered WITHOUT a token check on purpose: a preflight carries no credentials
+        It is answered WITHOUT a token check on purpose: a preflight carries no credentials
         by design, and the real request is still authenticated immediately afterwards.
         """
         self.send_response(204)
@@ -1029,25 +1029,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/health":
-            # ⚠️ UNAUTHENTICATED ON PURPOSE: the UI polls this to know the daemon is up, and it
+            # UNAUTHENTICATED ON PURPOSE: the UI polls this to know the daemon is up, and it
             # reveals nothing about the user's files.
             st = ENGINE.index_status()
             self._send(200, {"ok": True, "version": "0.1",
                              "documents": ENGINE.store.count(),
                              "semantic": ENGINE.semantic_note,
-                             # ⚠️ THE WARNING TRAVELS ON THE CHEAP POLL. The UI polls health
+                             # THE WARNING TRAVELS ON THE CHEAP POLL. The UI polls health
                              # every few seconds; making it also fetch /api/index/status just to
                              # know whether to draw a banner would double the polling for one
                              # boolean.
                              "stale": st["stale"],
-                # ⚠️ THE INDEX IS OUT OF DATE FOR A REASON THE USER DID NOT CAUSE, and the app
-                # says so and fixes it. ⚠️ It is reported separately from `stale`, because
+                # THE INDEX IS OUT OF DATE FOR A REASON THE USER DID NOT CAUSE, and the app
+                # says so and fixes it. It is reported separately from `stale`, because
                 # "files changed since you last indexed" and "this index is missing a whole
                 # category of thing" call for different words.
                 "outdated_reason": ENGINE.outdated_reason(),
                              "embedding_percent": st["embedding"]["percent"],
                              "indexing": st["indexing"],
-                             # ⚠️ The ETA and rate come from the process DOING the work. The
+                             # The ETA and rate come from the process DOING the work. The
                              # daemon cannot derive them, so it must not invent them.
                              "live": {k: st["live"].get(k) for k in
                                       ("running", "percent", "rate", "eta_seconds", "stage",
@@ -1059,7 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(url.query)
         try:
             if url.path == "/api/llm":
-                # ⚠⚠ GET NEVER RETURNS THE KEY. It reports whether one is configured and its
+                # GET NEVER RETURNS THE KEY. It reports whether one is configured and its
                 # last four characters — enough for a user to recognise which key is saved, and
                 # not enough to use it. A settings endpoint that echoes a secret turns every
                 # devtools session and every screenshot into a leak.
@@ -1074,7 +1074,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if url.path == "/api/llm/providers":
-                # ⚠️ EACH LOCAL ENTRY IS PROBED LIVE, so the panel can show "found 3 models"
+                # EACH LOCAL ENTRY IS PROBED LIVE, so the panel can show "found 3 models"
                 # rather than offering a choice that will fail. A dropdown listing a server that
                 # is not running is a dropdown that produces an error message.
                 out = []
@@ -1092,7 +1092,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if url.path == "/api/llm/test":
-                # ⚠️ A TEST BUTTON, BECAUSE A SAVED KEY IS NOT A WORKING KEY. Wrong key, wrong
+                # A TEST BUTTON, BECAUSE A SAVED KEY IS NOT A WORKING KEY. Wrong key, wrong
                 # base URL, no credit and a network that blocks the endpoint all look identical
                 # from the UI until the first real question fails — and then the failure is
                 # attributed to the app.
@@ -1104,13 +1104,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not query.strip():
                     self._send(400, {"error": "empty query"})
                     return
-                # ⚠⚠️ NO CAP. This was the outermost truncation of the lot: even if every layer
-                # below had returned everything, nothing above 50 could reach the user. ⚠️ A
+                # NO CAP. This was the outermost truncation of the lot: even if every layer
+                # below had returned everything, nothing above 50 could reach the user. A
                 # server that decides how many results a person may see is the tool deciding it
                 # knows better than the question.
                 k = max(1, int((q.get("k") or ["50"])[0]))
                 llm = (q.get("llm") or ["0"])[0] == "1"
-                # ⚠️ `ask` TURNS A LIST INTO AN ANSWER. It costs an API call and uploads snippets
+                # `ask` TURNS A LIST INTO AN ANSWER. It costs an API call and uploads snippets
                 # (minus anything matching a secret pattern), so it is never the default — and it
                 # fails with a reason rather than an empty box when no key is configured.
                 ask = (q.get("ask") or ["0"])[0] == "1"
@@ -1197,7 +1197,7 @@ class Handler(BaseHTTPRequestHandler):
 
                 from .config import MODES
                 configured = ENGINE.store.get_meta("roots") or []
-                # ⚠️ SUGGESTED FOLDERS ARE CHECKED FOR EXISTENCE, so the UI never offers a
+                # SUGGESTED FOLDERS ARE CHECKED FOR EXISTENCE, so the UI never offers a
                 # folder the user does not have. An empty Downloads on a fresh machine is normal.
                 # With an estimate, because on a fresh install these are the only
                 # folders the setup screen can offer and "0 files" is not a choice
@@ -1216,14 +1216,14 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/index/status":
                 self._send(200, ENGINE.index_status())
             elif url.path == "/api/runtime":
-                # ⚠️ THE CHOOSER, SERVED. The UI cannot run pip itself and must not try — it
+                # THE CHOOSER, SERVED. The UI cannot run pip itself and must not try — it
                 # has no idea which interpreter is running the engine, and installing into the
                 # wrong one succeeds while changing nothing.
                 from .runtime import options, survey
                 est = 0
                 n = ENGINE.store.count()
                 if n:
-                    est = int(n * 34)          # measured mean chunks/doc
+                    est = int(n * 34) # measured mean chunks/doc
                 self._send(200, {"survey": survey(), "options": options(est),
                                  "estimated_chunks": est})
             elif url.path == "/api/install/status":
@@ -1232,7 +1232,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, {"error": "no such route"})
         except Exception as e:
-            # ⚠️ ERRORS ARE RETURNED, NOT SWALLOWED. A UI that shows an empty list when the
+            # ERRORS ARE RETURNED, NOT SWALLOWED. A UI that shows an empty list when the
             # backend threw is indistinguishable from "not found" — the exact failure this
             # project keeps recording.
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
@@ -1294,7 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                         write_status(INDEX_DIR, stage="images", finished=True,
                                      documents_total=total, documents_done=total,
                                      percent=100.0, elapsed_seconds=round(time.time() - t0))
-                        ENGINE._img_index = None      # force a reload on the next search
+                        ENGINE._img_index = None # force a reload on the next search
                     else:
                         import os
                         os.environ["TRANSCRIBE_MEDIA"] = "1"
@@ -1339,7 +1339,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"started": True})
             return
 
-        # ⚠⚠ SAVING THE MODEL SETTINGS BELONGS HERE, NOT IN do_GET.
+        # SAVING THE MODEL SETTINGS BELONGS HERE, NOT IN do_GET.
         #
         # The first version put the read and the write in the same `if url.path == "/api/llm"`
         # block, which lived inside do_GET. So GET worked and POST returned "no such route" —
@@ -1352,7 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             given = (body.get("api_key") or "").strip()
             cur = llm_settings()
-            # ⚠️ A LONE "-" MEANS REMOVE. An empty field means KEEP — a settings form that wipes a
+            # A LONE "-" MEANS REMOVE. An empty field means KEEP — a settings form that wipes a
             # secret whenever the user edits the model name is a form that loses secrets, and a
             # secret with no way out is one people regret saving.
             if given == "-":
@@ -1372,7 +1372,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path_q.path == "/api/roots":
-            # ⚠️ SET THE ROOTS, THEN INDEX — two calls, deliberately. Setting roots is instant and
+            # SET THE ROOTS, THEN INDEX — two calls, deliberately. Setting roots is instant and
             # reversible; indexing is minutes to hours. Fusing them would make a mis-typed path
             # start a long job that cannot be stopped without killing the app.
             try:
@@ -1382,14 +1382,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             roots = [str(r) for r in (body.get("roots") or [])]
             mode = body.get("mode") or "explicit"
-            # ⚠️⚠️ "EVERYTHING" IS A MODE, NOT A LIST OF PATHS, AND THE LIST MUST BE DERIVED.
+            # "EVERYTHING" IS A MODE, NOT A LIST OF PATHS, AND THE LIST MUST BE DERIVED.
             #
             # The setup screen sends `mode: "everything"` with an empty roots list, because the
             # user is not choosing folders — they are choosing to index all of them. If the mode
             # were stored without expanding it, `ds index` would read `roots: []` and crawl
             # NOTHING, and the app would report a successful index of zero files.
             #
-            # ⚠️ A mode that stores an empty root list is a silent no-op, which is the same
+            # A mode that stores an empty root list is a silent no-op, which is the same
             # failure shape as every other one in this project.
             if mode and mode != "explicit":
                 from .config import MODES
@@ -1401,7 +1401,7 @@ class Handler(BaseHTTPRequestHandler):
                 roots = [str(r) for r in m.roots]
             missing = [r for r in roots if not Path(r).expanduser().is_dir()]
             if missing:
-                # ⚠️ REJECTED, NOT SILENTLY SKIPPED. A typo'd path that is quietly ignored
+                # REJECTED, NOT SILENTLY SKIPPED. A typo'd path that is quietly ignored
                 # produces an empty index and a user who concludes the tool is broken.
                 self._send(400, {"error": "not a directory", "paths": missing})
                 return
@@ -1416,18 +1416,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": f"bad JSON: {e}"})
                 return
             targets = [str(r) for r in (body.get("roots") or [])]
-            # ⚠️ DRY RUN BY DEFAULT. This deletes rows, and the difference between "show me what
+            # DRY RUN BY DEFAULT. This deletes rows, and the difference between "show me what
             # this would remove" and "remove it" should be an explicit opt-in, not a default.
             result = ENGINE.store.remove_under_roots(targets, dry_run=bool(body.get("dry_run", True)))
             if not body.get("dry_run"):
-                # ⚠️ Dropping documents invalidates every shard that contained them, and the
+                # Dropping documents invalidates every shard that contained them, and the
                 # fingerprint check detects that on the next run — no special code path needed.
                 ENGINE.store.prune_missing()
                 result["note"] = "run an index to rebuild the vectors for the remaining documents"
             self._send(200, result)
         elif path_q.path == "/api/install":
-            # ⚠️ RETURNS 202 AND POLLS, because a pip install takes minutes and a blocked
-            # request would look like a hang. ⚠️ AND STARTING TWICE IS REFUSED, not queued —
+            # RETURNS 202 AND POLLS, because a pip install takes minutes and a blocked
+            # request would look like a hang. AND STARTING TWICE IS REFUSED, not queued —
             # two pips writing the same environment is a way to corrupt it, and a double-click
             # in a UI is all it takes.
             from .runtime import INSTALLER
@@ -1438,20 +1438,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(202, {"accepted": True, "note": "installing in the background",
                              "poll": "/api/install/status"})
         elif urlparse(self.path).path == "/api/index":
-            # ⚠️⚠️ THE BUTTON MUST DO WHAT THE COMMAND DOES, AND IT DID NOT.
+            # THE BUTTON MUST DO WHAT THE COMMAND DOES, AND IT DID NOT.
             #
             # This used to run its own inline crawl: walk the roots, store the text, prune.
             # Measured against what `ds index` does, it was MISSING:
-            #     - the code graph        (18,777 symbols, 58,475 edges)
-            #     - every vector          (semantic search simply did not exist)
-            #     - the embedding policy  (the 71% cost reduction)
+            # - the code graph (18,777 symbols, 58,475 edges)
+            # - every vector (semantic search simply did not exist)
+            # - the embedding policy (the 71% cost reduction)
             #
-            # ⚠️ So the setup screen produced a text-only index and the app looked like it had
+            # So the setup screen produced a text-only index and the app looked like it had
             # no semantic search — while the CLI produced a complete one. TWO INDEXING PATHS
             # THAT DISAGREE is the same class of bug as the two staleness checks that disagreed,
             # and the fix is the same: one implementation, called from both places.
             #
-            # ⚠️ IT SPAWNS THE CLI RATHER THAN REIMPLEMENTING IT. The daemon supervises; the
+            # IT SPAWNS THE CLI RATHER THAN REIMPLEMENTING IT. The daemon supervises; the
             # CLI does the work. Progress arrives through index.status.json, so the UI reports a
             # button-started run and a terminal run identically.
             from .vectors import read_status
@@ -1461,7 +1461,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             roots = ENGINE.store.get_meta("roots") or []
             if not roots:
-                # ⚠️ REFUSED WITH A REASON. Silently indexing nothing would produce an empty
+                # REFUSED WITH A REASON. Silently indexing nothing would produce an empty
                 # index and a user who concludes the app is broken.
                 self._send(400, {"error": "no folders are set",
                                  "next": "POST /api/roots first"})
@@ -1471,7 +1471,7 @@ class Handler(BaseHTTPRequestHandler):
                 out = open(log_path, "a")
             except OSError:
                 out = subprocess.DEVNULL
-            # ⚠️ `-u` so the log is written immediately rather than sitting in a buffer.
+            # `-u` so the log is written immediately rather than sitting in a buffer.
             cmd = index_command()
             try:
                 proc = subprocess.Popen(cmd, stdout=out, stderr=out,
@@ -1479,7 +1479,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, {"error": f"could not start indexing: {e}"})
                 return
-            # ⚠️ HANDED TO THE SAME SUPERVISION auto-repair uses, so a crash is noticed and
+            # HANDED TO THE SAME SUPERVISION auto-repair uses, so a crash is noticed and
             # retried instead of leaving the banner claiming progress forever.
             ENGINE._repair_proc = proc
             ENGINE.last_index = {"running": True, "started": time.time(), "pid": proc.pid}
@@ -1491,7 +1491,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _write_token() -> str:
-    """⚠️ 0600, AND REGENERATED PER START.
+    """0600, AND REGENERATED PER START.
 
     A token that persists across restarts is a token that ends up in a config file, a backup or
     a screenshot. Regenerating costs nothing — the UI is launched by the same daemon that wrote
@@ -1510,17 +1510,17 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
     ENGINE.warm()
     token = _write_token()
 
-    # ⚠️ THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
+    # THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
     # daemon is idle, and idle is exactly when a repair should happen.
     def _repair_loop():
-        # ⚠️⚠️ CHECK AT STARTUP, DO NOT SLEEP FIRST.
+        # CHECK AT STARTUP, DO NOT SLEEP FIRST.
         #
         # This loop used to sleep REPAIR_CHECK_EVERY (300s) before its first look. So a user
         # who opened the app with a stale or policy-outdated index saw the warning sit there
         # for five minutes before anything noticed — and on a first run after an upgrade,
         # "the app is aware and doing nothing" is indistinguishable from "the app is broken".
         #
-        # ⚠️ AND THE FIX FOR A SHIPPED APP IS NOT TO TELL THE USER TO RUN A TERMINAL COMMAND.
+        # AND THE FIX FOR A SHIPPED APP IS NOT TO TELL THE USER TO RUN A TERMINAL COMMAND.
         # The whole point of auto-repair is that the app repairs itself; making the first check
         # wait five minutes means the documentation has to say "or just wait", which is worse
         # than saying nothing.
@@ -1529,33 +1529,33 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
             try:
                 r = ENGINE.maybe_repair()
                 if r.get("started"):
-                    print(f"  auto-repair started at startup: {r.get('why')}")
+                    print(f" auto-repair started at startup: {r.get('why')}")
             except Exception as e:
-                print(f"  startup repair check failed: {type(e).__name__}: {e}")
+                print(f" startup repair check failed: {type(e).__name__}: {e}")
             break
         while True:
             time.sleep(REPAIR_CHECK_EVERY)
             try:
                 r = ENGINE.maybe_repair()
                 if r.get("started"):
-                    print(f"  auto-repair started: {r.get('why')}")
+                    print(f" auto-repair started: {r.get('why')}")
             except Exception as e:
-                # ⚠️ SWALLOWED ON PURPOSE: a failing repair must not kill the loop, or one bad
+                # SWALLOWED ON PURPOSE: a failing repair must not kill the loop, or one bad
                 # cycle would disable auto-repair for the rest of the session.
-                print(f"  auto-repair check failed: {type(e).__name__}: {e}")
+                print(f" auto-repair check failed: {type(e).__name__}: {e}")
     threading.Thread(target=_repair_loop, daemon=True).start()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.token = token
-    print(f"  device-search daemon")
-    print(f"    http://127.0.0.1:{port}")
-    print(f"    index  : {DB_PATH} ({ENGINE.store.count():,} documents)")
-    print(f"    token  : {TOKEN_PATH} (0600, regenerated each start)")
-    print(f"    semantic: {ENGINE.semantic_note or 'off'}")
+    print(f" device-search daemon")
+    print(f" http://127.0.0.1:{port}")
+    print(f" index : {DB_PATH} ({ENGINE.store.count():,} documents)")
+    print(f" token : {TOKEN_PATH} (0600, regenerated each start)")
+    print(f" semantic: {ENGINE.semantic_note or 'off'}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n  stopped")
+        print("\n stopped")
 
 
 def main() -> int:

@@ -2,34 +2,34 @@
  * ai.js — connecting a model, which is a DIFFERENT DECISION from what to index.
  *
  * ============================================================================
- * ⚠️⚠️ WHY THIS IS NOT IN THE "WHAT SHOULD BE SEARCHABLE?" PANEL
+ * WHY THIS IS NOT IN THE "WHAT SHOULD BE SEARCHABLE?" PANEL
  * ============================================================================
  * The first version put the API key, the endpoint and the model name inside the folder
  * chooser. Two reasons that was wrong, and the second is the serious one.
  *
- * ⚠️ 1. THEY ANSWER DIFFERENT QUESTIONS.
- *       "What should be searchable?" is about what is on the disk.
- *       "Which model?" is about what LEAVES the machine.
- *    Putting them on one screen teaches the user that connecting a model is part of setting
- *    up their folders — a step to click past on the way to something else.
+ * 1. THEY ANSWER DIFFERENT QUESTIONS.
+ * "What should be searchable?" is about what is on the disk.
+ * "Which model?" is about what LEAVES the machine.
+ * Putting them on one screen teaches the user that connecting a model is part of setting
+ * up their folders — a step to click past on the way to something else.
  *
- * ⚠️ 2. IT NORMALISES A PRIVACY DECISION BY HIDING IT IN A ROUTINE ONE.
- *    This tool's premise is that files stay on the machine. Uploading snippets to an API is
- *    the one thing that breaks that premise, and it was sitting in the middle of a list of
- *    folders, styled identically. **A decision that changes where your data goes should not
- *    look like a checkbox next to Documents.**
+ * 2. IT NORMALISES A PRIVACY DECISION BY HIDING IT IN A ROUTINE ONE.
+ * This tool's premise is that files stay on the machine. Uploading snippets to an API is
+ * the one thing that breaks that premise, and it was sitting in the middle of a list of
+ * folders, styled identically. **A decision that changes where your data goes should not
+ * look like a checkbox next to Documents.**
  *
  * ============================================================================
- * ⚠️⚠️ AND WHY IT ASKS FOR ONE THING INSTEAD OF THREE
+ * AND WHY IT ASKS FOR ONE THING INSTEAD OF THREE
  * ============================================================================
  * The old form wanted a key, an endpoint AND a model name. That is a form written by someone
  * who already knows the answers — it asks a person to recall that DeepSeek's endpoint is
  * `api.deepseek.com` and its model is `deepseek-chat`, with no feedback until something fails.
  *
- * ⚠️ NOBODY KNOWS THAT, AND NOBODY SHOULD HAVE TO. Choosing who you pay is one decision;
+ * NOBODY KNOWS THAT, AND NOBODY SHOULD HAVE TO. Choosing who you pay is one decision;
  * everything else is a lookup, and a lookup is the app's job.
  *
- * ⚠️ AND THE LOCAL PATH ASKS FOR NOTHING AT ALL. If Ollama is running, the panel finds the
+ * AND THE LOCAL PATH ASKS FOR NOTHING AT ALL. If Ollama is running, the panel finds the
  * models already installed and offers them by name. No key, no endpoint, no model string —
  * the minimum possible work is none.
  */
@@ -57,7 +57,7 @@ const AI = (() => {
     }
     providers = r.providers || [];
     saved = { base_url: r.base_url || "", model: r.model || "", configured: !!r.configured };
-    // ⚠️ PRE-SELECT WHATEVER IS ALREADY SAVED, matched by endpoint. Starting on "OpenAI" when
+    // PRE-SELECT WHATEVER IS ALREADY SAVED, matched by endpoint. Starting on "OpenAI" when
     // the user is connected to DeepSeek would make the panel look like it had forgotten them.
     let current = providers.find((p) => p.base_url && p.base_url === saved.base_url);
     if (!current) {
@@ -67,7 +67,7 @@ const AI = (() => {
     render(current ? current.id : "custom");
   }
 
-  // ⚠⚠ IT RENDERS INTO WHATEVER CONTAINER IT IS GIVEN, SO IT CAN BE A STEP.
+  // IT RENDERS INTO WHATEVER CONTAINER IT IS GIVEN, SO IT CAN BE A STEP.
   // It used to own an overlay and a footer link. The right way to merge it into Settings is not
   // to put its controls in the same list as the folders — that is what was wrong the first time
   // — but to make the model a STEP drawn into a container the panel controls.
@@ -109,7 +109,7 @@ const AI = (() => {
       name.textContent = p.label;
       const det = document.createElement("span");
       det.className = "setup-path";
-      // ⚠️ THE COUNT IS SHOWN, NOT JUST A TICK. "Found 3 models" is what makes picking the local
+      // THE COUNT IS SHOWN, NOT JUST A TICK. "Found 3 models" is what makes picking the local
       // option feel like it did something; a bare radio button leaves the user guessing whether
       // their server was seen at all.
       det.textContent = p.local
@@ -148,7 +148,7 @@ const AI = (() => {
       } else {
         const warn = document.createElement("div");
         warn.className = "setup-sub";
-        // ⚠️ A REASON AND A NEXT STEP. "Not running" alone leaves the user with a dead option
+        // A REASON AND A NEXT STEP. "Not running" alone leaves the user with a dead option
         // and no idea whether it is broken or simply switched off.
         warn.textContent = `Nothing is listening on ${cur.base_url}. Start the app that serves `
                          + `it \u2014 Ollama or LM Studio \u2014 and reopen this panel.`;
@@ -161,7 +161,7 @@ const AI = (() => {
       kt.textContent = "API key";
       const ki = document.createElement("input");
       ki.id = "ai-key";
-      // ⚠️ WRITE-ONLY. It shows the last four characters of whatever is saved and never the key
+      // WRITE-ONLY. It shows the last four characters of whatever is saved and never the key
       // itself — a settings screen that displays a secret turns every screenshot and every
       // devtools session into a leak.
       ki.type = "password";
@@ -171,7 +171,7 @@ const AI = (() => {
       form.appendChild(keyRow);
     }
 
-    // ⚠️ ENDPOINT AND MODEL APPEAR ONLY FOR "Something else". For a known provider they are a
+    // ENDPOINT AND MODEL APPEAR ONLY FOR "Something else". For a known provider they are a
     // lookup, and showing them anyway is how the first version asked for three fields to
     // accomplish one decision.
     if (cur.id === "custom") {
@@ -196,7 +196,7 @@ const AI = (() => {
     foot.className = "setup-foot";
     const go = document.createElement("button");
     go.className = "primary";
-    // ⚠️ ONE BUTTON THAT SAVES AND TESTS. The old panel had separate Save and Test buttons, and
+    // ONE BUTTON THAT SAVES AND TESTS. The old panel had separate Save and Test buttons, and
     // a Test that ran against an UNSAVED key — the most confusing possible outcome, because the
     // form looks correct and the test fails.
     go.textContent = busy ? "Checking\u2026" : (saved.configured ? "Update and test"
@@ -206,7 +206,7 @@ const AI = (() => {
     const off = document.createElement("button");
     off.textContent = "Turn off";
     off.style.display = saved.configured ? "" : "none";
-    // ⚠️ A WAY OUT. A secret with no way to remove it is one people regret saving.
+    // A WAY OUT. A secret with no way to remove it is one people regret saving.
     off.onclick = async () => {
       await api("/api/llm", { method: "POST",
                               body: { api_key: "-", base_url: "", model: "" } });
@@ -227,7 +227,7 @@ const AI = (() => {
       body.model = (el("ai-model-text") || {}).value || "";
     } else if (p.local) {
       body.model = (el("ai-model") || {}).value || p.model;
-      // ⚠️ A LOCAL SERVER NEEDS NO KEY, but the API refuses to save without one because a
+      // A LOCAL SERVER NEEDS NO KEY, but the API refuses to save without one because a
       // remote provider without a key is a configuration that cannot work. The sentinel says
       // "deliberately none" rather than the field being left ambiguous.
       body.api_key = "local";
@@ -248,18 +248,18 @@ const AI = (() => {
     if (test.ok) {
       saved = { base_url: body.base_url, model: body.model, configured: true };
       announce();
-      // ⚠️ STAYS ON SCREEN ON SUCCESS. It is a step inside Settings now, and closing it would
+      // STAYS ON SCREEN ON SUCCESS. It is a step inside Settings now, and closing it would
       // drop the user back into the app with no confirmation of what just happened.
       render(p.id);
       return;
     }
-    // ⚠️ THE FAILURE STAYS ON SCREEN WITH THE REASON. Closing the panel and writing the error
+    // THE FAILURE STAYS ON SCREEN WITH THE REASON. Closing the panel and writing the error
     // somewhere else is how a user ends up believing it worked.
     note(`Saved, but the connection failed: ${test.reason}`
          + (test.detail ? ` (${String(test.detail).slice(0, 90)})` : ""), "err");
     render(p.id);
   }
-    // ⚠️ A STEP, NOT A PANEL. No overlay, no shortcut, no footer link of its own — Settings
+    // A STEP, NOT A PANEL. No overlay, no shortcut, no footer link of its own — Settings
     // owns those, and this is one of its two steps. It renders into whatever container it is
     // given and reports what it found.
     function renderInto(host) {
@@ -267,13 +267,13 @@ const AI = (() => {
       return load();
     }
 
-    // ⚠️ AND IT ANNOUNCES CHANGES. The main screen shows an "AI enabled" state that has to
+    // AND IT ANNOUNCES CHANGES. The main screen shows an "AI enabled" state that has to
     // appear the moment a model is connected; waiting for a relaunch reads as a failure.
     function announce() {
       window.dispatchEvent(new CustomEvent("ds:model-changed"));
     }
 
-    // ⚠️ `configured` IS EXPOSED so the main screen can show its AI state without fetching
+    // `configured` IS EXPOSED so the main screen can show its AI state without fetching
     // the settings again. Two sources of truth for one fact is what broke the folder list.
     const state = () => ({ configured: saved.configured, model: saved.model });
 

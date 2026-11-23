@@ -3,22 +3,22 @@
 test_fts_fallback.py — the FTS5 fast path, and the fallback that must not be silent.
 
 WHY THIS FILE EXISTS
---------------------
+
 `store.py` has two keyword backends: FTS5 (fast, on-disk, trigger-maintained) and an
 in-process NumPy BM25 (slower, always works). FTS5 is most builds but not all, so the
 fallback is real and necessary.
 
-⚠️ THE BUG THIS PINS: the fallback USED TO SAY NOTHING. A silent fallback is
+THE BUG THIS PINS: the fallback USED TO SAY NOTHING. A silent fallback is
 indistinguishable from a fallback that is never needed, so the slow path could run forever
 with nothing reporting it — which is the same defect already found and fixed once in the
 trigram path. The trigram path had a warning; the FTS5 path did not.
 
-⚠️ AND "SLOWER" IS NOT A SMALL WORD. Measured at 859,569 documents the NumPy BM25 took
+AND "SLOWER" IS NOT A SMALL WORD. Measured at 859,569 documents the NumPy BM25 took
 **351 seconds** on its first call. It caches, so the second query was 0.06 s — and the
 first call happens on EVERY daemon restart, which is what the user experiences as the app
 being broken.
 
-⚠️ THIS TEST DOES NOT NEED A SQLITE BUILD WITHOUT FTS5. It wraps the connection in a proxy
+THIS TEST DOES NOT NEED A SQLITE BUILD WITHOUT FTS5. It wraps the connection in a proxy
 that refuses any `fts5` statement, which is exactly what such a build does. A test that
 requires an unusual environment is a test nobody runs.
 
@@ -39,13 +39,13 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from device_search.store import Store  # noqa: E402
+from device_search.store import Store # noqa: E402
 
 FAILED: list[str] = []
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
-    print(f"  {'PASS' if ok else 'FAIL'}  {name}{'  — ' + detail if detail else ''}")
+    print(f" {'PASS' if ok else 'FAIL'} {name}{' — ' + detail if detail else ''}")
     if not ok:
         FAILED.append(name)
 
@@ -86,7 +86,7 @@ def main() -> int:
     # ---- 2. the fallback engages AND warns ----------------------------------
     slow = Store(tmp / "slow.db")
     slow.conn = RefusesFTS5(slow.conn)
-    # ⚠️ __init__ already called _ensure_fts, so the result is CACHED. Clearing it is what
+    # __init__ already called _ensure_fts, so the result is CACHED. Clearing it is what
     # makes this a test of the fallback rather than a test of the cache — the first version
     # of this check passed for the wrong reason.
     slow._fts_ok = None
@@ -100,14 +100,14 @@ def main() -> int:
           "a silent fallback is indistinguishable from one that is never needed")
 
     # ---- 3. it warns ONCE, not on every query ------------------------------
-    # ⚠️ Per-query warnings would be their own defect: a warning on every search is noise the
+    # Per-query warnings would be their own defect: a warning on every search is noise the
     # user learns to ignore, which is how a real warning stops being read.
     slow._ensure_fts()
     slow._ensure_fts()
     check("the warning does not repeat", getattr(slow, "_fts_warned", False) is True)
 
     # ---- 4. search still WORKS on the fallback -----------------------------
-    # ⚠️ The point of a fallback is that search never fails because an optimisation is
+    # The point of a fallback is that search never fails because an optimisation is
     # missing. A fallback that raises is worse than no fallback.
     # `Doc` is duck-typed in add_many (it reads .path/.mtime/.size/.lang/.n_lines/.text and
     # getattr-defaults .method/.is_dir), so a namespace is a real document as far as it cares.
@@ -125,13 +125,13 @@ def main() -> int:
           f"{len(hits)} hit(s)")
 
     # ---- 5. identifiers with punctuation, on BOTH paths --------------------
-    # ⚠️ PINS A REAL HISTORICAL BUG. The FTS5 path once filtered query tokens with
+    # Pins A real historical bug. The FTS5 path once filtered query tokens with
     # `.isalnum()`, which is False for "_" and "." — so a raw MATCH for `unique_token_xyz`
-    # returned its row while the search returned ZERO. ⚠️ In a FILE search tool that removes
+    # returned its row while the search returned ZERO. In a FILE search tool that removes
     # exactly the tokens the product exists to find, and it did it silently, by returning an
     # empty result rather than an error.
     #
-    # ⚠️ AND THE SAME CLASS OF BUG IS WHY THE FALLBACK CHECK ABOVE MATTERS: an empty result is
+    # And the same class of bug is why the fallback check above matters: an empty result is
     # the one failure signal a user cannot distinguish from "that file does not exist".
     fast = Store(tmp / "ident.db")
     fast.add_many(docs)
@@ -145,9 +145,9 @@ def main() -> int:
 
     print()
     if FAILED:
-        print(f"  ❌ {len(FAILED)} check(s) failed: {', '.join(FAILED)}")
+        print(f" {len(FAILED)} check(s) failed: {', '.join(FAILED)}")
         return 1
-    print("  ✅ the fallback is visible, and the fast path is unaffected")
+    print(" the fallback is visible, and the fast path is unaffected")
     return 0
 
 

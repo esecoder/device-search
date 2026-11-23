@@ -99,7 +99,7 @@ work and the CLI says so.
 
 Put `ds` on your PATH, or call it directly:
 ```bash
-export PATH="$PWD/bin:$PATH"     # then: ds search "..."
+export PATH="$PWD/bin:$PATH" # then: ds search "..."
 # or
 ./bin/ds search "..."
 ```
@@ -107,20 +107,20 @@ export PATH="$PWD/bin:$PATH"     # then: ds search "..."
 ## Use
 
 ```bash
-ds setup --mode curated              # Documents, Desktop, Downloads, code folders
-ds setup --mode everything           #  ENTIRE home directory, NO exclusions — reads the warning
-ds setup --roots ~/work ~/notes      # exactly these folders
+ds setup --mode curated # Documents, Desktop, Downloads, code folders
+ds setup --mode everything # ENTIRE home directory, NO exclusions — reads the warning
+ds setup --roots ~/work ~/notes # exactly these folders
 
-ds index                             # crawl + build; safe to re-run (incremental)
-ds index --no-semantic               #  START HERE on a real corpus — see the timings below
+ds index # crawl + build; safe to re-run (incremental)
+ds index --no-semantic # START HERE on a real corpus — see the timings below
 ds search 'some exact string'
 ds search 'a question about a concept'
 ds search 'retrievers.py' -k 5 --json
-ds search 'something' --llm          # optional LLM rerank (see privacy below)
-ds stats                             # what is actually indexed
-  ds deep-index                        # OPTIONAL code-fragment index; shows its cost, asks first
-  ds forget ~/old-project              # remove a folder and reclaim its space
-ds secrets-report                    # recognised secrets in the index, redacted
+ds search 'something' --llm # optional LLM rerank (see privacy below)
+ds stats # what is actually indexed
+  ds deep-index # OPTIONAL code-fragment index; shows its cost, asks first
+  ds forget ~/old-project # remove a folder and reclaim its space
+ds secrets-report # recognised secrets in the index, redacted
 ```
 
 **Run `ds stats` before concluding a file does not exist.** A miss from a partial index and a
@@ -134,10 +134,10 @@ Installed dependencies and application data are **not** indexed. On a typical ma
 are the majority of every file on disk:
 
 ```
-.git/  node_modules/  .venv/  venv/  build/  dist/  target/  .next/  coverage/
-__pycache__/  .mypy_cache/  .pytest_cache/  .ruff_cache/  Pods/  vendor/
-.cargo/  .rustup/  .npm/  .bun/  .yarn/  .konan/  .gradle/  .m2/  .hermes/
-.nvm/  .pyenv/  .rbenv/  .sdkman/  .cache/  Library/
+.git/ node_modules/ .venv/ venv/ build/ dist/ target/ .next/ coverage/
+__pycache__/ .mypy_cache/ .pytest_cache/ .ruff_cache/ Pods/ vendor/
+.cargo/ .rustup/ .npm/ .bun/ .yarn/ .konan/ .gradle/ .m2/ .hermes/
+.nvm/ .pyenv/ .rbenv/ .sdkman/ .cache/ Library/
 ```
 
 Measured on one home folder, these held **755,412 of 859,569 indexed rows — 88%**. Excluding
@@ -167,9 +167,9 @@ milliseconds instead of scanning. It is **not built unless you ask for it**, and
 cost first:
 
 ```
-  Documents to index :      586,383
-  Disk it will use   :        11.4 GB   (free: 170.1 GB)
-  Time to build      :          10 minutes
+  Documents to index : 586,383
+  Disk it will use : 11.4 GB (free: 170.1 GB)
+  Time to build : 10 minutes
 
   Build it? This is the only step that uses this much space. [y/N]
 ```
@@ -182,8 +182,8 @@ a decision rather than a default.
 ### Removing a folder
 
 ```bash
-./bin/ds forget ~/old-project            # shows what it will remove, then asks
-./bin/ds forget ~/old-project --vacuum   # and shrinks the file afterwards
+./bin/ds forget ~/old-project # shows what it will remove, then asks
+./bin/ds forget ~/old-project --vacuum # and shrinks the file afterwards
 ```
 
 Removal frees the rows immediately. **The file only returns the space after a `VACUUM`**,
@@ -235,11 +235,11 @@ daemon itself, and cannot if there is no interpreter to launch.
 ```bash
 cd ~/WebstormProjects/device-search
 
-./bin/ds setup --roots ~/Documents ~/work   #  YOUR folders, not a test corpus
-./bin/ds index                              # build the index
+./bin/ds setup --roots ~/Documents ~/work # YOUR folders, not a test corpus
+./bin/ds index # build the index
 
 cd src-tauri
-cargo run                                   # first build compiles ~400 crates, then ~5s
+cargo run # first build compiles ~400 crates, then ~5s
 ```
 
 A **tray icon** appears. Press **`Cmd+Shift+Space`** (Windows/Linux: `Ctrl+Shift+Space`) to
@@ -265,7 +265,7 @@ Two processes:
 
 If a search says *"daemon unreachable"*, start it manually and read the error:
 ```bash
-./bin/ds                    # if this fails, the venv is the problem
+./bin/ds # if this fails, the venv is the problem
 ./.venv/bin/python -m device_search.server
 ```
 
@@ -290,27 +290,27 @@ Functional behaviour, measured on the `11-rag` track (13 documents, 399 vectors)
 
 | Test | Result |
 |---|---|
-| Exact code fragment `extract_calls(sources, syms)` | ✅ found, correct file **and line number** |
-| Filename `retrievers.py` | ✅ routed to path, ranked #1 |
-| Concept question (no shared keywords) | ✅ routed to semantic, correct file #1 |
-| **Control: a string not on disk** | ✅ **exit 1, "NO LEXICAL MATCH"** — no false confidence |
+| Exact code fragment `extract_calls(sources, syms)` | found, correct file **and line number** |
+| Filename `retrievers.py` | routed to path, ranked #1 |
+| Concept question (no shared keywords) | routed to semantic, correct file #1 |
+| **Control: a string not on disk** | **exit 1, "NO LEXICAL MATCH"** — no false confidence |
 
 Scale behaviour, measured separately on a **859,569-document corpus (6.9 GB)** — see
 [the index section](#the-index-what-fts5-gave-and-what-the-trigram-index-cost):
 
 | Test | Result |
 |---|---|
-| Keyword search, first call | ✅ **0.002s** (was **351.45s** on the in-process BM25) |
-| Index build | ✅ **90s, once ever** — it lives in the database, not rebuilt per restart |
-| Fragment search via trigram | ✅ **10.73s → 0.015s** — but see the recommendation to revert it |
+| Keyword search, first call | **0.002s** (was **351.45s** on the in-process BM25) |
+| Index build | **90s, once ever** — it lives in the database, not rebuilt per restart |
+| Fragment search via trigram | **10.73s → 0.015s** — but see the recommendation to revert it |
 | `path` after the trigram move | **1.77s**, still worse than the **0.73s** before any of this |
 
 **Test suites:**
 
 ```bash
-npm test                              # 32 assertions — the UI and setup paths
-python tests/test_fts_fallback.py     # 9 checks — the FTS5 fast path, its fallback, and
-                                      #   identifiers containing '_' and '.' on both
+npm test # 32 assertions — the UI and setup paths
+python tests/test_fts_fallback.py # 9 checks — the FTS5 fast path, its fallback, and
+                                      # identifiers containing '_' and '.' on both
 ```
 
 **The fallback test is not decoration.** The NumPy BM25 fallback turned out to be **dead code
@@ -363,10 +363,10 @@ At **859,569 documents (6.9 GB)**, the first keyword query took **five minutes f
 seconds**:
 
 ```
-                before      after
-exact            4.09s       (see below)
-path             0.79s       1.77s
-keyword        351.45s       0.002s     ← 'screenshot', 400 hits
+                before after
+exact 4.09s (see below)
+path 0.79s 1.77s
+keyword 351.45s 0.002s ← 'screenshot', 400 hits
 ```
 
 The Python BM25 *caches*, so the second query was 0.06 s — **but the first call happens on every
@@ -382,18 +382,18 @@ so the two agree rather than quietly disagreeing, and the Python version stays a
 the fallback and its warning).
 
 ```
-building the index   90s   ONCE, EVER — it lives in the database, not rebuilt per restart
-'screenshot'       0.002s   400 hits
-'merge conflict'   0.011s   400 hits
-'php'              0.004s   400 hits
+building the index 90s ONCE, EVER — it lives in the database, not rebuilt per restart
+'screenshot' 0.002s 400 hits
+'merge conflict' 0.011s 400 hits
+'php' 0.004s 400 hits
 ```
 
 ### The first attempt was fast and wrong, and that is the part worth keeping
 
 ```
-count(docs_fts)   859,569
-count(documents)  859,569
-raw MATCH             0
+count(docs_fts) 859,569
+count(documents) 859,569
+raw MATCH 0
 ```
 
 With `content='documents'` the FTS table is external-content, so `SELECT count(*) FROM docs_fts`
@@ -433,8 +433,8 @@ hit its own guard, and returned `[]` for every query, forever.
 
 ```
 two documents indexed:
-  FTS5 path     : keyword_search("quick") -> 1 hit
-  fallback path : keyword_search("quick") -> 0 hits   ← silently nothing
+  FTS5 path : keyword_search("quick") -> 1 hit
+  fallback path : keyword_search("quick") -> 0 hits ← silently nothing
 ```
 
 **An empty result is the worst possible failure signal for this tool**, because a file search
@@ -452,19 +452,19 @@ that exist or do not — and a word tokenizer cannot help, because `(784,)` is n
 substring of length ≥ 3 becomes a token lookup instead of a scan of 6 GB.
 
 ```
-InputLayer           10.73s -> 0.015s
-shape=(784                   -> 0.004s
-db_acl.php                   -> 0.002s
+InputLayer 10.73s -> 0.015s
+shape=(784 -> 0.004s
+db_acl.php -> 0.002s
 ```
 
 **But adding an index is not local, and the honest measured result is not a clean win:**
 
 ```
-                          before      after
-exact (fragment)          10.70s      0.015s     the thing it was built for   ✅
-path                       0.73s      9.16s      12x SLOWER, never mentioned
-index.db                    8.6GB     19.4GB     11GB of trigram data
-live search                  ~2s        ~13s     NET WORSE
+                          before after
+exact (fragment) 10.70s 0.015s the thing it was built for
+path 0.73s 9.16s 12x SLOWER, never mentioned
+index.db 8.6GB 19.4GB 11GB of trigram data
+live search ~2s ~13s NET WORSE
 ```
 
 A trigram index is roughly **twice the size of the text it indexes**, and inside the same file
@@ -473,9 +473,9 @@ it interleaves with `documents`, so `path_search`'s `LIKE` scan reads scattered 
 from another database and `exact_search` only ever asks for rowids):
 
 ```
-index.db          19.4GB -> 8.2GB
-index.db.tri               8.3GB      its own file
-path_search        9.16s -> 1.77s
+index.db 19.4GB -> 8.2GB
+index.db.tri 8.3GB its own file
+path_search 9.16s -> 1.77s
 ```
 
 **The cost, paid knowingly:** triggers cannot cross database files, so this index has to be
@@ -488,9 +488,9 @@ table is rejected outright (`cannot DELETE from contentless fts5 table`).
 **AND THE HONEST RECOMMENDATION IS TO REVERT IT.**
 
 ```
-size       8.3GB   for an 8.2GB corpus    — it nearly doubles the disk
-build      >12min  for 859,569 documents  — on a machine the user is using
-benefit    10.7s → 0.015s on FRAGMENT queries, which are the minority of searches
+size 8.3GB for an 8.2GB corpus — it nearly doubles the disk
+build >12min for 859,569 documents — on a machine the user is using
+benefit 10.7s → 0.015s on FRAGMENT queries, which are the minority of searches
 ```
 
 Eight gigabytes and twelve minutes to speed up a query type most searches are not is a bad
@@ -500,9 +500,9 @@ query of ordinary words is already answered by `keyword` in milliseconds — is 
 it cost nothing:
 
 ```
-screenshot      4.88s -> 1.25s
-merge conflict  7.19s -> 0.93s
-db_acl.php      7.35s -> 0.81s
+screenshot 4.88s -> 1.25s
+merge conflict 7.19s -> 0.93s
+db_acl.php 7.35s -> 0.81s
 ```
 
 ---
@@ -532,7 +532,7 @@ Each release includes `SHA256SUMS-<version>.txt`:
 shasum -a 256 -c SHA256SUMS-0.1.0.txt
 ```
 
-⚠️ **This is an unsigned build.** The checksum proves the file arrived intact; it
+**This is an unsigned build.** The checksum proves the file arrived intact; it
 does not prove who made it. Signing needs an Apple Developer account, and the
 commands are further down this file.
 
@@ -551,16 +551,16 @@ commands are further down this file.
 Three steps, and the third is the only one that needs an account you may not have.
 
 ```bash
-./bin/build-sidecar.sh   # freezes the daemon: Python, packages and code in one binary
-./bin/make-app.sh        # assembles the .app, refusing a stale daemon
-./bin/make-dmg.sh        # produces dist/device-search-<version>-macos-arm64.dmg
+./bin/build-sidecar.sh # freezes the daemon: Python, packages and code in one binary
+./bin/make-app.sh # assembles the .app, refusing a stale daemon
+./bin/make-dmg.sh # produces dist/device-search-<version>-macos-arm64.dmg
 ```
 
 The result is a **85 MB disk image** that runs on a machine with no Python, no
 repository, and no environment variables. Verified by copying it to `/tmp` and
 launching it there.
 
-### ⚠️ It is unsigned, and that has consequences
+### It is unsigned, and that has consequences
 
 macOS will refuse to open it by default, with a message that does not explain
 what happened. The user has to **right-click → Open → Open** once. The image
@@ -599,6 +599,6 @@ There is no cross-compilation here. Each platform builds on its own machine:
 | **Windows** | PyInstaller produces `.exe`; Tauri produces `.msi` via `cargo tauri build` |
 | **Linux** | PyInstaller + Tauri `.deb`/`.AppImage` |
 
-⚠️ **`onnxruntime==1.19.2` must be pinned in every bundle.** Version 1.23.2 fails
+**`onnxruntime==1.19.2` must be pinned in every bundle.** Version 1.23.2 fails
 to load on macOS 13 with `Symbol not found: __ZNSt3__18to_charsEPcS0_d`, and it
 fails at import — so the app starts and dies, rather than refusing to install.

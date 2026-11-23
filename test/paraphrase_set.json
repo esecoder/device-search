@@ -177,7 +177,7 @@
  {
   "doc_id": 1941,
   "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/google/crc32/src/CRCTrait.php",
-  "phrase": "* @param  boolean  $raw_output  When set to TRUE, outputs raw binary data.",
+  "phrase": "* @param boolean $raw_output When set to TRUE, outputs raw binary data.",
   "query": "Where can I find code generating cryptographic digests from strings?",
   "overlap": 0.0
  },
@@ -289,7 +289,7 @@
  {
   "doc_id": 987,
   "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/webroot/Aws3/Aws/S3/PostObject.php",
-  "phrase": "* @param string|array      $jsonPolicy JSON encoded POST policy document.",
+  "phrase": "* @param string|array $jsonPolicy JSON encoded POST policy document.",
   "query": "Where is the file that validates upload requests?",
   "overlap": 0.0
  },
@@ -758,7 +758,7 @@
  {
   "doc_id": 2530,
   "path": "/Users/eseudom/Documents/meplaylist-admin-again/app/Vendor/psr/simple-cache/src/CacheInterface.php",
-  "phrase": "* @param string $key     The unique key of this item in the cache.",
+  "phrase": "* @param string $key The unique key of this item in the cache.",
   "query": "Where is code that stores values temporarily by identifier?",
   "overlap": 0.2
  },

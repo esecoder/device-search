@@ -72,16 +72,16 @@ def _req(method: str, url: str, token: str, data: bytes | None = None,
 
 def main() -> int:
     if len(sys.argv) < 3:
-        print("  usage: publish_release.py VERSION FILE [FILE...]")
+        print(" usage: publish_release.py VERSION FILE [FILE...]")
         return 2
     version, files = sys.argv[1], [Path(f) for f in sys.argv[2:]]
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not token:
-        print("  no GITHUB_TOKEN in the environment")
+        print(" no GITHUB_TOKEN in the environment")
         return 1
     for f in files:
         if not f.exists():
-            print(f"  missing: {f}")
+            print(f" missing: {f}")
             return 1
 
     tag = f"v{version}"
@@ -98,13 +98,13 @@ def main() -> int:
             json.dumps({"tag_name": tag, "name": f"DeviceSearch {version}",
                         "body": notes, "draft": False, "prerelease": False}).encode())
         if status not in (200, 201):
-            print(f"  could not create the release: HTTP {status} {rel.get('message','')}")
+            print(f" could not create the release: HTTP {status} {rel.get('message','')}")
             return 1
-        print(f"  created release {tag}")
+        print(f" created release {tag}")
     elif status == 200:
-        print(f"  release {tag} already exists")
+        print(f" release {tag} already exists")
     else:
-        print(f"  could not look up the release: HTTP {status} {rel.get('message','')}")
+        print(f" could not look up the release: HTTP {status} {rel.get('message','')}")
         return 1
 
     upload_url = rel.get("upload_url", "").split("{")[0]
@@ -114,16 +114,16 @@ def main() -> int:
     for path in files:
         if path.name in existing:
             _req("DELETE", f"{API}/repos/{REPO}/releases/assets/{existing[path.name]}", token)
-            print(f"  replaced existing asset {path.name}")
+            print(f" replaced existing asset {path.name}")
         data = path.read_bytes()
         status, out = _req("POST", f"{upload_url}?name={path.name}", token,
                            data, content_type="application/octet-stream")
         if status not in (200, 201):
-            print(f"  upload of {path.name} failed: HTTP {status} {out.get('message','')}")
+            print(f" upload of {path.name} failed: HTTP {status} {out.get('message','')}")
             return 1
-        print(f"  uploaded {path.name} ({len(data)/1e6:.0f} MB)")
+        print(f" uploaded {path.name} ({len(data)/1e6:.0f} MB)")
 
-    print(f"  https://github.com/{REPO}/releases/tag/{tag}")
+    print(f" https://github.com/{REPO}/releases/tag/{tag}")
     return 0
 
 

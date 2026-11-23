@@ -1,7 +1,7 @@
 """
 config.py — setup modes, what gets indexed, and the secret patterns.
 
-⚠️ THE TWO MODES ARE THE WHOLE PRIVACY STORY, so they are defined in one place and printed
+THE TWO MODES ARE THE WHOLE PRIVACY STORY, so they are defined in one place and printed
 loudly at setup time. A search index is a COPY OF YOUR FILES in a second location. That is the
 point, and it is also the risk: anything you index is now readable by anything that can read
 the index.
@@ -16,28 +16,28 @@ from pathlib import Path
 
 HOME = Path.home()
 
-# ⚠️ THE INDEX LIVES OUTSIDE THE REPO. Two reasons, both load-bearing:
-#   1. SIZE — a home-directory index is hundreds of MB to a few GB. Never in git.
-#   2. PRIVACY — the index contains the TEXT of your files. If it lived in a repo you might
-#      commit it, and then it is published. `.gitignore` is a backstop, not the defence.
-# ⚠⚠️ THE INDEX FORMAT VERSION, AND THE ANSWER TO "WILL A USER HAVE TO RUN A COMMAND?"
+# THE INDEX LIVES OUTSIDE THE REPO. Two reasons, both load-bearing:
+# 1. SIZE — a home-directory index is hundreds of MB to a few GB. Never in git.
+# 2. PRIVACY — the index contains the TEXT of your files. If it lived in a repo you might
+# commit it, and then it is published. `.gitignore` is a backstop, not the defence.
+# THE INDEX FORMAT VERSION, AND THE ANSWER TO "WILL A USER HAVE TO RUN A COMMAND?"
 #
 # A change that adds something to the index — not to the code — cannot take effect until the
 # index is rebuilt. Directories are the first case: the code can look for folders all day, and
 # none exist in an index written before the crawler learned about them.
 #
-# ⚠️ ASKING THE USER TO RE-RUN A TERMINAL COMMAND IS NOT AN ANSWER. A person who installed an
+# ASKING THE USER TO RE-RUN A TERMINAL COMMAND IS NOT AN ANSWER. A person who installed an
 # app, clicked through setup and searched for a folder should never be told to open a terminal
 # to make their own files visible. **Nothing this app can do for itself should be homework for
 # the user.**
 #
-# ⚠️ SO THE INDEX RECORDS WHICH FORMAT BUILT IT, AND A MISMATCH IS A REASON TO REBUILD. The
+# SO THE INDEX RECORDS WHICH FORMAT BUILT IT, AND A MISMATCH IS A REASON TO REBUILD. The
 # daemon notices on its own, tells the interface why, and runs the rebuild in the background
 # while search keeps working — exactly as it already does for an interrupted index.
 #
 # BUMP THIS WHENEVER A CHANGE MEANS THE NEXT CRAWL PRODUCES A DIFFERENT INDEX.
-#   1  files only
-#   2  + directories, so a folder can be found by name
+# 1 files only
+# 2 + directories, so a folder can be found by name
 INDEX_FORMAT = 2
 
 INDEX_DIR = HOME / ".device-search"
@@ -78,12 +78,12 @@ MODES = {
         description="YOUR ENTIRE HOME DIRECTORY, NO EXCLUSIONS.",
         roots=[HOME],
         warns=[
-            "⚠️ THIS INCLUDES .ssh, .aws, .env FILES, BROWSER PROFILES AND KEYCHAINS.",
-            "⚠️ The index will contain the TEXT of those files in ~/.device-search.",
-            "⚠️ Anything that can read that folder can read your credentials.",
-            "⚠️ If you later enable --llm, matched content can be sent to an API.",
-            "   (A secret interlock blocks that for recognised key formats — see secrets.py,",
-            "    but do not rely on a regex to be complete.)",
+            "THIS INCLUDES .ssh, .aws, .env FILES, BROWSER PROFILES AND KEYCHAINS.",
+            "The index will contain the TEXT of those files in ~/.device-search.",
+            "Anything that can read that folder can read your credentials.",
+            "If you later enable --llm, matched content can be sent to an API.",
+            " (A secret interlock blocks that for recognised key formats — see secrets.py,",
+            " but do not rely on a regex to be complete.)",
         ],
     ),
 }
@@ -92,11 +92,11 @@ MODES = {
 # =============================================================================
 # TECHNICAL LIMITS, NOT PRIVACY EXCLUSIONS
 # =============================================================================
-# ⚠️ THE DIFFERENCE MATTERS AND THE USER ASKED FOR "NO EXCLUSIONS". These are not policy
+# THE DIFFERENCE MATTERS AND THE USER ASKED FOR "NO EXCLUSIONS". These are not policy
 # choices — they are the boundaries of what a text index can hold:
-#   - a 4 GB disk image has no text to index and would blow up the store
-#   - a binary file decoded as utf-8 produces megabytes of replacement characters
-#   - a symlink loop never terminates
+# - a 4 GB disk image has no text to index and would blow up the store
+# - a binary file decoded as utf-8 produces megabytes of replacement characters
+# - a symlink loop never terminates
 # So they are enforced in BOTH modes, and reported as "skipped: N", never silently.
 MAX_FILE_BYTES = 2 * 1024 * 1024
 
@@ -107,14 +107,14 @@ MAX_FILE_BYTES = 2 * 1024 * 1024
 # 1.5 MB and a real one is tens of megabytes. With the text limit applied, 79 media
 # files were skipped as too_large before the extractor ever saw them - the
 # transcription code was unreachable for exactly the files it exists for.
-MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024          # 2 MB of text per file is plenty for search
-MAX_LINE_BYTES = 4000                     # minified JS / single-line dumps
+MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024 # 2 MB of text per file is plenty for search
+MAX_LINE_BYTES = 4000 # minified JS / single-line dumps
 SKIP_DIR_NAMES = {
     # Version-control internals: thousands of compressed binary blobs, no searchable text.
     ".git", ".hg", ".svn",
     # Python bytecode caches: regenerated, binary, enormous count.
     "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    # ⚠️ These are dependency trees. They are TEXT and they are huge (often 100k+ files each).
+    # These are dependency trees. They are TEXT and they are huge (often 100k+ files each).
     # They are NOT excluded for privacy — they are excluded because they drown real results.
     # `--include-deps` turns them back on, because sometimes you DO want to search them.
     "node_modules", ".venv", "venv", "site-packages",
@@ -140,8 +140,8 @@ SKIP_DIR_NAMES = {
     ".gemini", ".cursor", ".codeium", ".continue", ".aider",
     ".anthropic", ".claude", ".codex", ".openai",
 }
-# ⚠️ MEDIA WE CAN EXTRACT TEXT FROM — moved OUT of SKIP_EXTS and into the index.
-# ⚠️ These were previously skipped as "binary", which was correct when the tool was text-only
+# MEDIA WE CAN EXTRACT TEXT FROM — moved OUT of SKIP_EXTS and into the index.
+# These were previously skipped as "binary", which was correct when the tool was text-only
 # and is now wrong: a PDF and a screenshot are exactly what people search for. The extension
 # list is deliberately the ones extract.py has a real extractor for.
 # Audio and video. Transcribed by Whisper, which is far slower than every other
@@ -164,7 +164,7 @@ MEDIA_EXTS = {
     ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif",
 }
 SKIP_EXTS = {
-    # ⚠️ Images we have no OCR path for, and everything genuinely without text.
+    # Images we have no OCR path for, and everything genuinely without text.
     ".ico", ".svgz", ".heic",
     # Audio and video are NOT here. They were, from before transcription existed,
     # and SKIP_EXTS is checked before AUDIO_EXTS - so `.mp4` returned binary_ext and
@@ -197,7 +197,7 @@ TEXT_EXTS = {
     ".csv": "csv", ".tsv": "tsv", ".tex": "latex", ".org": "org", ".adoc": "asciidoc",
     ".dockerfile": "docker", ".tf": "terraform", ".gradle": "gradle", ".cmake": "cmake",
 }
-# ⚠️ FILES WITH NO EXTENSION BUT ALWAYS TEXT. `Dockerfile`, `Makefile`, `.env`, `LICENSE` etc.
+# FILES WITH NO EXTENSION BUT ALWAYS TEXT. `Dockerfile`, `Makefile`, `.env`, `LICENSE` etc.
 # Missing these loses exactly the files people search for most.
 TEXT_NAMES = {
     "dockerfile", "makefile", "cmakelists.txt", "rakefile", "gemfile", "procfile",
@@ -211,12 +211,12 @@ TEXT_NAMES = {
 # =============================================================================
 # SECRET PATTERNS
 # =============================================================================
-# ⚠️⚠️ THIS IS AN INTERLOCK, NOT A GUARANTEE, AND THE DISTINCTION IS THE POINT.
+# THIS IS AN INTERLOCK, NOT A GUARANTEE, AND THE DISTINCTION IS THE POINT.
 # A regex cannot know that a random 40-character string in a notes file is a password. What it
 # CAN do is stop the obvious, catastrophic cases — an RSA private key, an AWS key, a `.env`
 # line — from being sent to a third-party API by an optional feature.
 #
-# ⚠️ Saying "it detects secrets" would be a lie. Saying "it blocks the recognised formats, and
+# Saying "it detects secrets" would be a lie. Saying "it blocks the recognised formats, and
 # treats everything it cannot recognise as your responsibility" is the truth, and it is written
 # here so nobody has to infer which one is meant.
 SECRET_PATTERNS = {
@@ -233,7 +233,7 @@ SECRET_PATTERNS = {
     "connection_string": re.compile(r"(?i)\b(?:postgres|mysql|mongodb|redis|amqp)://[^\s\"']+"),
 }
 
-# ⚠️ These are the files a secrets audit should always look at FIRST, regardless of content.
+# These are the files a secrets audit should always look at FIRST, regardless of content.
 SENSITIVE_PATH_HINTS = (
     ".ssh", ".aws", ".gnupg", "id_rsa", "id_ed25519", "credentials", ".netrc",
     ".env", "secrets", ".npmrc", ".pypirc", ".docker/config.json", "keychain",
@@ -242,7 +242,7 @@ SENSITIVE_PATH_HINTS = (
 
 
 def is_text_file(path: Path, size: int) -> tuple[bool, str]:
-    """Decide whether to index a file, and why not. ⚠️ Returns the REASON so stats can report it."""
+    """Decide whether to index a file, and why not. Returns the REASON so stats can report it."""
     # The media limit applies before the text one, because the extension decides
     # which ceiling is relevant and checking the text limit first rejects every
     # real video.
@@ -254,7 +254,7 @@ def is_text_file(path: Path, size: int) -> tuple[bool, str]:
     ext = path.suffix.lower()
     if ext in SKIP_EXTS:
         return False, "binary_ext"
-    # ⚠️ CHECKED BEFORE TEXT_EXTS, and it is NOT a text file — `extract.py` dispatches it to
+    # CHECKED BEFORE TEXT_EXTS, and it is NOT a text file — `extract.py` dispatches it to
     # OCR or pdftext. The reason string is distinct so the crawl stats separate "indexed as
     # text" from "indexed via OCR", which is what tells a user whether media is being covered.
     # Audio and video are "media" for routing purposes even though they are
@@ -271,7 +271,7 @@ def is_text_file(path: Path, size: int) -> tuple[bool, str]:
         return True, "ext"
     if name in TEXT_NAMES or name.startswith(".env"):
         return True, "known_name"
-    # ⚠️ NO EXTENSION AND NOT A KNOWN NAME: sniff the first bytes for NUL. A file with a null
+    # NO EXTENSION AND NOT A KNOWN NAME: sniff the first bytes for NUL. A file with a null
     # byte in its first 8 KB is not text, whatever it is called. This is how `Makefile` and
     # `README` get picked up without a list of every possible name.
     if ext == "":
@@ -303,7 +303,7 @@ def redact(text: str, keep: int = 4) -> str:
 
 
 def find_secrets(text: str, limit: int = 20) -> list[tuple[str, str]]:
-    """Return [(kind, redacted_sample)] — ⚠️ NEVER the full secret, so this is safe to print."""
+    """Return [(kind, redacted_sample)] — NEVER the full secret, so this is safe to print."""
     found: list[tuple[str, str]] = []
     for kind, rx in SECRET_PATTERNS.items():
         for m in rx.finditer(text):
@@ -315,4 +315,4 @@ def find_secrets(text: str, limit: int = 20) -> list[tuple[str, str]]:
 
 def ensure_index_dir() -> None:
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    os.chmod(INDEX_DIR, 0o700)   # ⚠️ owner-only. The index holds file contents.
+    os.chmod(INDEX_DIR, 0o700) # owner-only. The index holds file contents.

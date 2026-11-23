@@ -1,12 +1,12 @@
 """
 store.py — the index: a SQLite database holding extracted text plus the search backends.
 
-⚠️ WHY SQLITE AND NOT A VECTOR DATABASE. At device scale (10k-500k files) everything fits on
+WHY SQLITE AND NOT A VECTOR DATABASE. At device scale (10k-500k files) everything fits on
 one machine, one process and one file. A server-backed vector DB adds an install, a port and a
 failure mode, and buys nothing until you are past millions of chunks. The pragmatic choice is
 the right one here, and saying so is more useful than reaching for the fashionable tool.
 
-⚠️⚠️ FTS5 IS USED, AND THIS IS A CORRECTION OF AN EARLIER CLAIM IN THIS FILE.
+FTS5 IS USED, AND THIS IS A CORRECTION OF AN EARLIER CLAIM IN THIS FILE.
 
 This docstring used to say there was no FTS5 here, and give a good reason: FTS5 may be absent
 (`sqlite3` compiled without it is common on macOS system Python), and a search backend that is
@@ -19,7 +19,7 @@ the first keyword query took **351 seconds**; it is now **0.002s**. So FTS5 is t
 backend and the NumPy BM25 is the FALLBACK — the original worry is handled by checking at
 runtime and degrading, rather than by refusing to use the fast path at all.
 
-⚠️ THE GENERALISABLE LESSON, because it cost a lot to learn: "I could not verify this
+THE GENERALISABLE LESSON, because it cost a lot to learn: "I could not verify this
 dependency is present" is a reason to add a fallback, not a reason to avoid the dependency.
 Avoiding it hid a five-minute first-query cost behind a reassuring-sounding principle.
 """
@@ -49,27 +49,27 @@ import numpy as np
 
 
 # =============================================================================
-# ⚠️⚠️ THREAD SAFETY, AND WHY THE OBVIOUS FIX IS THE WRONG ONE
+# THREAD SAFETY, AND WHY THE OBVIOUS FIX IS THE WRONG ONE
 # =============================================================================
 # The daemon serves each request in its own thread (`ThreadingHTTPServer`), but a SQLite
 # connection is bound to the thread that created it. That produced:
 #
-#     sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that
-#     same thread.
+# sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that
+# same thread.
 #
-# ⚠️ THE FIX EVERYONE COPIES IS `check_same_thread=False`, AND IT IS THE DANGEROUS ONE.
+# THE FIX EVERYONE COPIES IS `check_same_thread=False`, AND IT IS THE DANGEROUS ONE.
 # That flag silences the error and lets several threads use ONE connection with no
 # synchronisation at all. It trades a loud crash for **silent corruption** — interleaved
 # statements, mismatched cursors, and a database that is wrong in ways nobody can reproduce.
 #
-# ⚠️ So the flag is used HERE ONLY WITH A LOCK AROUND EVERY METHOD. The flag makes the crash go
+# So the flag is used HERE ONLY WITH A LOCK AROUND EVERY METHOD. The flag makes the crash go
 # away; the lock is what makes it correct. **Either one alone is a bug.**
 #
-# ⚠️ A lock is acceptable because the work is tiny — a search is a few milliseconds of SQLite
+# A lock is acceptable because the work is tiny — a search is a few milliseconds of SQLite
 # and NumPy — and there is one user. The alternative that scales better is a connection per
 # thread, which is more code for a load this service will never see.
 def _serialised(fn):
-    """⚠️ Hold the store lock for the whole call. Applied to EVERY public method."""
+    """Hold the store lock for the whole call. Applied to EVERY public method."""
     @functools.wraps(fn)
     def wrapper(self, *a, **kw):
         with self._lock:
@@ -78,20 +78,20 @@ def _serialised(fn):
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
-    id       INTEGER PRIMARY KEY,
-    path     TEXT UNIQUE NOT NULL,
-    mtime    REAL,
-    size     INTEGER,
-    lang     TEXT,
-    n_lines  INTEGER,
-    text     TEXT NOT NULL,
-    method   TEXT DEFAULT 'utf8'    -- ⚠️ utf8 | pdftext | ocr. Shown in results.
+    id INTEGER PRIMARY KEY,
+    path TEXT UNIQUE NOT NULL,
+    mtime REAL,
+    size INTEGER,
+    lang TEXT,
+    n_lines INTEGER,
+    text TEXT NOT NULL,
+    method TEXT DEFAULT 'utf8' -- utf8 | pdftext | ocr. Shown in results.
 );
 CREATE INDEX IF NOT EXISTS idx_path ON documents(path);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
-# ⚠️ A TOKENIZER, NOT A LANGUAGE MODEL. `\w+` would keep `InputLayer` and `shape` but split
+# A TOKENIZER, NOT A LANGUAGE MODEL. `\w+` would keep `InputLayer` and `shape` but split
 # `InputLayer(shape=(784,))` into words, losing the very thing code search needs. Code
 # identifiers have `_`, `.`, `:` and `(` in them, so the pattern below preserves those runs.
 # This is the tokenizer equivalent of the "code needs its own chunking" argument in the manual.
@@ -106,82 +106,82 @@ def tokenize(text: str) -> list[str]:
 
 
 class Store:
-    """⚠️ ONE CONNECTION, ONE FILE, NO SERVER. See the module docstring."""
+    """ONE CONNECTION, ONE FILE, NO SERVER. See the module docstring."""
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # ⚠️ THE LOCK IS CREATED BEFORE THE CONNECTION, because the connection is the thing
+        # THE LOCK IS CREATED BEFORE THE CONNECTION, because the connection is the thing
         # that needs guarding and a half-constructed object must not be reachable.
         self._lock = threading.RLock()
-        # ⚠️ check_same_thread=False IS ONLY SAFE WITH THE LOCK ABOVE. See the module note.
-        # ⚠⚠️ WAL AND A LONG BUSY TIMEOUT, BECAUSE AN INDEX RUN HOLDS THE WRITE LOCK FOR MINUTES.
+        # check_same_thread=False IS ONLY SAFE WITH THE LOCK ABOVE. See the module note.
+        # WAL AND A LONG BUSY TIMEOUT, BECAUSE AN INDEX RUN HOLDS THE WRITE LOCK FOR MINUTES.
         #
-        # ⚠️ MEASURED: with the defaults — journal_mode=delete, busy timeout 5s — the DAEMON COULD
+        # MEASURED: with the defaults — journal_mode=delete, busy timeout 5s — the DAEMON COULD
         # NOT START while a crawl was running. `executescript(SCHEMA)` below needs an exclusive
         # lock, gave up after five seconds, raised `database is locked`, and the process exited.
         #
-        # ⚠️ AND IT FAILED SILENTLY FROM THE USER'S SIDE: no daemon means no search and no green AI
+        # AND IT FAILED SILENTLY FROM THE USER'S SIDE: no daemon means no search and no green AI
         # indicator, which is how this was reported — as the AI pill having disappeared. The pill
         # was fine. Nothing was answering.
         #
-        # ⚠️ WAL IS THE ACTUAL FIX, not just a bigger timeout: it lets a READER and a WRITER work
+        # WAL IS THE ACTUAL FIX, not just a bigger timeout: it lets a READER and a WRITER work
         # at the same time, so the daemon can serve searches while the indexer is writing. Without
         # it, no timeout is long enough — a home-directory crawl holds that lock for an hour.
         #
-        # ⚠️ AND A LONG TIMEOUT COVERS THE REMAINING CASE, where the schema script itself needs to
+        # AND A LONG TIMEOUT COVERS THE REMAINING CASE, where the schema script itself needs to
         # write while a crawl is mid-batch. Better to wait a few seconds than to refuse to start.
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30)
-        # ⚠️ None = not yet asked, True/False = the answer. A tri-state, because "have we tried"
+        # None = not yet asked, True/False = the answer. A tri-state, because "have we tried"
         # and "did it work" are different questions and conflating them re-attempts on every query.
         self._fts_ok = None
-        self._tri_conn = None      # ⚠️ the separate connection, lazily opened
+        self._tri_conn = None # the separate connection, lazily opened
         self._tri_ready = None
-        # ⚠⚠️ BUILT EAGERLY, NOT LAZILY, AND THE TRIGGERS ARE WHY.
+        # BUILT EAGERLY, NOT LAZILY, AND THE TRIGGERS ARE WHY.
         #
-        # ⚠️ _ensure_fts() was called from keyword_search, which is lazy — so on a fresh database
+        # _ensure_fts() was called from keyword_search, which is lazy — so on a fresh database
         # the table and its triggers did not exist yet when the first documents were inserted.
         # MEASURED: a fresh index where the very first insert was already invisible to keyword
         # search, because nothing was listening when it happened.
         #
-        # ⚠️ LAZY IS FINE FOR A CACHE AND WRONG FOR ANYTHING THAT MUST OBSERVE EVENTS. A trigger
+        # LAZY IS FINE FOR A CACHE AND WRONG FOR ANYTHING THAT MUST OBSERVE EVENTS. A trigger
         # only fires from the moment it exists, so setting one up at read time misses every write
         # that came before.
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
-            # ⚠️ AND A SHORT WAIT FOR THE WRITER rather than an instant failure, so a search during
+            # AND A SHORT WAIT FOR THE WRITER rather than an instant failure, so a search during
             # a batch blocks for a moment instead of erroring.
             self.conn.execute("PRAGMA busy_timeout=30000")
         except sqlite3.OperationalError:
-            # ⚠️ A DATABASE THAT CANNOT SWITCH TO WAL IS STILL USABLE. Refusing to start over a
+            # A DATABASE THAT CANNOT SWITCH TO WAL IS STILL USABLE. Refusing to start over a
             # performance setting would turn a slow search into no search.
             pass
         self.conn.executescript(SCHEMA)
-        # ⚠⚠️ EAGERLY, AND AFTER THE SCHEMA — THE ORDER IS THE WHOLE POINT.
+        # EAGERLY, AND AFTER THE SCHEMA — THE ORDER IS THE WHOLE POINT.
         #
-        # ⚠️ Two mistakes in a row, both silent:
-        #   1. called from keyword_search, which is lazy — so the triggers did not exist when the
-        #      first documents were inserted, and a fresh index had its own first files invisible
-        #   2. then called EAGERLY but BEFORE this line — so `content='documents'` referenced a table
-        #      that did not exist yet, the CREATE failed, _fts_ok stayed False, and keyword search
-        #      fell back to the Python BM25 forever without saying so
+        # Two mistakes in a row, both silent:
+        # 1. called from keyword_search, which is lazy — so the triggers did not exist when the
+        # first documents were inserted, and a fresh index had its own first files invisible
+        # 2. then called EAGERLY but BEFORE this line — so `content='documents'` referenced a table
+        # that did not exist yet, the CREATE failed, _fts_ok stayed False, and keyword search
+        # fell back to the Python BM25 forever without saying so
         #
-        # ⚠️ BOTH LOOKED LIKE SUCCESS. The first returned results, just not all of them; the
+        # BOTH LOOKED LIKE SUCCESS. The first returned results, just not all of them; the
         # second returned results, just slowly. Neither raised anything a caller would see.
         #
-        # ⚠️ THE RULE: A TRIGGER MUST EXIST BEFORE THE FIRST WRITE, AND A TABLE MUST EXIST BEFORE
+        # THE RULE: A TRIGGER MUST EXIST BEFORE THE FIRST WRITE, AND A TABLE MUST EXIST BEFORE
         # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
         # anything at runtime.
         self._drop_stale_trigram_triggers()
         self._ensure_fts()
-        # ⚠️ MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
+        # MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
         # column to a table that already exists, so an index built before `method` existed
         # would fail every query with "no such column". Silent upgrade breakage is the kind of
         # bug that only appears on other people's machines.
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(documents)")}
         if "method" not in cols:
             self.conn.execute("ALTER TABLE documents ADD COLUMN method TEXT DEFAULT 'utf8'")
-        # ⚠⚠️ A MIGRATION IS REQUIRED FOR A NEW COLUMN, AND THIS IS THE SAME TRAP AS `method`.
+        # A MIGRATION IS REQUIRED FOR A NEW COLUMN, AND THIS IS THE SAME TRAP AS `method`.
         # `CREATE TABLE IF NOT EXISTS` does NOT add a column to a table that already exists —
         # so a new column works perfectly on a fresh database and fails on every real one.
         try:
@@ -189,7 +189,7 @@ class Store:
         except sqlite3.OperationalError:
             pass
         self.conn.commit()
-        # ⚠️ Caches, invalidated on write. Rebuilding an inverted index is O(corpus) and would
+        # Caches, invalidated on write. Rebuilding an inverted index is O(corpus) and would
         # dominate every query if it were not cached.
         self._postings: dict[str, list[int]] | None = None
         self._doc_len: np.ndarray | None = None
@@ -201,7 +201,7 @@ class Store:
     def _tri_sync_all(self, ids=None) -> None:
         """Refresh the trigram index entries for `ids`, or rebuild if it is not populated.
 
-        ⚠️ Called after a prune, because a deleted file that still matches fragment search is the
+        Called after a prune, because a deleted file that still matches fragment search is the
         worst possible stale result: the user is shown a path that does not exist.
         """
         if not self.trigram_ready():
@@ -222,7 +222,7 @@ class Store:
 
     @_serialised
     def add_many(self, docs) -> int:
-        """Bulk insert. ⚠️ `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
+        """Bulk insert. `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
         a file that has not changed is simply overwritten with identical content."""
         rows = [(d.path, d.mtime, d.size, d.lang, d.n_lines, d.text,
                  getattr(d, "method", "utf8"), 1 if getattr(d, "is_dir", False) else 0)
@@ -236,26 +236,26 @@ class Store:
             rows)
         self.conn.commit()
 
-        # ⚠⚠️ AND THE SECOND DATABASE HAS TO BE TOLD, BECAUSE TRIGGERS CANNOT CROSS FILES.
+        # AND THE SECOND DATABASE HAS TO BE TOLD, BECAUSE TRIGGERS CANNOT CROSS FILES.
         #
-        # ⚠️ The word index is kept in step by triggers ON `documents`. The trigram index lives in
+        # The word index is kept in step by triggers ON `documents`. The trigram index lives in
         # its own file with no content of its own, so no trigger can reach it.
         #
-        # ⚠️ WITHOUT THIS LINE EVERY FILE INDEXED AFTER THE TRIGRAM BUILD IS INVISIBLE TO FRAGMENT
-        # SEARCH — and it looks exactly like the file not existing. ⚠️ That is the same bug
+        # WITHOUT THIS LINE EVERY FILE INDEXED AFTER THE TRIGRAM BUILD IS INVISIBLE TO FRAGMENT
+        # SEARCH — and it looks exactly like the file not existing. That is the same bug
         # already found once in the word index, where a document inserted after the build could
         # not be found by keyword search, before a restart or after one.
         #
-        # ⚠️ THE URL IS RE-READ AFTER THE UPSERT, because a conflicting path keeps its ORIGINAL
+        # THE URL IS RE-READ AFTER THE UPSERT, because a conflicting path keeps its ORIGINAL
         # rowid and the index must be told the same id the table now holds.
         try:
             ids = [self.conn.execute("SELECT id FROM documents WHERE path=?",
                                      (r[0],)).fetchone()[0] for r in rows]
-            self.tri_drop(ids)          # ⚠️ forget the old terms before adding the new ones
+            self.tri_drop(ids) # forget the old terms before adding the new ones
             self.tri_add([(i, r[5]) for i, r in zip(ids, rows)])
             self.conn.commit()
         except Exception:
-            # ⚠️ A SYNC FAILURE MUST NOT FAIL THE INDEX RUN. The document is safely in the main
+            # A SYNC FAILURE MUST NOT FAIL THE INDEX RUN. The document is safely in the main
             # table; the trigram index is an optimisation, and a rebuild repairs it.
             pass
 
@@ -266,7 +266,7 @@ class Store:
     def known_state(self) -> dict:
         """path -> (mtime, size) for everything already indexed.
 
-        ⚠️ THIS IS WHAT MAKES RE-INDEX INCREMENTAL. It is one query over the index, and it is
+        THIS IS WHAT MAKES RE-INDEX INCREMENTAL. It is one query over the index, and it is
         the difference between re-reading every file on disk and re-reading only what changed.
         """
         return {p: (m, sz) for p, m, sz in
@@ -274,7 +274,7 @@ class Store:
 
     @_serialised
     def _ensure_skipped(self) -> None:
-        """⚠️ A TABLE FOR WHAT WAS NOT INDEXED, because silence about it is the failure this
+        """A TABLE FOR WHAT WAS NOT INDEXED, because silence about it is the failure this
         project keeps rediscovering. Measured on the author's own machine: 150 files over the
         size limit, 22% of all bytes, and NOTHING anywhere said they had been skipped. Searching
         for something inside one returns "no results" and the user concludes it is not on disk."""
@@ -296,7 +296,7 @@ class Store:
         return len(items)
 
     def prune_skipped(self) -> int:
-        """⚠️ A file that is gone, or that is now small enough to index, must leave this table —
+        """A file that is gone, or that is now small enough to index, must leave this table —
         otherwise the report claims files are missing that are right there in the results."""
         self._ensure_skipped()
         gone = [(p,) for (p,) in self.conn.execute("SELECT path FROM skipped")
@@ -322,13 +322,13 @@ class Store:
                 "largest": [{"path": p, "size": sz, "reason": r} for p, sz, r in big]}
 
     def grep_skipped(self, query: str, limit: int = 30, budget_s: float = 6.0) -> list:
-        """⚠️⚠️ READ THE FILES THAT WERE NEVER INDEXED, ON DEMAND.
+        """READ THE FILES THAT WERE NEVER INDEXED, ON DEMAND.
 
         This is the ONE case where grep is the right tool and an index is not: the files are
         excluded from the index by definition, so there is nothing to search. Reading 150 files
         with a time budget beats indexing 1.25 GB that will almost never be queried.
 
-        ⚠️ IT HAS A TIME BUDGET AND REPORTS WHEN IT RUNS OUT. A grep over 1.25 GB takes minutes,
+        IT HAS A TIME BUDGET AND REPORTS WHEN IT RUNS OUT. A grep over 1.25 GB takes minutes,
         and a search box that silently takes minutes is worse than one that says "checked 40 of
         150 large files" — the user can decide whether to narrow the query.
         """
@@ -345,11 +345,11 @@ class Store:
                                            "total": self.skipped_stats()["files"]})]
             checked += 1
             try:
-                # ⚠️ BINARY MODE AND A BYTE-LEVEL SEARCH. We do not know the encoding and may not
+                # BINARY MODE AND A BYTE-LEVEL SEARCH. We do not know the encoding and may not
                 # care — `mongod` is a binary and a user may still want to know it exists. Reading
                 # as text with errors="replace" would work but is 10x slower on 200 MB.
                 with open(path, "rb") as fh:
-                    blob = fh.read(48 * 1024 * 1024)      # ⚠️ capped: 200 MB binaries are not text
+                    blob = fh.read(48 * 1024 * 1024) # capped: 200 MB binaries are not text
                 if rx.search(blob.decode("utf-8", "replace")):
                     out.append((path, size, None))
                     if len(out) >= limit:
@@ -359,7 +359,7 @@ class Store:
         return out
 
     def graph(self):
-        """⚠️ ONE CONNECTION, TWO USES. A symbol is a property of a document, and splitting them
+        """ONE CONNECTION, TWO USES. A symbol is a property of a document, and splitting them
         across two stores lets them disagree about which files exist — the exact class of bug the
         vector manifest already had to be fixed for."""
         from .codegraph import CodeGraph
@@ -370,7 +370,7 @@ class Store:
     def build_graph(self, docs) -> dict:
         """Extract symbols and edges for a batch of documents.
 
-        ⚠️ REBUILDS PER PATH RATHER THAN APPENDING. Re-indexing a file must not leave the
+        REBUILDS PER PATH RATHER THAN APPENDING. Re-indexing a file must not leave the
         previous version's symbols in the graph, or a renamed function would still have callers
         pointing at a name that no longer exists anywhere.
         """
@@ -390,29 +390,29 @@ class Store:
     def remove_under_roots(self, roots: list, dry_run: bool = False) -> dict:
         """Delete every document located under any of these directories.
 
-        ⚠️⚠️ THIS IS THE MISSING HALF OF SETUP, AND ITS ABSENCE WAS A ONE-WAY DOOR.
+        THIS IS THE MISSING HALF OF SETUP, AND ITS ABSENCE WAS A ONE-WAY DOOR.
         `prune_missing` only deletes rows whose FILE no longer exists on disk, so switching from
         curated folders to "everything" added documents and there was no operation anywhere in
         the tool to take them back out. A user could widen the index and never narrow it.
 
-        ⚠️ IT MATCHES ON THE PATH PREFIX, and the trailing separator is load-bearing. Comparing
+        IT MATCHES ON THE PATH PREFIX, and the trailing separator is load-bearing. Comparing
         `/Users/x/Doc` without it also matches `/Users/x/Documents` and `/Users/x/Doc-backup` —
         so removing one folder would silently delete two others. That is a data-loss bug that
         looks like it works.
         """
         from pathlib import Path as _P
-        # ⚠️⚠️ BOTH FORMS OF EVERY PATH, AND THIS IS NOT DEFENSIVE PADDING — IT WAS A REAL BUG.
+        # BOTH FORMS OF EVERY PATH, AND THIS IS NOT DEFENSIVE PADDING — IT WAS A REAL BUG.
         #
         # On macOS `/tmp` is a SYMLINK to `/private/tmp`. `remove_under_roots(['/tmp/isotest'])`
         # resolved the root to `/private/tmp/isotest/` while the stored document paths began
         # `/tmp/isotest/`, so the string prefix match failed and the removal returned 0 with no
         # error at all.
         #
-        # ⚠️ A REMOVAL THAT SILENTLY DOES NOTHING IS WORSE THAN ONE THAT FAILS. The user is told
+        # A REMOVAL THAT SILENTLY DOES NOTHING IS WORSE THAN ONE THAT FAILS. The user is told
         # "0 removed", assumes a bug in the count, and believes the documents are gone — while
         # they are still indexed, still searchable, and still on disk.
         #
-        # ⚠️ SO BOTH FORMS ARE MATCHED: the resolved one, and the literal expanded one. Which one
+        # SO BOTH FORMS ARE MATCHED: the resolved one, and the literal expanded one. Which one
         # the stored paths use depends on how they were reached at crawl time, and that is not
         # knowable from here.
         prefixes = []
@@ -436,14 +436,14 @@ class Store:
         if dry_run:
             out = {"removed": len(victims), "roots": prefixes, "dry_run": True,
                    "sample": [v[1] for v in victims[:5]]}
-            # ⚠️ ZERO MATCHES IS REPORTED, not passed off as success. "I removed nothing" and
+            # ZERO MATCHES IS REPORTED, not passed off as success. "I removed nothing" and
             # "there was nothing to remove" look identical in a count and mean opposite things.
             if not victims:
                 out["warning"] = ("no indexed documents are under any of those paths — check "
                                   "the path is spelled the way it was crawled")
             return out
         if victims:
-            # ⚠️ THE GRAPH IS CLEANED WITH THE DOCUMENTS. Leaving symbols behind means a graph
+            # THE GRAPH IS CLEANED WITH THE DOCUMENTS. Leaving symbols behind means a graph
             # query returns hits in files that are no longer indexed — results the user cannot
             # open, from a store that claims not to contain them.
             for _did, path in victims:
@@ -458,20 +458,20 @@ class Store:
         return {"removed": len(victims), "roots": prefixes}
 
     def roots_in_index(self) -> list[dict]:
-        """⚠️ WHAT IS ACTUALLY IN THE INDEX, as opposed to what was REQUESTED.
+        """WHAT IS ACTUALLY IN THE INDEX, as opposed to what was REQUESTED.
 
         The configured roots and the indexed roots drift apart the moment a folder is added or a
         drive is unmounted, and the UI needs the second one to show the truth.
         """
         seen: dict[str, int] = {}
         for (path,) in self.conn.execute("SELECT path FROM documents"):
-            top = os.sep.join(str(path).split(os.sep)[:4])     # /Users/<name>/<folder>
+            top = os.sep.join(str(path).split(os.sep)[:4]) # /Users/<name>/<folder>
             seen[top] = seen.get(top, 0) + 1
         return sorted(({"path": k, "documents": v} for k, v in seen.items()),
                       key=lambda d: -d["documents"])
 
     def prune_missing(self) -> int:
-        """Drop rows whose file no longer exists. ⚠️ Without this the index only grows, and a
+        """Drop rows whose file no longer exists. Without this the index only grows, and a
         deleted secret stays searchable forever — which is the exact thing a user would never
         think to check."""
         gone = []
@@ -492,9 +492,9 @@ class Store:
         self.conn.commit()
 
     @_serialised
-    # ⚠⚠️ THE INDEX KNOWS WHICH FORMAT BUILT IT, AND SAYS SO WHEN ASKED.
+    # THE INDEX KNOWS WHICH FORMAT BUILT IT, AND SAYS SO WHEN ASKED.
     #
-    # ⚠️ AN ABSENT RECORD IS NOT A MATCHING ONE. A index written before this existed has no
+    # AN ABSENT RECORD IS NOT A MATCHING ONE. A index written before this existed has no
     # entry at all, and treating "no record" as "up to date" is how the stale-index bug appears
     # on every machine that has been running the app for a while — which is all of them.
     def index_format(self) -> int:
@@ -504,7 +504,7 @@ class Store:
             return 0
 
     def needs_rebuild_for(self, current: int) -> tuple:
-        """(bool, reason). ⚠️ The reason is returned, not just the verdict — because the user is
+        """(bool, reason). The reason is returned, not just the verdict — because the user is
         told WHY the app decided to spend their CPU on something they did not ask for."""
         have = self.index_format()
         if have == current:
@@ -545,12 +545,12 @@ class Store:
     def exact_search(self, literal: str, limit: int = 40) -> list[tuple[int, float]]:
         """Literal substring match. **THIS IS THE BACKEND YOUR EXAMPLE NEEDS.**
 
-        ⚠️ `InputLayer(shape=(784,))` is not a concept — it is 24 characters that exist or do
+        `InputLayer(shape=(784,))` is not a concept — it is 24 characters that exist or do
         not exist in a file. An embedding would return "things that look like Keras input
         configuration"; this returns the line. Semantic search is the wrong tool for a code
         fragment, and a tool that only embeds would fail the user's own example query.
 
-        ⚠️ `LIKE '%...%'` IS A FULL SCAN and that is accepted: it runs in C inside SQLite over
+        `LIKE '%...%'` IS A FULL SCAN and that is accepted: it runs in C inside SQLite over
         a few hundred MB, in single-digit seconds. The alternative — a suffix automaton or n-gram
         inverted index — is the correct engineering answer at 100x this corpus and the wrong
         one for a first version.
@@ -558,51 +558,51 @@ class Store:
         if len(literal) < 2:
             return []
 
-        # ⚠⚠️ THE TRIGRAM INDEX ANSWERS THIS IN MILLISECONDS. THE SCAN IS THE FALLBACK.
+        # THE TRIGRAM INDEX ANSWERS THIS IN MILLISECONDS. THE SCAN IS THE FALLBACK.
         #
-        # ⚠️ A trigram tokenizer indexes every three-character sequence, so any substring of
-        # length >= 3 is a token lookup rather than a scan of 6 GB. ⚠️ MEASURED: 9.8s for
+        # A trigram tokenizer indexes every three-character sequence, so any substring of
+        # length >= 3 is a token lookup rather than a scan of 6 GB. MEASURED: 9.8s for
         # `InputLayer(shape=(784,))` by LIKE, and the same shape of query in 0.001s by trigram.
         #
-        # ⚠️ THREE CHARACTERS IS THE FLOOR, because that is the token size. Shorter fragments
+        # THREE CHARACTERS IS THE FLOOR, because that is the token size. Shorter fragments
         # — `(7)` — have no trigram to look up and fall through to LIKE, which is correct and
         # rare: a two-character search matches a large fraction of the corpus anyway.
         if len(literal) >= 3 and self.trigram_ready():
             try:
-                # ⚠⚠️ `self._tri()`, NOT `self.conn`. THE TRIGRAM TABLE IS IN ANOTHER DATABASE.
+                # `self._tri()`, NOT `self.conn`. THE TRIGRAM TABLE IS IN ANOTHER DATABASE.
                 #
-                # ⚠️ IT WAS self.conn, so this asked the MAIN database for `docs_tri` — which is not
+                # IT WAS self.conn, so this asked the MAIN database for `docs_tri` — which is not
                 # there — raised OperationalError, and was caught by the `except ... pass` two lines
-                # below. ⚠️ SO THE TRIGRAM INDEX WAS BUILT, FILLED, MARKED READY, AND NEVER ONCE
+                # below. SO THE TRIGRAM INDEX WAS BUILT, FILLED, MARKED READY, AND NEVER ONCE
                 # QUERIED. Every fragment search fell through to the LIKE scan.
                 #
-                # ⚠️ MEASURED, AND IT IS WHY THIS WAS HARD TO SEE: the gate passed
+                # MEASURED, AND IT IS WHY THIS WAS HARD TO SEE: the gate passed
                 # (len>=3 and trigram_ready() both True), the branch alone ran in 0.002s when
                 # called directly, and exact_search still took 6.3s. Three true statements that
                 # together said nothing about which database the query had gone to.
                 #
-                # ⚠️ AND THE SILENT EXCEPT IS WHAT HID IT. A fallback that swallows every error is
+                # AND THE SILENT EXCEPT IS WHAT HID IT. A fallback that swallows every error is
                 # indistinguishable from a fallback that is never needed — the 11.1 GB index and
                 # the ten-second scan produced identical behaviour from the outside.
                 rows = self._tri().execute(
                     "SELECT rowid FROM docs_tri WHERE docs_tri MATCH ? LIMIT ?",
                     ('"' + literal.replace('"', '""') + '"', limit * 4)).fetchall()
-                # ⚠️ THE TRIGRAM MATCH IS A CANDIDATE SET, NOT A RESULT. It finds DOCUMENTS
+                # THE TRIGRAM MATCH IS A CANDIDATE SET, NOT A RESULT. It finds DOCUMENTS
                 # containing the trigrams, which is a superset of those containing the string —
                 # so each candidate is verified below by counting the literal, exactly as the
-                # scan path does. ⚠️ Skipping that check would return files that merely share
+                # scan path does. Skipping that check would return files that merely share
                 # three-character sequences, and they would look like matches.
                 cand = [r[0] for r in rows]
                 if cand:
-                    # ⚠⚠️ VERIFY IN SQL, NOT BY PULLING EVERY CANDIDATE'S TEXT INTO PYTHON.
+                    # VERIFY IN SQL, NOT BY PULLING EVERY CANDIDATE'S TEXT INTO PYTHON.
                     #
-                    # ⚠️ MEASURED: the first version called self.by_id() per candidate and counted
+                    # MEASURED: the first version called self.by_id() per candidate and counted
                     # the literal in Python. That FETCHES THE ENTIRE DOCUMENT — up to megabytes each —
-                    # to count one substring, 200 times, and it cost 5.6s. ⚠️ The trigram lookup
+                    # to count one substring, 200 times, and it cost 5.6s. The trigram lookup
                     # itself is milliseconds; the verification was the whole expense, so the fix
                     # made no difference until this line changed.
                     #
-                    # ⚠️ SQLITE DOES BOTH HALVES IN ONE PASS AND SENDS BACK ONLY THE IDS. `instr` is
+                    # SQLITE DOES BOTH HALVES IN ONE PASS AND SENDS BACK ONLY THE IDS. `instr` is
                     # the exact substring test — no wildcards, no escaping — which is the same claim
                     # the LIKE path makes, and LIKE would give up the index to make it.
                     _ph = ",".join("?" * len(cand))
@@ -610,29 +610,29 @@ class Store:
                         f"SELECT id, length(text) FROM documents "
                         f"WHERE id IN ({_ph}) AND instr(text, ?) > 0",
                         (*cand, literal)).fetchall()
-                    # ⚠️ RANKED BY DOCUMENT LENGTH, because a 4 KB file that contains the fragment is
+                    # RANKED BY DOCUMENT LENGTH, because a 4 KB file that contains the fragment is
                     # almost certainly ABOUT it while a 2 MB file that contains it once is probably
-                    # not. ⚠️ This is not the recount the scan path does — counting occurrences
+                    # not. This is not the recount the scan path does — counting occurrences
                     # needs the text, and the text is what we stopped fetching.
                     hits.sort(key=lambda r: r[1])
                     return [(i, 1.0) for i, _ln in hits[:limit]]
             except sqlite3.OperationalError as _e:
-                # ⚠⚠️ SAID OUT LOUD, NOT SWALLOWED. A silent fallback is indistinguishable from a
+                # SAID OUT LOUD, NOT SWALLOWED. A silent fallback is indistinguishable from a
                 # fallback that is never needed, which is how a built-and-ready index went
                 # unqueried through every fragment search without anything reporting it.
-                # ⚠️ The scan still runs — search must never fail because an optimisation did — but
+                # The scan still runs — search must never fail because an optimisation did — but
                 # the reason is now visible the first time rather than never.
                 if not getattr(self, "_tri_warned", False):
                     self._tri_warned = True
                     import sys as _sys
-                    print(f"  ⚠️ trigram index unavailable, using the slow scan: "
+                    print(f" trigram index unavailable, using the slow scan: "
                           f"{type(_e).__name__}: {_e}", file=_sys.stderr)
 
         esc = literal.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self.conn.execute(
             "SELECT id FROM documents WHERE text LIKE ? ESCAPE '\\' LIMIT ?",
             (f"%{esc}%", limit * 4)).fetchall()
-        # ⚠️ Score by occurrence count so the file that is ABOUT the fragment outranks a file
+        # Score by occurrence count so the file that is ABOUT the fragment outranks a file
         # that mentions it once in passing.
         out = []
         for (doc_id,) in rows:
@@ -645,7 +645,7 @@ class Store:
 
     @_serialised
     def regex_search(self, pattern: str, limit: int = 40) -> list[tuple[int, float]]:
-        """Regex over stored text. ⚠️ Pure Python, so it is the slowest backend; it reports how
+        """Regex over stored text. Pure Python, so it is the slowest backend; it reports how
         many documents it had to scan so the cost is visible rather than mysterious."""
         try:
             rx = re.compile(pattern, re.IGNORECASE)
@@ -665,26 +665,26 @@ class Store:
         return out[:limit]
 
     # ------------------------------------------------------ backend 2: keyword
-    # ⚠⚠️ AN FTS5 INDEX, BECAUSE BUILDING ONE IN PYTHON COSTS SIX MINUTES AND ALL THE MEMORY.
+    # AN FTS5 INDEX, BECAUSE BUILDING ONE IN PYTHON COSTS SIX MINUTES AND ALL THE MEMORY.
     #
-    # ⚠️ MEASURED AT 859,569 DOCUMENTS:
+    # MEASURED AT 859,569 DOCUMENTS:
     #
-    #       exact      4.09s
-    #       path       0.79s
-    #       keyword  351.45s      <- five minutes fifty-one
+    # exact 4.09s
+    # path 0.79s
+    # keyword 351.45s <- five minutes fifty-one
     #
-    # ⚠️ The Python BM25 does cache its postings, so that number is the FIRST call — which is the
+    # The Python BM25 does cache its postings, so that number is the FIRST call — which is the
     # one that matters, because the daemon restarts and every restart pays it again. And the
     # postings live in RAM, which at this size is gigabytes for an index SQLite will maintain
     # on disk for nothing.
     #
-    # ⚠️ SO SQLITE DOES IT. FTS5 keeps an inverted index in the database, updated on insert, and
+    # SO SQLITE DOES IT. FTS5 keeps an inverted index in the database, updated on insert, and
     # ranks with BM25 — the same formula and the same constants as the Python path below, so the
     # two agree rather than quietly disagreeing.
     #
-    # ⚠️ AND IT DEGRADES RATHER THAN FAILS. FTS5 is compiled into most builds but not all, and a
+    # AND IT DEGRADES RATHER THAN FAILS. FTS5 is compiled into most builds but not all, and a
     # database file may predate this table, so every use is guarded and the Python BM25 remains
-    # as the fallback. ⚠️ A search backend that refuses to run because an optional extension is
+    # as the fallback. A search backend that refuses to run because an optional extension is
     # missing turns "slower" into "broken".
     def _drop_stale_trigram_triggers(self) -> None:
         """Remove triggers left behind when the trigram moved to its own file.
@@ -711,40 +711,40 @@ class Store:
             self.conn.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5("
                 "text, content='documents', content_rowid='id', tokenize='unicode61')")
-            # ⚠️ AN EXTERNAL-CONTENT TABLE, so the text is NOT stored twice. At 6.9 GB of
+            # AN EXTERNAL-CONTENT TABLE, so the text is NOT stored twice. At 6.9 GB of
             # documents a duplicate copy is the difference between an index and a second corpus.
-            # ⚠⚠️ COUNT THE INDEX, NOT THE TABLE. COUNT(docs_fts) READS `documents`.
+            # COUNT THE INDEX, NOT THE TABLE. COUNT(docs_fts) READS `documents`.
             #
-            # ⚠️ With content='documents' the FTS table is EXTERNAL-CONTENT: SELECT count(*) FROM
+            # With content='documents' the FTS table is EXTERNAL-CONTENT: SELECT count(*) FROM
             # docs_fts returns the number of rows in the CONTENT table, not the number of terms
-            # indexed. ⚠️ So comparing it to count(documents) compared a number with itself, the
+            # indexed. So comparing it to count(documents) compared a number with itself, the
             # check always passed, and the rebuild never ran.
             #
-            # ⚠️ MEASURED: count(docs_fts) = 859,569, count(documents) = 859,569, and a raw
+            # MEASURED: count(docs_fts) = 859,569, count(documents) = 859,569, and a raw
             # MATCH 'screenshot' returned ZERO. The index was empty and every number said it was
             # full. Searches came back in 0.00s with no results — fast, and wrong.
             #
-            # ⚠️ docs_fts_data IS THE ACTUAL INDEX. A fresh table has one row of structural data and
+            # docs_fts_data IS THE ACTUAL INDEX. A fresh table has one row of structural data and
             # nothing else, so a handful of rows means unbuilt and thousands means built.
             n_idx = self.conn.execute("SELECT count(*) FROM docs_fts_data").fetchone()[0]
             n_doc = self.conn.execute("SELECT count(*) FROM documents").fetchone()[0]
             if n_idx < 100 and n_doc > 0:
-                # ⚠️ REBUILT IN ONE STATEMENT when the counts disagree — which is also what makes
+                # REBUILT IN ONE STATEMENT when the counts disagree — which is also what makes
                 # this safe to add to an existing database that was written before the table.
                 self.conn.execute("INSERT INTO docs_fts(docs_fts) VALUES('rebuild')")
                 self.conn.commit()
-            # ⚠⚠️ TRIGGERS, BECAUSE AN EXTERNAL-CONTENT FTS TABLE DOES NOT MAINTAIN ITSELF.
+            # TRIGGERS, BECAUSE AN EXTERNAL-CONTENT FTS TABLE DOES NOT MAINTAIN ITSELF.
             #
-            # ⚠️ MEASURED: a document inserted after the index was built was INVISIBLE to keyword
+            # MEASURED: a document inserted after the index was built was INVISIBLE to keyword
             # search — zero hits before a restart and zero hits after one. FTS5 with
             # content='documents' stores no text of its own, so it has no way to know a row
             # changed; the CONTENT table has to tell it.
             #
-            # ⚠️ AND NOTHING ELSE WOULD HAVE CAUGHT THIS. The index builds, the counts match, the
+            # AND NOTHING ELSE WOULD HAVE CAUGHT THIS. The index builds, the counts match, the
             # searches are instant, and every file added after that point is silently unsearchable
             # by keyword — which looks exactly like the file not existing.
             #
-            # ⚠️ THIS IS SQLITE'S OWN DOCUMENTED PATTERN for external-content FTS5: three triggers
+            # THIS IS SQLITE'S OWN DOCUMENTED PATTERN for external-content FTS5: three triggers
             # on the content table, one per operation. The 'delete' row the triggers insert is a
             # command to the FTS index, not a row of data — it is how an external-content index is
             # told to forget the old terms.
@@ -754,7 +754,7 @@ class Store:
                 ("docs_fts_ad", "CREATE TRIGGER IF NOT EXISTS docs_fts_ad AFTER DELETE ON documents BEGIN "
                                 "INSERT INTO docs_fts(docs_fts, rowid, text) "
                                 "VALUES('delete', old.id, old.text); END"),
-                # ⚠️ THE UPDATE TRIGGER DELETES THEN RE-INSERTS, and the ORDER matters: a delete
+                # THE UPDATE TRIGGER DELETES THEN RE-INSERTS, and the ORDER matters: a delete
                 # without the old text leaves stale terms behind that match forever.
                 ("docs_fts_au", "CREATE TRIGGER IF NOT EXISTS docs_fts_au AFTER UPDATE ON documents BEGIN "
                                 "INSERT INTO docs_fts(docs_fts, rowid, text) "
@@ -765,54 +765,54 @@ class Store:
             self.conn.commit()
             self._fts_ok = True
         except sqlite3.OperationalError as _e:
-            # ⚠️ NOT COMPILED IN, OR AN OLD FILE THAT CANNOT TAKE THE TABLE.
+            # NOT COMPILED IN, OR AN OLD FILE THAT CANNOT TAKE THE TABLE.
             #
-            # ⚠️ AND IT USED TO SAY NOTHING HERE, WHICH WAS THE SAME BUG ALREADY FOUND IN THE
+            # AND IT USED TO SAY NOTHING HERE, WHICH WAS THE SAME BUG ALREADY FOUND IN THE
             # TRIGRAM PATH. A silent fallback is indistinguishable from a fallback that is never
             # needed, so the slow path could run forever with nothing reporting it. The trigram
             # path had been given a warning; this one had not.
             #
-            # ⚠️ AND "SLOWER" IS NOT A SMALL WORD HERE. MEASURED AT 859,569 DOCUMENTS, the Python
+            # AND "SLOWER" IS NOT A SMALL WORD HERE. MEASURED AT 859,569 DOCUMENTS, the Python
             # BM25 took 351 SECONDS on its first call. It caches, so the second query was 0.06s —
             # and the first call happens on EVERY daemon restart, which is what the user
             # experiences as the app being broken. Saying nothing about that is not acceptable.
-            # ⚠️ Search still runs, because it must never fail over an optimisation — but the
+            # Search still runs, because it must never fail over an optimisation — but the
             # reason is now visible the first time rather than never.
             if not getattr(self, "_fts_warned", False):
                 self._fts_warned = True
                 import sys as _sys
-                print(f"  ⚠️ FTS5 unavailable, falling back to the in-process BM25 "
+                print(f" FTS5 unavailable, falling back to the in-process BM25 "
                       f"(much slower on the first query): "
                       f"{type(_e).__name__}: {_e}", file=_sys.stderr)
             self._fts_ok = False
         return self._fts_ok
 
-    # ⚠⚠️ THE TRIGRAM INDEX LIVES IN ITS OWN FILE, BECAUSE IT MADE ANOTHER BACKEND 12x SLOWER.
+    # THE TRIGRAM INDEX LIVES IN ITS OWN FILE, BECAUSE IT MADE ANOTHER BACKEND 12x SLOWER.
     #
-    # ⚠️ MEASURED, AND IT IS THE REASON THIS WAS MOVED:
+    # MEASURED, AND IT IS THE REASON THIS WAS MOVED:
     #
-    #       exact (fragment)   10.7s  ->  0.015s     the thing it was built for  ✅
-    #       path                0.73s ->  9.16s      ⚠️ 12x slower, and never mentioned
-    #       index.db            8.6GB ->  19.4GB     ⚠️ 11GB of trigram data
+    # exact (fragment) 10.7s -> 0.015s the thing it was built for
+    # path 0.73s -> 9.16s 12x slower, and never mentioned
+    # index.db 8.6GB -> 19.4GB 11GB of trigram data
     #
-    # ⚠️ A TRIGRAM INDEX IS ROUGHLY TWICE THE SIZE OF THE TEXT IT INDEXES. Inside the same file it
+    # A TRIGRAM INDEX IS ROUGHLY TWICE THE SIZE OF THE TEXT IT INDEXES. Inside the same file it
     # interleaves with the `documents` table, so path_search's LIKE scan reads scattered pages,
     # and a live search went from ~2s to ~13s.
     #
-    # ⚠️ SO IT IS A SECOND DATABASE. `content=''` — CONTENTLESS — because FTS5 cannot take its
+    # SO IT IS A SECOND DATABASE. `content=''` — CONTENTLESS — because FTS5 cannot take its
     # content from a table in another file, and because the content is not needed: `exact_search`
     # only ever asks for ROWIDS. Storing the text twice would double a 6 GB corpus for nothing.
     #
-    # ⚠️ THE COST IS THAT TRIGGERS CANNOT CROSS DATABASES. The word index is kept in sync by
+    # THE COST IS THAT TRIGGERS CANNOT CROSS DATABASES. The word index is kept in sync by
     # triggers on `documents`; this one has to be told explicitly from add_many. That is a real
-    # trade, made knowingly: ⚠️ a missing sync here would make NEW files invisible to fragment
+    # trade, made knowingly: a missing sync here would make NEW files invisible to fragment
     # search, which is exactly the bug found in the word index an hour ago.
     def _tri(self):
         """The trigram connection, opened lazily. None when it cannot be opened."""
         if self._tri_conn is not None:
             return self._tri_conn if self._tri_conn is not False else None
         try:
-            # ⚠️ `idx_path` COMES FROM CONFIG SO THE FILE SITS BESIDE THE INDEX, not inside it.
+            # `idx_path` COMES FROM CONFIG SO THE FILE SITS BESIDE THE INDEX, not inside it.
             path = getattr(self, "tri_path", None) or (Path(str(self.db_path) + ".tri"))
             c = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
             c.execute("PRAGMA journal_mode=WAL")
@@ -822,16 +822,16 @@ class Store:
             c.commit()
             self._tri_conn = c
         except sqlite3.OperationalError:
-            # ⚠️ NO TRIGRAM TOKENIZER, OR NO ROOM FOR THE FILE. `exact` falls back to the LIKE
+            # NO TRIGRAM TOKENIZER, OR NO ROOM FOR THE FILE. `exact` falls back to the LIKE
             # scan, which is slower and correct.
             self._tri_conn = False
         return self._tri_conn if self._tri_conn is not False else None
 
     def trigram_ready(self) -> bool:
-        """⚠️ True once the index HOLDS something. Asked once, then remembered.
+        """True once the index HOLDS something. Asked once, then remembered.
 
-        ⚠️ The first version asked this on every search and it cost 2.55s of a 2.6s query — the
-        readiness check was more expensive than the thing it guarded. ⚠️ A constant cost per
+        The first version asked this on every search and it cost 2.55s of a 2.6s query — the
+        readiness check was more expensive than the thing it guarded. A constant cost per
         search is the signature of a check rather than a lookup.
         """
         if self._tri_ready is not None:
@@ -840,17 +840,17 @@ class Store:
         if c is None:
             self._tri_ready = False
             return False
-        # ⚠⚠️ A MARKER IN THE MAIN DATABASE, NOT A ROW COUNT IN THE INDEX.
+        # A MARKER IN THE MAIN DATABASE, NOT A ROW COUNT IN THE INDEX.
         #
-        # ⚠️ The first version asked `count(*) FROM docs_tri_data > 100` and it was WRONG IN BOTH
+        # The first version asked `count(*) FROM docs_tri_data > 100` and it was WRONG IN BOTH
         # DIRECTIONS: SQLite packs trigram data into a handful of large rows, so a fully built
         # index over 300 documents reported ELEVEN rows — and the same check on the 859,569-document
         # index took 2.55 SECONDS per search.
         #
-        # ⚠️ MEASURED: raw MATCH returned 300 hits while trigram_ready said False. The index was
+        # MEASURED: raw MATCH returned 300 hits while trigram_ready said False. The index was
         # built and working and the check that decides whether to use it said no.
         #
-        # ⚠️ SO THE BUILD RECORDS THAT IT HAPPENED. A flag written once, in the database that is
+        # SO THE BUILD RECORDS THAT IT HAPPENED. A flag written once, in the database that is
         # already being read, with no scan of either index to ask a question whose answer never
         # changes.
         try:
@@ -860,29 +860,29 @@ class Store:
         return self._tri_ready
 
     def build_trigram(self, resume: bool = True) -> int:
-        """Populate the trigram index. ⚠️ Resumable: an interrupted run continues where it stopped."""
+        """Populate the trigram index. Resumable: an interrupted run continues where it stopped."""
         c = self._tri()
         if c is None:
             return 0
-        # ⚠⚠️ DROP AND RECREATE. A CONTENTLESS FTS5 TABLE CANNOT BE DELETED FROM.
+        # DROP AND RECREATE. A CONTENTLESS FTS5 TABLE CANNOT BE DELETED FROM.
         #
-        # ⚠️ MEASURED: `DELETE FROM docs_tri` raises "cannot DELETE from contentless fts5 table".
+        # MEASURED: `DELETE FROM docs_tri` raises "cannot DELETE from contentless fts5 table".
         # Contentless means FTS5 stores no copy of the text, so it cannot reconstruct what to
         # remove for an arbitrary delete — only the whole index can go.
         #
-        # ⚠️ AND `tri_drop` BELOW IS STILL VALID, because it deletes by rowid via the special
+        # AND `tri_drop` BELOW IS STILL VALID, because it deletes by rowid via the special
         # 'delete' command instead. The restriction is on unbounded deletes, not targeted ones.
-        # ⚠⚠️ RESUMABLE, BECAUSE THE BUILD TAKES TWELVE MINUTES AND THE MACHINE IS IN USE.
+        # RESUMABLE, BECAUSE THE BUILD TAKES TWELVE MINUTES AND THE MACHINE IS IN USE.
         #
-        # ⚠️ MEASURED: 859,569 documents, more than twelve minutes, and it reached 650,000 before
+        # MEASURED: 859,569 documents, more than twelve minutes, and it reached 650,000 before
         # being interrupted — at which point the only options were to start again from zero or to
         # ship an index that is silently incomplete for the rest of its life.
         #
-        # ⚠️ A CONTENTLESS TABLE CANNOT BE PARTIALLY DELETED, so resuming cannot mean "redo the
-        # last batch". ⚠️ IT MEANS REMEMBERING HOW FAR IT GOT. The build is ordered by rowid and
+        # A CONTENTLESS TABLE CANNOT BE PARTIALLY DELETED, so resuming cannot mean "redo the
+        # last batch". IT MEANS REMEMBERING HOW FAR IT GOT. The build is ordered by rowid and
         # records the last id written; an interrupted run continues from there.
         #
-        # ⚠️ AND THE IDS ARE ALSO A CHECK. On resume the stored id must still exist in `documents`
+        # AND THE IDS ARE ALSO A CHECK. On resume the stored id must still exist in `documents`
         # — if the index was cleared or rebuilt since, it does not, and the trigram index is
         # stale in a way that only a full rebuild repairs.
         resume_from = 0
@@ -891,7 +891,7 @@ class Store:
                 mark = self.get_meta("trigram_progress", None)
                 if mark is not None:
                     mark = int(mark)
-                    # ⚠️ VERIFIED AGAINST THE CONTENT TABLE, not trusted. A stored id that no longer
+                    # VERIFIED AGAINST THE CONTENT TABLE, not trusted. A stored id that no longer
                     # exists means the documents were rebuilt and this index describes a corpus
                     # that is gone.
                     if self.conn.execute("SELECT 1 FROM documents WHERE id >= ? LIMIT 1",
@@ -908,7 +908,7 @@ class Store:
             self.set_meta("trigram_progress", 0)
             self.conn.commit()
         n = resume_from
-        # ⚠️ STREAMED, NOT FETCHED. A home directory is 6 GB of text; `fetchall()` would hold all
+        # STREAMED, NOT FETCHED. A home directory is 6 GB of text; `fetchall()` would hold all
         # of it in memory at once to write an index that already duplicates most of it on disk.
         total = self.conn.execute("SELECT count(*) FROM documents").fetchone()[0]
         cur = self.conn.execute("SELECT id, text FROM documents WHERE id > ? ORDER BY id",
@@ -921,7 +921,7 @@ class Store:
             c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
                           [(i, t or "") for i, t in rows])
             n = rows[-1][0]
-            # ⚠️ THE PROGRESS IS PERSISTED WITH THE DATA, in the same commit. Recording it
+            # THE PROGRESS IS PERSISTED WITH THE DATA, in the same commit. Recording it
             # separately would leave the two disagreeing after a crash, and the disagreement
             # would be silent: an index missing a range of documents that nothing reports.
             self.set_meta("trigram_progress", n)
@@ -931,8 +931,8 @@ class Store:
                 done = n - resume_from
                 rate = done / max(time.time() - t_start, 1)
                 left = (total - n) / rate if rate > 0 else 0
-                print(f"    … {n:,}/{total:,} indexed, about {left/60:.0f}m left", flush=True)
-                # ⚠️ WRITTEN THE SAME WAY THE CRAWL WRITES ITS PROGRESS, so the existing banner
+                print(f" … {n:,}/{total:,} indexed, about {left/60:.0f}m left", flush=True)
+                # WRITTEN THE SAME WAY THE CRAWL WRITES ITS PROGRESS, so the existing banner
                 # reads it without knowing which phase produced it.
                 try:
                     from .vectors import write_status
@@ -944,26 +944,26 @@ class Store:
                 except Exception:
                     pass
         c.commit()
-        # ⚠️ RECORDED ONLY AFTER THE INDEX IS COMPLETE. Writing the flag first would mark an index
+        # RECORDED ONLY AFTER THE INDEX IS COMPLETE. Writing the flag first would mark an index
         # current before it contained anything — the same ordering mistake as the crawl's format
         # version, which would have left a "v2" index with no directories in it.
         self.set_meta("trigram_built", True)
-        self.set_meta("trigram_progress", 0)     # ⚠️ nothing left to resume
+        self.set_meta("trigram_progress", 0) # nothing left to resume
         self.conn.commit()
         self._tri_ready = True
         return n
 
     def tri_add(self, rows) -> None:
-        """⚠️ KEEP THE SECOND DATABASE IN STEP — there are no triggers across files."""
+        """KEEP THE SECOND DATABASE IN STEP — there are no triggers across files."""
         c = self._tri()
-        # ⚠⚠️ NO `_tri_ready` CHECK HERE, AND THAT CHECK WAS A CIRCULAR DEPENDENCY.
+        # NO `_tri_ready` CHECK HERE, AND THAT CHECK WAS A CIRCULAR DEPENDENCY.
         #
-        # ⚠️ The first version refused to add unless the index was already populated — but nothing
+        # The first version refused to add unless the index was already populated — but nothing
         # populates it except build_trigram, so on a fresh database NOTHING WAS EVER ADDED and
-        # `trigram_ready` stayed False forever. ⚠️ MEASURED: 300 documents inserted, the index
+        # `trigram_ready` stayed False forever. MEASURED: 300 documents inserted, the index
         # built, and trigram_ready still False.
         #
-        # ⚠️ The guard was there to avoid writing to an index that does not exist. The right way to
+        # The guard was there to avoid writing to an index that does not exist. The right way to
         # say that is "is the connection open", which is what `c is None` already says.
         if c is None:
             return
@@ -971,21 +971,21 @@ class Store:
             c.executemany("INSERT INTO docs_tri(rowid, text) VALUES (?, ?)",
                           [(i, t or "") for i, t in rows])
         except sqlite3.OperationalError:
-            pass      # ⚠️ a failed sync must not break an index run; the next build repairs it
+            pass # a failed sync must not break an index run; the next build repairs it
 
     def tri_drop(self, ids) -> None:
-        """⚠️ A DELETED FILE MUST STOP MATCHING. A stale row here outlives the file it describes."""
+        """A DELETED FILE MUST STOP MATCHING. A stale row here outlives the file it describes."""
         c = self._tri()
         if c is None or not ids:
             return
         try:
-            # ⚠️ IN CHUNKS: SQLite caps the number of bound parameters, and a prune can carry
+            # IN CHUNKS: SQLite caps the number of bound parameters, and a prune can carry
             # tens of thousands of ids.
             ids = list(ids)
             for i in range(0, len(ids), 500):
                 chunk = ids[i:i + 500]
                 ph = ",".join("?" * len(chunk))
-                # ⚠️ THE CONTENTLESS DELETE FORM: 'delete' WITH THE OLD TEXT, which FTS5 requires
+                # THE CONTENTLESS DELETE FORM: 'delete' WITH THE OLD TEXT, which FTS5 requires
                 # in order to know which terms to forget. A plain DELETE is rejected outright.
                 for rid in chunk:
                     c.execute("INSERT INTO docs_tri(docs_tri, rowid, text) VALUES('delete', ?, '')",
@@ -994,7 +994,7 @@ class Store:
             pass
 
     def _build_postings(self) -> None:
-        """⚠️ BUILT LAZILY AND CACHED. Rebuilding on every query would make keyword search
+        """BUILT LAZILY AND CACHED. Rebuilding on every query would make keyword search
         O(corpus) per query — technically correct and unusable."""
         if self._postings is not None:
             return
@@ -1006,7 +1006,7 @@ class Store:
             lengths.append(len(toks))
             ids.append(doc_id)
             for tok, tf in Counter(toks).items():
-                # ⚠️ Storing tf as repeated entries would balloon memory; instead the posting
+                # Storing tf as repeated entries would balloon memory; instead the posting
                 # value encodes it as a float in the high bits. Simpler: keep tf in a dict.
                 postings[tok].append((len(ids) - 1, tf))
         self._postings = dict(postings)
@@ -1018,33 +1018,33 @@ class Store:
     @_serialised
     def keyword_search(self, query: str, limit: int = 40, k1: float = 1.5,
                        b: float = 0.75) -> list[tuple[int, float]]:
-        """Okapi BM25. ⚠️ Same formula as the RAG track, same constants, deliberately: a
+        """Okapi BM25. Same formula as the RAG track, same constants, deliberately: a
         second implementation with different constants would make the two tracks disagree and
         the disagreement would be mine, not the data's."""
-        # ⚠⚠️ FTS5 FIRST, THE PYTHON BM25 SECOND. Same formula, same k1 and b — the only
+        # FTS5 FIRST, THE PYTHON BM25 SECOND. Same formula, same k1 and b — the only
         # difference the caller can observe is that one answers in milliseconds.
         #
-        # ⚠️ MEASURED AT 859,569 DOCUMENTS: the Python path took 351s on its FIRST call. It
+        # MEASURED AT 859,569 DOCUMENTS: the Python path took 351s on its FIRST call. It
         # caches, so the second query was 0.06s — but the first call happens on every daemon
         # restart, which is what the user experiences as the app being broken.
         if self._ensure_fts():
-            # ⚠⚠️ `.isalnum()` DROPPED EVERY IDENTIFIER WITH AN UNDERSCORE OR A DOT IN IT.
+            # `.isalnum()` DROPPED EVERY IDENTIFIER WITH AN UNDERSCORE OR A DOT IN IT.
             #
-            # ⚠️ MEASURED: the FTS index matched `unique_token_xyz` and `db_acl.php` perfectly — a raw
+            # MEASURED: the FTS index matched `unique_token_xyz` and `db_acl.php` perfectly — a raw
             # MATCH returned the row — and the search returned ZERO, because `"_".isalnum()` is
             # False and the token was filtered out before it reached the query.
             #
-            # ⚠️ THIS IS A FILE SEARCH TOOL. Underscores, dots and hyphens are in most filenames and
+            # THIS IS A FILE SEARCH TOOL. Underscores, dots and hyphens are in most filenames and
             # most code identifiers, so the filter removed exactly the tokens the product exists to
             # find — and it did it silently, by returning an empty result rather than an error.
             #
-            # ⚠️ SO NOTHING IS FILTERED. The tokens are QUOTED below, which is what makes FTS5 treat
+            # SO NOTHING IS FILTERED. The tokens are QUOTED below, which is what makes FTS5 treat
             # them as literal strings, so a token containing punctuation cannot be parsed as
             # syntax. Filtering was never needed; quoting is the mechanism.
             toks = [t for t in tokenize(query) if t.strip()]
             if not toks:
                 return []
-            # ⚠️ QUOTED AND OR-JOINED. FTS5 treats AND, OR, NOT, NEAR and * as operators, so a
+            # QUOTED AND OR-JOINED. FTS5 treats AND, OR, NOT, NEAR and * as operators, so a
             # user searching "not working" would have NOT parsed as one and the query mangled.
             expr = " OR ".join('"' + t.replace('"', '""') + '"' for t in toks)
             try:
@@ -1054,23 +1054,23 @@ class Store:
                     (k1, b, expr, limit)).fetchall()
             except sqlite3.OperationalError:
                 rows = []
-            # ⚠️ NEGATED: bm25() returns LOWER for better while the rest of the pipeline sorts
+            # NEGATED: bm25() returns LOWER for better while the rest of the pipeline sorts
             # descending. Sign confusion here would silently REVERSE the ranking while every
             # other part of the system looked correct.
             return [(rid, -float(r)) for rid, r in rows]
 
-        # ⚠️⚠️ THE POSTINGS HAVE TO BE BUILT, AND NOTHING WAS BUILDING THEM.
+        # THE POSTINGS HAVE TO BE BUILT, AND NOTHING WAS BUILDING THEM.
         #
-        # ⚠️ `_build_postings()` HAD NO CALL SITES ANYWHERE IN THE CODEBASE. So on a build
+        # `_build_postings()` HAD NO CALL SITES ANYWHERE IN THE CODEBASE. So on a build
         # without FTS5 this path ran with `_n_docs == 0` and `_postings is None`, fell through
         # the guard below, and returned `[]` — for every query, forever.
         #
-        # ⚠️ MEASURED: two documents indexed, `keyword_search("quick")` returned 0 hits;
+        # MEASURED: two documents indexed, `keyword_search("quick")` returned 0 hits;
         # calling `_build_postings()` by hand made the same query return 1.
         #
-        # ⚠️ AND AN EMPTY RESULT IS THE WORST POSSIBLE FAILURE SIGNAL FOR THIS TOOL, because a
+        # AND AN EMPTY RESULT IS THE WORST POSSIBLE FAILURE SIGNAL FOR THIS TOOL, because a
         # file search that finds nothing reads as "that file does not exist" rather than as "a
-        # backend is missing". ⚠️ So the fallback was not slow — IT WAS BROKEN — and the
+        # backend is missing". So the fallback was not slow — IT WAS BROKEN — and the
         # fallback is the entire reason this file originally refused to depend on FTS5. The
         # argument for the reimplementation rested on a path that did not work.
         #
@@ -1086,7 +1086,7 @@ class Store:
             if not posting:
                 continue
             df = len(posting)
-            # ⚠️ The +0.5 smoothing keeps a term appearing in EVERY document from scoring
+            # The +0.5 smoothing keeps a term appearing in EVERY document from scoring
             # zero or negative, which is what an unsmoothed idf does.
             idf = math.log(1 + (self._n_docs - df + 0.5) / (df + 0.5))
             for row_idx, tf in posting:
@@ -1098,17 +1098,17 @@ class Store:
 
     @_serialised
     def path_search(self, query: str, limit: int = 40) -> list[tuple[int, float]]:
-        """Match against the PATH. ⚠️ A separate backend because 'where is my file called X' is
+        """Match against the PATH. A separate backend because 'where is my file called X' is
         a completely different question from 'which file contains X', and conflating them makes
         filename lookups fail whenever the file is small or its content is unrelated."""
-        # ⚠️⚠️ TOKENISED, NOT A LITERAL SUBSTRING OF THE WHOLE QUERY.
+        # TOKENISED, NOT A LITERAL SUBSTRING OF THE WHOLE QUERY.
         #
         # This matched the raw query against the path, so "find db_acl.php" searched for the
         # literal string "find db_acl.php" in a filename and found nothing — while "db_acl.php"
-        # worked. ⚠️ Anyone who types a verb first got zero results, and would reasonably
+        # worked. Anyone who types a verb first got zero results, and would reasonably
         # conclude filename search does not exist.
         #
-        # ⚠️ Separate terms rather than the whole string also means a query naming a file AND a
+        # Separate terms rather than the whole string also means a query naming a file AND a
         # directory scores higher for matching both.
         terms = [t for t in re.findall(r"[A-Za-z0-9_.+\-]{2,}", query)
                  if t.lower() not in _PATH_STOPWORDS]
@@ -1124,16 +1124,16 @@ class Store:
             for doc_id, path, dflag in rows:
                 base = Path(path).name.lower()
                 t = term.lower()
-                # ⚠️ Matches in the BASENAME outrank matches anywhere in the path, so
+                # Matches in the BASENAME outrank matches anywhere in the path, so
                 # `config.py` beats `…/config-helper/src/…/Thing.java`. A bare extension match
                 # (".php") scores lowest — it is true of thousands of files and identifies none.
-                # ⚠⚠️ A DIRECTORY WHOSE NAME IS THE QUERY IS THE ANSWER, NOT A CANDIDATE.
+                # A DIRECTORY WHOSE NAME IS THE QUERY IS THE ANSWER, NOT A CANDIDATE.
                 #
                 # Searching "screenshot" and getting files that mention screenshots, while the
                 # folder actually called that sits fourth, is the wrong answer presented
                 # confidently. A folder named exactly what was typed outranks everything.
                 #
-                # ⚠️ READ FROM THE ROW SO IT CANNOT DRIFT from what is stored — the earlier
+                # READ FROM THE ROW SO IT CANNOT DRIFT from what is stored — the earlier
                 # folder bugs all came from a second source of truth.
                 is_dir = bool(dflag)
                 if base == t or base.rsplit(".", 1)[0] == t:
@@ -1145,18 +1145,18 @@ class Store:
                 elif t.startswith(".") :
                     sc = 0.3
                 else:
-                    # ⚠⚠️ THE TERM IS NOT IN THIS ITEM'S NAME AT ALL — AN ANCESTOR MATCHED, AND AN
+                    # THE TERM IS NOT IN THIS ITEM'S NAME AT ALL — AN ANCESTOR MATCHED, AND AN
                     # ANCESTOR MATCH IS NOT A RESULT.
                     #
-                    # ⚠️ REPORTED TWICE: "screenshot" returned everything under
+                    # REPORTED TWICE: "screenshot" returned everything under
                     # ~/Documents/Screenshots, because that file contains the word in its PATH
                     # while its own NAME is something else entirely.
                     #
-                    # ⚠️ IT SCORED 1.0, WHICH IS ABOVE ZERO AND THEREFORE A RESULT. Searching for a
+                    # IT SCORED 1.0, WHICH IS ABOVE ZERO AND THEREFORE A RESULT. Searching for a
                     # folder returned the folder AND every file inside it, burying the folder
                     # that was actually asked for under its own contents.
                     #
-                    # ⚠️ SOMEONE WHO SEARCHES A FOLDER NAME WANTS THE FOLDER. If they want what is
+                    # SOMEONE WHO SEARCHES A FOLDER NAME WANTS THE FOLDER. If they want what is
                     # inside they can open it — one click, no guessing. Guessing wrong here is
                     # worse, because an ancestor match looks exactly like a real one.
                     continue

@@ -186,10 +186,10 @@ class Transcriber:
         try:
             segments, info = model.transcribe(
                 audio,
-                beam_size=1,        # greedy: faster, and the difference is small
-                vad_filter=True,    # skip silence, which is most of a long recording
-                language=None,      # detect; a device can hold more than one language
-                condition_on_previous_text=False,   # avoids repetition loops on music
+                beam_size=1, # greedy: faster, and the difference is small
+                vad_filter=True, # skip silence, which is most of a long recording
+                language=None, # detect; a device can hold more than one language
+                condition_on_previous_text=False, # avoids repetition loops on music
             )
         except Exception as exc:
             # The reason is KEPT. A bare except that returns a status name made a

@@ -154,7 +154,7 @@ Every clause of that is now false, and each one took a measurement to disprove:
 - the agent was one pass because **nobody had written the second one**
 - the binary could not leave because **the bundle contained no Python**
 
-⚠️ All three were invisible from the source. They were visible from running it.
+All three were invisible from the source. They were visible from running it.
 
 ## What "done" looks like
 

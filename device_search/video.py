@@ -2,15 +2,15 @@
 
 A video has two separable contents, and they need different tools:
 
-    the audio track      -> Whisper  -> what was SAID, with a timestamp
-    the frames           -> SigLIP   -> what was SHOWN, with a timestamp
+    the audio track -> Whisper -> what was SAID, with a timestamp
+    the frames -> SigLIP -> what was SHOWN, with a timestamp
 
 Both are already built for other file types. This module adds the one thing video
 needs that neither has: SAMPLING. A 40-minute recording is 60,000 frames, and the
 whole problem is deciding which 60 of them are worth keeping.
 
-    frame  ->  768-dim vector  ->  searched by describing it
-    hit    ->  "at 12:30 the screen shows a bar chart"
+    frame -> 768-dim vector -> searched by describing it
+    hit -> "at 12:30 the screen shows a bar chart"
 
 WHY EVEN SAMPLING AND NOT EVERY FRAME
 
@@ -95,7 +95,7 @@ def sample_frames(path: Path, interval: float = DEFAULT_INTERVAL):
 
             target = 0.0
             while target < duration and len(out) < 600:
-                # ⚠️ THE OFFSET IS IN THE STREAM'S TIME BASE, NOT MICROSECONDS.
+                # THE OFFSET IS IN THE STREAM'S TIME BASE, NOT MICROSECONDS.
                 #
                 # This stream's time_base is 1/6000. Passing target * 1,000,000
                 # therefore asked for a point 167x further into the file than
@@ -115,7 +115,7 @@ def sample_frames(path: Path, interval: float = DEFAULT_INTERVAL):
                     if frame.time is None:
                         continue
                     if frame.time + 1e-6 < target:
-                        continue          # still before the target; keep reading
+                        continue # still before the target; keep reading
                     try:
                         img = frame.to_image()
                     except Exception:
@@ -212,7 +212,7 @@ class VideoIndex:
                 added += 1
             if progress_every and added and added % progress_every < BATCH:
                 rate = added / max(time.time() - t0, 1e-6)
-                print(f"  … {added} frames ({rate:.1f}/s)", flush=True)
+                print(f" … {added} frames ({rate:.1f}/s)", flush=True)
         return added
 
     def search(self, query: str, k: int = 10):

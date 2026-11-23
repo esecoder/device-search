@@ -8,10 +8,10 @@ The gap is not ranking. The retrieved document is correct and still insufficient
 So the second hop is driven by REFERENCES FOUND IN THE RESULTS, not by re-running
 the same query harder:
 
-    hop 1:  "which document explains the retry policy"
-            -> docs/retry.md  ("...see config/limits.yaml for the values")
+    hop 1: "which document explains the retry policy"
+            -> docs/retry.md ("...see config/limits.yaml for the values")
 
-    hop 2:  the first result names config/limits.yaml, which is indexed
+    hop 2: the first result names config/limits.yaml, which is indexed
             -> config/limits.yaml, now in context
 
     answer: a fact that was in neither document alone
@@ -91,7 +91,7 @@ def resolve_references(store, refs: list[str], exclude_ids: set[int]) -> list[tu
     """
     hits: list[tuple[int, str]] = []
     for ref in refs:
-        if len(ref) < 8:              # `x.py` matches far too much
+        if len(ref) < 8: # `x.py` matches far too much
             continue
         rows = store.conn.execute(
             "SELECT id, path FROM documents "

@@ -23,7 +23,7 @@ js = "".join(
 
 def main() -> int:
     ids = re.findall(r'id="([^"]+)"', html)
-    print(f"  {len(ids)} ids in index.html")
+    print(f" {len(ids)} ids in index.html")
 
     # An id can be styled by its ELEMENT as easily as by its id - `esc` is covered
     # by the generic `kbd` rule. Looking only for "#id" reported it as unstyled.
@@ -38,10 +38,10 @@ def main() -> int:
 
     missing_css = [i for i in ids if not styled(i)]
     missing_js = [i for i in ids if f'"{i}"' not in js]
-    print(f"  ids with no CSS rule     : {missing_css or 'none'}")
+    print(f" ids with no CSS rule : {missing_css or 'none'}")
     # Not a problem: an id styled only in CSS (`drag`, `box`, `foot`) is meant to
     # be static. Listed so the output is complete, not because it is wrong.
-    print(f"  ids not used in JS (style-only): {missing_js or 'none'}")
+    print(f" ids not used in JS (style-only): {missing_js or 'none'}")
 
     # Classes defined in CSS that nothing renders.
     defined = set(re.findall(r"\.([a-zA-Z][\w-]*)\s*(?=[,{:])", css))
@@ -54,24 +54,24 @@ def main() -> int:
     orphan = sorted(c for c in defined
                     if c not in used and c not in js)
 
-    print(f"  CSS classes never used   : {orphan[:15] or 'none'}")
+    print(f" CSS classes never used : {orphan[:15] or 'none'}")
 
     # Handlers pointing at ids that do not exist.
     handler_ids = set(re.findall(r'\$\("([^"]+)"\)', js))
     ghosts = sorted(h for h in handler_ids if h not in ids and h not in
                     {"busy-overlay", "setup-msg", "code-cost", "code-actions",
                      "media-cost", "media-actions", "setup"})
-    print(f"  JS looks for ids that do not exist: {ghosts or 'none'}")
+    print(f" JS looks for ids that do not exist: {ghosts or 'none'}")
 
     # Only these two are failures. "Style-only id" is normal, and the class check
     # already excludes anything mentioned in a script.
     problems = bool(missing_css or ghosts or orphan)
     print()
     if problems:
-        print("  REVIEW  something above needs a reason or a removal")
+        print(" REVIEW something above needs a reason or a removal")
     else:
-        print("  PASS  no orphaned ids, classes or handlers")
-    print("  NOTE  this cannot judge layout, spacing or colour. That needs eyes.")
+        print(" PASS no orphaned ids, classes or handlers")
+    print(" NOTE this cannot judge layout, spacing or colour. That needs eyes.")
     return 1 if problems else 0
 
 

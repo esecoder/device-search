@@ -1,28 +1,28 @@
 """
 extract.py — get TEXT out of a file, whatever kind of file it is.
 
-===============================================================================
-⚠️ WHY THIS IS THE RIGHT FIRST MOVE INTO MULTIMODAL, AND WHY IT IS NOT "MULTIMODAL RAG"
-===============================================================================
+
+WHY THIS IS THE RIGHT FIRST MOVE INTO MULTIMODAL, AND WHY IT IS NOT "MULTIMODAL RAG"
+
 There are three ways to make media searchable, and they are not interchangeable:
 
-    1. EXTRACT TEXT FROM IT  (this file)      image -> OCR, PDF -> text, audio -> ASR
-                                              ⚠️ Then it is just NORMAL RAG. One index,
+    1. EXTRACT TEXT FROM IT (this file) image -> OCR, PDF -> text, audio -> ASR
+                                              Then it is just NORMAL RAG. One index,
                                               BM25 works, embeddings work, nothing new.
-    2. JOINT EMBEDDING       (CLIP, later)    image -> vector, text -> same vector space
-                                              ⚠️ Finds images by VISUAL CONTENT with no text
+    2. JOINT EMBEDDING (CLIP, later) image -> vector, text -> same vector space
+                                              Finds images by VISUAL CONTENT with no text
                                               at all — but coarsely, and it cannot answer
                                               questions about what is in the image.
-    3. CAPTION THEN EMBED    (a VLM)          image -> description -> index the text
-                                              ⚠️ Richest, and the most expensive: one model
+    3. CAPTION THEN EMBED (a VLM) image -> description -> index the text
+                                              Richest, and the most expensive: one model
                                               call per file. 66k images is hours to days.
 
-⚠️ **THIS IS APPROACH 1, AND IT IS THE HIGHEST VALUE PER UNIT OF EFFORT**, because it reuses
+**THIS IS APPROACH 1, AND IT IS THE HIGHEST VALUE PER UNIT OF EFFORT**, because it reuses
 the entire existing pipeline. Once a PDF or a screenshot becomes text, everything already
 built — exact match, BM25, embeddings, the query router, the two-tier output — works on it
 with no changes.
 
-⚠️ ITS HONEST LIMIT: it only finds media that CONTAINS TEXT. A photograph of a sunset has
+ITS HONEST LIMIT: it only finds media that CONTAINS TEXT. A photograph of a sunset has
 nothing to extract, and this file will correctly report that it found nothing. Approach 2 is
 what finds that photo, and it is not built here.
 """
@@ -33,7 +33,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-# ⚠️ LAZY GLOBALS. Loading the OCR model takes seconds and ~100 MB of RAM; a user who only
+# LAZY GLOBALS. Loading the OCR model takes seconds and ~100 MB of RAM; a user who only
 # searches text should never pay for it. Both are loaded on first use and cached.
 _ocr_engine = None
 _ocr_failed = False
@@ -42,7 +42,7 @@ _ocr_failed = False
 def _ocr():
     """Return a RapidOCR engine, or None if it cannot be built.
 
-    ⚠️ RETURNS None RATHER THAN RAISING. OCR is an ENHANCEMENT — if it is unavailable, text
+    RETURNS None RATHER THAN RAISING. OCR is an ENHANCEMENT — if it is unavailable, text
     search must still work. A search tool that refuses to run because an optional model is
     missing is worse than one that searches text only, and reports that it did.
     """
@@ -57,7 +57,7 @@ def _ocr():
 
 
 def ocr_available() -> tuple[bool, str]:
-    """⚠️ REPORTED, NOT ASSUMED. If this is False the CLI must say so, or a user will conclude
+    """REPORTED, NOT ASSUMED. If this is False the CLI must say so, or a user will conclude
     their screenshot does not exist rather than that OCR was never installed."""
     if _ocr() is None:
         return False, "rapidocr-onnxruntime unavailable (pip install rapidocr-onnxruntime)"
@@ -66,7 +66,7 @@ def ocr_available() -> tuple[bool, str]:
 
 def pdf_available() -> tuple[bool, str]:
     try:
-        import pdftext  # noqa: F401
+        import pdftext # noqa: F401
         return True, "pdftext"
     except Exception as e:
         return False, f"pdftext unavailable ({type(e).__name__})"
@@ -76,9 +76,9 @@ def pdf_available() -> tuple[bool, str]:
 # EXTRACTORS
 # =============================================================================
 def extract_pdf(path: Path, max_pages: int | None = None) -> str:
-    """⚠️ pdftext RETURNS TEXT WITH POSITIONS, which we join page by page.
+    """pdftext RETURNS TEXT WITH POSITIONS, which we join page by page.
 
-    ⚠️ PAGE MARKERS ARE INSERTED DELIBERATELY. Without them a hit inside a 400-page PDF reports
+    PAGE MARKERS ARE INSERTED DELIBERATELY. Without them a hit inside a 400-page PDF reports
     "line 8,231", which is true and useless — the user thinks in pages. The marker lets the
     snippet say which page it came from.
     """
@@ -99,14 +99,14 @@ def extract_pdf(path: Path, max_pages: int | None = None) -> str:
 
 
 def extract_image(path: Path, min_conf: float = 0.5) -> str:
-    """OCR an image. ⚠️ `min_conf` IS NOT A TUNABLE — IT IS THE DIFFERENCE BETWEEN TEXT AND NOISE.
+    """OCR an image. `min_conf` IS NOT A TUNABLE — IT IS THE DIFFERENCE BETWEEN TEXT AND NOISE.
 
-    ⚠️ OCR ALWAYS RETURNS SOMETHING. On a photograph with no text, a detector with no
+    OCR ALWAYS RETURNS SOMETHING. On a photograph with no text, a detector with no
     confidence floor invents words out of texture — and those invented words go into the index
     and become searchable. **A hallucinated index entry is worse than a missing one**, because
     a user who searches and gets a match believes the text is really there.
 
-    ⚠️ And the confidence is REPORTED per detection, so the caller can see how much of the text
+    And the confidence is REPORTED per detection, so the caller can see how much of the text
     was marginal rather than being handed one blended string.
     """
     engine = _ocr()
@@ -120,7 +120,7 @@ def extract_image(path: Path, min_conf: float = 0.5) -> str:
         return ""
     lines = []
     for box, txt, conf in result:
-        # ⚠️ Raise the floor rather than lower it if text is being invented. The default 0.5 is
+        # Raise the floor rather than lower it if text is being invented. The default 0.5 is
         # already permissive; real screenshots score 0.85-0.99.
         if conf is not None and conf < min_conf:
             continue
@@ -151,7 +151,7 @@ def extract_text_file(path: Path) -> str:
 # =============================================================================
 # THE DISPATCHER
 # =============================================================================
-# ⚠️ ORDER MATTERS AND IS BY COST: utf-8 read (microseconds) -> PDF (ms) -> OCR (SECONDS).
+# ORDER MATTERS AND IS BY COST: utf-8 read (microseconds) -> PDF (ms) -> OCR (SECONDS).
 # The cheap paths must be tried first so a corpus of text files never pays for OCR.
 from .config import AUDIO_EXTS, VIDEO_EXTS, transcribe_enabled
 
@@ -179,7 +179,7 @@ def _transcriber():
 def extract(path: Path) -> tuple[str, str]:
     """Return (text, method). `method` is empty-ish when nothing was found.
 
-    ⚠️ `method` IS RETURNED, NOT DISCARDED. "found in scan.pdf" and "found in scan.pdf via OCR"
+    `method` IS RETURNED, NOT DISCARDED. "found in scan.pdf" and "found in scan.pdf via OCR"
     are different claims about reliability, and a user checking an OCR hit needs to know which
     one they are looking at. It travels into the index and is shown in results.
     """
@@ -223,7 +223,7 @@ def extract(path: Path) -> tuple[str, str]:
 
 
 def supports_media() -> dict:
-    """⚠️ A SINGLE PLACE THE CLI CAN ASK 'what can this install actually do?'
+    """A SINGLE PLACE THE CLI CAN ASK 'what can this install actually do?'
 
     Without this, the answer is discovered one missing file at a time — and the user concludes
     their scan is not on disk rather than that OCR was never installed.

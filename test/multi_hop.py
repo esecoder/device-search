@@ -36,7 +36,7 @@ def main() -> int:
         Doc("/proj/config/limits.yaml",
             "retry_timeout_seconds: 30\nmax_attempts: 5"),
         Doc("/proj/README.md", "This project retries things. see config/limits.yaml"),
-        Doc("/proj/src/app.py", "from retry import Retry  # unrelated"),
+        Doc("/proj/src/app.py", "from retry import Retry # unrelated"),
         Doc("/proj/lonely.txt", "nothing points anywhere. no paths at all."),
     ])
     store.conn.commit()
@@ -48,7 +48,7 @@ def main() -> int:
     print("reference extraction")
     for ref in extract_references(
             "see config/limits.yaml and docs/retry.md, not README.md or package.json"):
-        print(f"  {ref}")
+        print(f" {ref}")
     ok_refs = ("config/limits.yaml" in
                extract_references("see config/limits.yaml"))
 
@@ -58,29 +58,29 @@ def main() -> int:
                       lang="md", n_lines=1, score=1.0)]
     added, trace = follow(store, hop1)
     for _, path in added:
-        print(f"  added: {path}")
+        print(f" added: {path}")
 
     answer_reachable = False
     for doc_id, _path in added:
         row = store.by_id(doc_id)
         if row and "30" in (row[4] or ""):
             answer_reachable = True
-    print(f"  hop 1 alone contains the answer : {'30' in (store.by_id(hop1[0].doc_id)[4] or '')}")
-    print(f"  after hop 2 the answer is present: {answer_reachable}")
+    print(f" hop 1 alone contains the answer : {'30' in (store.by_id(hop1[0].doc_id)[4] or '')}")
+    print(f" after hop 2 the answer is present: {answer_reachable}")
 
     print()
     print("control - a document that references nothing")
     lonely = [Candidate(doc_id=ident("lonely.txt"), path="/proj/lonely.txt",
                         lang="txt", n_lines=1, score=1.0)]
     added2, trace2 = follow(store, lonely)
-    print(f"  added: {len(added2)} (expect 0), hop: {trace2['hop']}")
+    print(f" added: {len(added2)} (expect 0), hop: {trace2['hop']}")
 
     print()
     print("control - README is skipped, so hop 2 does not add noise")
     readme = [Candidate(doc_id=ident("README.md"), path="/proj/README.md",
                         lang="md", n_lines=1, score=1.0)]
     added3, trace3 = follow(store, readme)
-    print(f"  added: {[p for _, p in added3]}")
+    print(f" added: {[p for _, p in added3]}")
 
     failures = []
     if not ok_refs:
@@ -97,9 +97,9 @@ def main() -> int:
     print()
     if failures:
         for f in failures:
-            print(f"  FAIL  {f}")
+            print(f" FAIL {f}")
         return 1
-    print("  PASS  the second hop reaches an answer the first cannot")
+    print(" PASS the second hop reaches an answer the first cannot")
     return 0
 
 

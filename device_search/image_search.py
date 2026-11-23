@@ -7,8 +7,8 @@ model cannot either: bge-small has never seen a pixel.
 SigLIP2 maps an image and a sentence into the SAME 768-dimensional space, so a
 description and a picture can be compared directly. Two halves, one space:
 
-    ImageEmbedding("google/siglip2-base-patch16-224")   image -> vector
-    TextEmbedding("google/siglip2-base-patch16-224")   query -> vector
+    ImageEmbedding("google/siglip2-base-patch16-224") image -> vector
+    TextEmbedding("google/siglip2-base-patch16-224") query -> vector
 
 They must be the same model name. Pairing the vision half with a different text
 model produces two vectors that are individually sensible and mutually
@@ -16,8 +16,8 @@ meaningless, and the failure looks like poor search rather than a bug.
 
 Measured on this machine: 0.22s per image, 768 dimensions, about 3 KB per vector.
 
-    image embed    0.22 s each
-    1,660 images   about 6 minutes, 5 MB of vectors
+    image embed 0.22 s each
+    1,660 images about 6 minutes, 5 MB of vectors
 
 WHAT IT IS GOOD AND BAD AT
 
@@ -82,7 +82,7 @@ class ImageIndex:
             from fastembed import ImageEmbedding
             t = time.time()
             self._img = ImageEmbedding(model_name=self.model_name)
-            print(f"  image model ready in {time.time()-t:.0f}s")
+            print(f" image model ready in {time.time()-t:.0f}s")
         return self._img
 
     def _text_model(self):
@@ -90,7 +90,7 @@ class ImageIndex:
             from fastembed import TextEmbedding
             t = time.time()
             self._txt = TextEmbedding(model_name=self.model_name)
-            print(f"  text model ready in {time.time()-t:.0f}s")
+            print(f" text model ready in {time.time()-t:.0f}s")
         return self._txt
 
     # ------------------------------------------------------------------ build
@@ -146,7 +146,7 @@ class ImageIndex:
                 done = len(ids)
                 if done and done % progress_every < batch:
                     rate = done / max(time.time() - t0, 1e-6)
-                    print(f"  … {done:,} images embedded ({rate:.1f}/s)", flush=True)
+                    print(f" … {done:,} images embedded ({rate:.1f}/s)", flush=True)
                     # Reported to the caller so a background build can say how far
                     # it has got. Without this the button said "Running in the
                     # background" and then nothing, for forty-six minutes.
@@ -213,10 +213,10 @@ def demo(image_paths: list[str], queries: list[str]) -> None:
     txts = txts / np.linalg.norm(txts, axis=1, keepdims=True)
     sims = imgs @ txts.T
 
-    print(f"  {len(image_paths)} images embedded in {dt:.1f}s ({dt/len(image_paths):.2f}s each)")
+    print(f" {len(image_paths)} images embedded in {dt:.1f}s ({dt/len(image_paths):.2f}s each)")
     print()
     header = "".join(f"{q[:12]:>14}" for q in queries)
-    print(f"  {'':<20}{header}")
+    print(f" {'':<20}{header}")
     hits = 0
     for r, p in enumerate(image_paths):
         row = "".join(f"{sims[r][c]:>14.3f}" for c in range(len(queries)))
@@ -224,7 +224,7 @@ def demo(image_paths: list[str], queries: list[str]) -> None:
         ok = best == r if r < len(queries) else None
         hits += bool(ok)
         mark = "OK" if ok else ("WRONG" if ok is False else "")
-        print(f"  {os.path.basename(p)[:19]:<20}{row}   {queries[best][:24]!r} {mark}")
+        print(f" {os.path.basename(p)[:19]:<20}{row} {queries[best][:24]!r} {mark}")
     print()
-    print(f"  matched to their own description: {hits}/{len(image_paths)}"
-          f"   (chance {1/len(queries):.0%})")
+    print(f" matched to their own description: {hits}/{len(image_paths)}"
+          f" (chance {1/len(queries):.0%})")

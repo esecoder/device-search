@@ -21,17 +21,17 @@ nothing; it is stripped rather than shipped in every build.
 
 WHY THIS AND NOT THE EARLIER ATTEMPTS
 
-  a single magnifier     indistinguishable from Spotlight at a glance
-  three stacked bars     a HAMBURGER MENU; in a menu bar that means "open a menu"
-  2x2 grid, one lit      clear at 176px, mush at 22 - outlines dissolve when the
+  a single magnifier indistinguishable from Spotlight at a glance
+  three stacked bars a HAMBURGER MENU; in a menu bar that means "open a menu"
+  2x2 grid, one lit clear at 176px, mush at 22 - outlines dissolve when the
                          44px source is downsampled, and thickening merges them
-  a frame with a dot     legible, but said nothing about searching
+  a frame with a dot legible, but said nothing about searching
 
 TWO lenses are distinctive where ONE is not, and the V of handles is a shape no
 system icon uses.
 
-    app icon      rounded square, warm ground, three pale slabs, one accent dot
-    tray icon     same three slabs in BLACK + ALPHA ONLY, because macOS menu-bar
+    app icon rounded square, warm ground, three pale slabs, one accent dot
+    tray icon same three slabs in BLACK + ALPHA ONLY, because macOS menu-bar
                   template images are masked by the system: any colour is ignored
                   and only the alpha survives. A coloured icon here renders as a
                   grey blob, which is what shipped before and why it looked wrong.
@@ -88,7 +88,7 @@ def _render_mark(ink: str, px: int, weight: int = 8) -> Image.Image:
     if not chrome.exists():
         chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
     if not chrome.exists():
-        raise SystemExit("  no Chrome or Edge to rasterise the SVG")
+        raise SystemExit(" no Chrome or Edge to rasterise the SVG")
 
     out = work / "out.png"
     subprocess.run([str(chrome), "--headless", "--disable-gpu", "--hide-scrollbars",
@@ -119,7 +119,7 @@ def draw_app_icon(size: int = 1024) -> Image.Image:
     #
     # Rendering large, measuring the alpha bounding box, and scaling that box into
     # the icon centres it whatever the source file does.
-    canvas = int(size * 0.74)          # the mark occupies 74% of the tile
+    canvas = int(size * 0.74) # the mark occupies 74% of the tile
     big = _render_mark("#ECE9F5", size)
     box = big.getbbox()
     if box:
@@ -164,11 +164,11 @@ def main() -> int:
 
     app = draw_app_icon(1024)
     app.save(ICONS / "icon.png")
-    print(f"  wrote {ICONS/'icon.png'} ({app.size[0]}x{app.size[1]})")
+    print(f" wrote {ICONS/'icon.png'} ({app.size[0]}x{app.size[1]})")
 
     tray = draw_tray_icon(44)
     tray.save(ICONS / "tray.png")
-    print(f"  wrote {ICONS/'tray.png'} ({tray.size[0]}x{tray.size[1]}, black + alpha)")
+    print(f" wrote {ICONS/'tray.png'} ({tray.size[0]}x{tray.size[1]}, black + alpha)")
 
     # .icns is what the bundle actually uses. iconutil needs an .iconset folder
     # containing every size, and refuses anything else.
@@ -181,9 +181,9 @@ def main() -> int:
     r = subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(out)],
                        capture_output=True, text=True)
     if r.returncode == 0:
-        print(f"  wrote {out}")
+        print(f" wrote {out}")
     else:
-        print(f"  iconutil failed: {r.stderr.strip()[:120]}")
+        print(f" iconutil failed: {r.stderr.strip()[:120]}")
         return 1
     return 0
 

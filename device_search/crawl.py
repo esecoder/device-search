@@ -1,14 +1,14 @@
 """
 crawl.py — walk the filesystem and turn files into text.
 
-⚠️ THIS IS THE PART THAT TOUCHES EVERYTHING, so it is written defensively:
+THIS IS THE PART THAT TOUCHES EVERYTHING, so it is written defensively:
 
-    * a permission error is a SKIP, not a crash  — half of `~/Library` is unreadable
+    * a permission error is a SKIP, not a crash — half of `~/Library` is unreadable
     * a symlink loop is detected, not followed forever
     * a file that vanishes mid-walk (a build writing output) is a skip
     * a 4 GB disk image is rejected on SIZE before it is ever opened
 
-⚠️ And every skip is COUNTED AND REPORTED. A crawler that silently drops files produces a
+And every skip is COUNTED AND REPORTED. A crawler that silently drops files produces a
 search tool whose misses are indistinguishable from "not on disk" — which is the worst possible
 failure for a tool whose entire job is telling you whether something exists.
 """
@@ -27,24 +27,24 @@ from .extract import extract
 
 @dataclass
 class CrawlStats:
-    """⚠️ Every number here is printed at the end of a crawl. Nothing is silent."""
+    """Every number here is printed at the end of a crawl. Nothing is silent."""
     seen: int = 0
     indexed: int = 0
-    unchanged: int = 0       # ⚠️ skipped because mtime+size matched the index
-    media_seen: int = 0      # ⚠️ PDFs and images that went through extract()
-    media_indexed: int = 0   # ⚠️ of those, how many actually contained text
+    unchanged: int = 0 # skipped because mtime+size matched the index
+    media_seen: int = 0 # PDFs and images that went through extract()
+    media_indexed: int = 0 # of those, how many actually contained text
     skipped: dict = field(default_factory=dict)
     bytes_indexed: int = 0
     errors: int = 0
 
-    # ⚠️ THE PATHS, NOT JUST THE COUNTS. A count tells the user something was skipped; the path
+    # THE PATHS, NOT JUST THE COUNTS. A count tells the user something was skipped; the path
     # is what lets them find it by name and grep it on demand. Without this the information is
     # unactionable, which is barely better than not having it.
     missing: list = field(default_factory=list)
 
     def skip(self, reason: str, path: str = "", size: int = 0) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
-        # ⚠️ ONLY THE REASONS A USER CAN ACT ON. `unchanged` is a success (the file is already
+        # ONLY THE REASONS A USER CAN ACT ON. `unchanged` is a success (the file is already
         # indexed) and `empty` is a property of the file, not a failure to index it. Listing them
         # would bury the 150 that actually matter under thousands that do not.
         if path and reason in ("too_large", "read_failed", "media_no_text", "no_text_content"):
@@ -52,22 +52,22 @@ class CrawlStats:
 
     def report(self) -> str:
         lines = [
-            f"  files seen      : {self.seen:,}",
-            f"  unchanged       : {self.unchanged:,}  (skipped — mtime+size match the index)",
-            f"  re-indexed      : {self.indexed:,}  ({self.bytes_indexed/1e6:.1f} MB of text)",
+            f" files seen : {self.seen:,}",
+            f" unchanged : {self.unchanged:,} (skipped — mtime+size match the index)",
+            f" re-indexed : {self.indexed:,} ({self.bytes_indexed/1e6:.1f} MB of text)",
         ]
         if self.media_seen:
-            # ⚠️ Media is reported SEPARATELY and always, once any was seen. A PDF-heavy or
+            # Media is reported SEPARATELY and always, once any was seen. A PDF-heavy or
             # photo-heavy corpus otherwise looks identical to one where media was skipped.
-            lines.append(f"  media seen      : {self.media_seen:,}  "
+            lines.append(f" media seen : {self.media_seen:,} "
                          f"({self.media_indexed:,} contained text, "
                          f"{self.media_seen - self.media_indexed:,} did not)")
         if self.skipped:
-            lines.append("  skipped:")
+            lines.append(" skipped:")
             for reason, n in sorted(self.skipped.items(), key=lambda kv: -kv[1]):
-                lines.append(f"    {reason:<20} {n:,}")
+                lines.append(f" {reason:<20} {n:,}")
         if self.errors:
-            lines.append(f"  read errors     : {self.errors:,}  (permissions / vanished files)")
+            lines.append(f" read errors : {self.errors:,} (permissions / vanished files)")
         return "\n".join(lines)
 
 
@@ -79,11 +79,11 @@ class FileDoc:
     lang: str
     text: str
     n_lines: int
-    # ⚠️ HOW the text was obtained: "utf8", "pdftext", "ocr". This travels into the index and
+    # HOW the text was obtained: "utf8", "pdftext", "ocr". This travels into the index and
     # into search results, because "found in scan.pdf" and "found in scan.pdf via OCR" are
     # different claims about reliability and the user is entitled to know which one they got.
     method: str = "utf8"
-    # ⚠️ True FOR A DIRECTORY. It has no text, must never be embedded, and exists so that
+    # True FOR A DIRECTORY. It has no text, must never be embedded, and exists so that
     # "find my screenshots folder" can work at all — which it could not, because only files
     # were ever added to the index.
     is_dir: bool = False
@@ -92,12 +92,12 @@ class FileDoc:
 def _read_text(path: Path) -> str | None:
     """Read a file as text, or return None.
 
-    ⚠️ `errors="replace"` IS DELIBERATE. Plenty of real source files are latin-1 or have a
+    `errors="replace"` IS DELIBERATE. Plenty of real source files are latin-1 or have a
     stray invalid byte, and refusing to index them because of one byte loses the whole file.
     The replacement character is harmless for search, and it is honest: the text really is
     not valid utf-8.
 
-    ⚠️ And the LINE-LENGTH CAP matters more than it looks: a minified JS bundle is one line of
+    And the LINE-LENGTH CAP matters more than it looks: a minified JS bundle is one line of
     2 MB. Indexing it whole makes the store huge and every line-number report meaningless, so
     very long lines are truncated with a marker.
     """
@@ -126,27 +126,27 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
          known: dict | None = None):
     """Yield FileDoc for every indexable file under `roots`.
 
-    ⚠️⚠️ `known` IS THE INCREMENTAL RE-INDEX, AND IT IS THE MOST IMPORTANT PARAMETER HERE.
+    `known` IS THE INCREMENTAL RE-INDEX, AND IT IS THE MOST IMPORTANT PARAMETER HERE.
     It maps path -> (mtime, size) from the existing index. A file whose mtime AND size are
     unchanged is SKIPPED WITHOUT BEING OPENED.
 
-    ⚠️ WHY THIS IS NOT AN OPTIMISATION BUT A PREREQUISITE: `stat` costs microseconds; reading,
+    WHY THIS IS NOT AN OPTIMISATION BUT A PREREQUISITE: `stat` costs microseconds; reading,
     extracting and embedding costs seconds. Without this, every run is a full rebuild — which
     for a text corpus is minutes, and for OCR over 66k images is 18-36 HOURS. An app you cannot
     re-run is an app you run once, and then it silently stops finding new files.
 
-    ⚠️ AND WHY SIZE IS CHECKED TOO, NOT JUST MTIME: mtime LIES. `rsync -t`, archivers and some
+    AND WHY SIZE IS CHECKED TOO, NOT JUST MTIME: mtime LIES. `rsync -t`, archivers and some
     editors preserve an old modification time on new content, so an mtime-only check would
     serve a stale index forever. Size catches nearly all of those for one extra integer
     comparison. (A content hash would be exact, but it requires reading the file — which is the
     cost we are trying to avoid.)
 
-    ⚠️ `os.walk(followlinks=False)` IS THE DEFAULT AND MUST STAY THAT WAY. Following symlinks
+    `os.walk(followlinks=False)` IS THE DEFAULT AND MUST STAY THAT WAY. Following symlinks
     on a home directory is the classic way to walk `/` through a link in a project folder and
     never finish. Directories that ARE symlinks are still descended once because `os.walk`
     lists them in `dirnames`; we filter them below.
 
-    ⚠️ THE IN-PLACE `dirnames[:]` FILTER is what makes this fast: pruning `node_modules` here
+    THE IN-PLACE `dirnames[:]` FILTER is what makes this fast: pruning `node_modules` here
     means the walk never stats its 40,000 files at all.
     """
     if known is None:
@@ -169,31 +169,31 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 if name.startswith(".") and name in SKIP_DIR_NAMES:
                     stats.skip(f"dir:{name}")
                     continue
-                # ⚠️ Drop symlinked dirs so we cannot loop.
+                # Drop symlinked dirs so we cannot loop.
                 if (d / name).is_symlink():
                     stats.skip("symlink_dir")
                     continue
                 keep.append(name)
             dirnames[:] = keep
 
-            # ⚠⚠️ DIRECTORIES ARE YIELDED HERE, FROM `dirnames` — NOT FROM `filenames`.
+            # DIRECTORIES ARE YIELDED HERE, FROM `dirnames` — NOT FROM `filenames`.
             #
             # The first attempt put this in the `for fname in filenames` loop below, where
-            # `p.is_dir()` CAN NEVER BE TRUE, because `filenames` contains only files. ⚠️ So the
+            # `p.is_dir()` CAN NEVER BE TRUE, because `filenames` contains only files. So the
             # branch was unreachable, no folder was ever indexed, and "screenshot" stayed
             # unanswerable while the code looked correct and the test passed.
             #
-            # ⚠️ `os.walk` HANDS YOU THE TWO LISTS SEPARATELY AND THAT IS THE WHOLE POINT — a
+            # `os.walk` HANDS YOU THE TWO LISTS SEPARATELY AND THAT IS THE WHOLE POINT — a
             # directory is in `dirnames`, and looking for one among `filenames` finds nothing,
             # forever, silently.
             #
-            # ⚠️ AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
+            # AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
             # embed; it is a NAME. Giving it any text would put it in the vector index and the
             # quality filter, where it would mean nothing.
             for name in dirnames:
                 sub_path = d / name
                 stats.seen += 1
-                # ⚠️ 0.0 as the mtime IS DELIBERATE: a directory's mtime changes whenever a
+                # 0.0 as the mtime IS DELIBERATE: a directory's mtime changes whenever a
                 # file is added or removed inside it, so using the real one would mark every
                 # parent directory changed on every incremental pass.
                 yield FileDoc(str(sub_path), 0.0, 0, "", "", 0, is_dir=True)
@@ -201,33 +201,33 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
             for fname in filenames:
                 stats.seen += 1
                 if stats.seen % progress_every == 0:
-                    print(f"    … {stats.seen:,} seen, {stats.indexed:,} indexed", flush=True)
+                    print(f" … {stats.seen:,} seen, {stats.indexed:,} indexed", flush=True)
                 p = d / fname
                 try:
                     st = p.stat()
                 except (OSError, PermissionError):
                     stats.skip("stat_failed")
                     continue
-                # ⚠⚠️ DIRECTORIES ARE INDEXED, NOT SKIPPED, AND THIS WAS THE LARGEST HOLE IN THE TOOL.
+                # DIRECTORIES ARE INDEXED, NOT SKIPPED, AND THIS WAS THE LARGEST HOLE IN THE TOOL.
                 #
                 # "find my screenshot folder" could never work: only files were indexed, so a
-                # directory name was invisible however it was spelled. ⚠️ Measured — a search for
+                # directory name was invisible however it was spelled. Measured — a search for
                 # "screenshot" over 5,570 indexed files returned ONE result, because the folder
                 # the user meant had never been added to the index at all.
                 #
-                # ⚠️ EVERY FILE-SEARCH TOOL RETURNS FOLDERS. Spotlight, Everything and the Finder
+                # EVERY FILE-SEARCH TOOL RETURNS FOLDERS. Spotlight, Everything and the Finder
                 # all do, because someone looking for "the screenshots folder" is asking about a
                 # CONTAINER — it is the natural way to look for something whose contents they
                 # cannot name.
                 #
-                # ⚠️ AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
+                # AND THE TEXT IS EMPTY ON PURPOSE. A directory has no content to search or to
                 # embed; it is a NAME. Giving it any text would put it in the vector index and the
                 # quality filter, where it would mean nothing.
                 if not p.is_file():
                     stats.skip("not_regular_file")
                     continue
 
-                # ⚠️ THE INCREMENTAL CHECK. It must come AFTER the file-type check (so a
+                # THE INCREMENTAL CHECK. It must come AFTER the file-type check (so a
                 # binary file is still counted as skipped for the right reason) and BEFORE
                 # `is_text_file` / `_read_text` (which is where the cost lives).
                 prev = known.get(str(p))
@@ -237,22 +237,22 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
 
                 ok, reason = is_text_file(p, st.st_size)
                 if not ok:
-                    # ⚠️ `too_large` AND `binary_ext` CARRY THE PATH. The first is the one the
+                    # `too_large` AND `binary_ext` CARRY THE PATH. The first is the one the
                     # user most needs to know about: the file is real, searchable in principle,
                     # and invisible. The second is how you find out that a 200 MB binary exists.
-                    # ⚠⚠️ `sz` WAS NEVER DEFINED. IT CRASHED THE WHOLE CRAWL, EVERY TIME.
+                    # `sz` WAS NEVER DEFINED. IT CRASHED THE WHOLE CRAWL, EVERY TIME.
                     #
                     # The stat result is `st`. This line referred to `sz`, a name that appears
                     # nowhere else in the file — so the FIRST file that was too large or had a
                     # binary extension raised NameError and killed the walk.
                     #
-                    # ⚠️ AND IT WAS INVISIBLE FROM THE INTERFACE. The daemon's automatic rebuild did
+                    # AND IT WAS INVISIBLE FROM THE INTERFACE. The daemon's automatic rebuild did
                     # fire, immediately, exactly as designed — and it died on the first skipped
                     # file, with the traceback going to daemon.log and nothing reaching the user.
                     # The index stayed at format 0 and folders stayed unsearchable, while the app
                     # looked healthy.
                     #
-                    # ⚠️ A BACKGROUND JOB THAT FAILS SILENTLY IS WORSE THAN ONE THAT DOES NOT RUN,
+                    # A BACKGROUND JOB THAT FAILS SILENTLY IS WORSE THAN ONE THAT DOES NOT RUN,
                     # because the app believes it succeeded.
                     stats.skip(reason, str(p), st.st_size)
                     continue
@@ -262,8 +262,8 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 # the else below, were read as text, failed, and were counted as
                 # read_failed - 105 media files, none of them visible in any count.
                 if ext in MEDIA_EXTS or ext in AUDIO_EXTS or ext in VIDEO_EXTS:
-                    # ⚠️ MEDIA GOES THROUGH extract(), WHICH IS SLOW (OCR is ~1-2s a file).
-                    # ⚠️ AND AN IMAGE WITH NO TEXT IS NOT AN ERROR — it is the common case for
+                    # MEDIA GOES THROUGH extract(), WHICH IS SLOW (OCR is ~1-2s a file).
+                    # AND AN IMAGE WITH NO TEXT IS NOT AN ERROR — it is the common case for
                     # photos, and it gets its own counter so a user can see the difference
                     # between "not indexed" and "indexed, found no text".
                     text, method = extract(p)
@@ -299,14 +299,14 @@ def walk(roots: list[Path], include_deps: bool = False, progress_every: int = 20
                 yield FileDoc(str(p), st.st_mtime, st.st_size,
                               "ocr" if method == "ocr" else lang_of(p), text,
                               text.count("\n") + 1, method)
-    # ⚠️ Stats are attached to the generator so the caller can print them after the loop.
+    # Stats are attached to the generator so the caller can print them after the loop.
     walk.stats = stats
 
 
 def find_line(text: str, needle: str) -> tuple[int, str] | None:
     """Locate `needle` in `text`, returning (1-based line number, that line).
 
-    ⚠️ USED FOR PROVENANCE, NOT FOR SEARCHING. The search backends already know which file
+    USED FOR PROVENANCE, NOT FOR SEARCHING. The search backends already know which file
     matched; this turns "matched this file" into "matched line 214", which is the difference
     between a useful result and a `grep`-shaped shrug. Case-insensitive on the fallback so a
     semantic hit still gets a line number even when the words differ.
