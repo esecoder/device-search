@@ -40,8 +40,21 @@ from pathlib import Path
 # A path-ish token: something with a slash, or a filename with an extension.
 # Deliberately narrow. `re.findall` over a large document with a looser pattern
 # returns sentences, and each one would become a lookup.
+# A reference must end in an extension that looks like a FILE.
+#
+# The first pattern matched any dotted token, so `self.compiler`,
+# `os.path.getsize` and `name.split` were treated as file references - and each one
+# triggered a full 866,000-row path scan. Measured: 8 seconds per false reference,
+# 35 of them per search.
+_SOURCE_EXTS = (
+    "py js ts tsx jsx mjs cjs json yaml yml toml ini cfg conf md txt rst html htm css "
+    "scss less php rb go rs java kt swift c h cpp hpp cs sh bash zsh sql xml csv tsv "
+    "lock env gitignore dockerfile makefile"
+).split()
+
 _PATH_RX = re.compile(
-    r"(?:\.{0,2}/)?(?:[\w.\-]+/)*[\w.\-]+\.[A-Za-z0-9]{1,8}\b"
+    r"(?:\.{0,2}/)?(?:[\w.\-]+/)*[\w.\-]+\.(" + "|".join(_SOURCE_EXTS) + r")\b",
+    re.IGNORECASE,
 )
 
 # Files that are named constantly and referred to by everything. Following them
@@ -93,10 +106,19 @@ def resolve_references(store, refs: list[str], exclude_ids: set[int]) -> list[tu
     for ref in refs:
         if len(ref) < 8: # `x.py` matches far too much
             continue
-        rows = store.conn.execute(
-            "SELECT id, path FROM documents "
-            "WHERE COALESCE(is_dir,0)=0 AND path LIKE ? LIMIT 4",
-            ("%" + ref,)).fetchall()
+        # Trigram lookup on paths, not LIKE. The LIKE version scanned every path
+        # for every reference: measured at 8 seconds each, and a search produces
+        # dozens of references.
+        if store.path_index_ready() and len(ref) >= 3:
+            rows = store.conn.execute(
+                "SELECT d.id, d.path FROM paths_tri t JOIN documents d ON d.id = t.rowid "
+                "WHERE paths_tri MATCH ? AND d.is_dir = 0 LIMIT 4",
+                ('"' + ref.replace('"', '""') + '"',)).fetchall()
+        else:
+            rows = store.conn.execute(
+                "SELECT id, path FROM documents "
+                "WHERE COALESCE(is_dir,0)=0 AND path LIKE ? LIMIT 4",
+                ("%" + ref,)).fetchall()
         for doc_id, path in rows:
             if doc_id in exclude_ids:
                 continue

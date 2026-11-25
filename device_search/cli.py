@@ -152,6 +152,17 @@ A SEARCH INDEX IS A COPY OF YOUR FILES IN A SECOND LOCATION. That is the point, 
 # =============================================================================
 def cmd_deep_index(args) -> int:
     """Build the optional code-fragment index, with its cost shown first."""
+    # Refuse while the daemon holds the database. Measured: a build killed by
+    # "database is locked" after 3.5 GB, because the daemon was writing health-poll
+    # bookkeeping at the same time. A build is a long write; nothing else may be
+    # writing.
+    from .vectors import read_status
+    live = read_status(INDEX_DIR)
+    if live.get("running"):
+        print(f"  an index is running (pid {live.get('pid')}).")
+        print("  Stop it before building the code index:  kill " + str(live.get("pid")))
+        return 3
+
     store = Store(DB_PATH)
     files = store.conn.execute(
         "SELECT COUNT(*) FROM documents WHERE COALESCE(is_dir,0)=0").fetchone()[0]

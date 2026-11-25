@@ -286,43 +286,25 @@ def estimate_folder(path: str, budget_s: float = 1.5) -> dict:
 
 
 def counts_by_ext(store) -> dict:
-    """Files and bytes per extension.
+    """Files and bytes per extension, from an indexed column.
 
-    THE FIRST VERSION TRIED TO DO THIS IN SQL AND WAS WRONG.
+    This used to loop over every row in Python - 866,000 of them - and Python
+    threads share one GIL, so the loop blocked every concurrent request. The UI
+    polls the endpoints that need this, so the daemon spent most of its time here
+    and searches appeared to hang.
 
-        lower(substr(path, length(path) - length(replace(path,'.','')) + 1))
-
-    That computes a position from the NUMBER of dots, not from where the last one
-    is, so it returned fragments of the path from wherever the arithmetic landed.
-    The end result: every count was zero, and the Media tab said "0 pictures, 0
-    video, 0 audio" on a machine with 12,554 images and 131 videos.
-
-    SQLite has no `reverse()` and no regex, so "after the last dot" is genuinely
-    awkward in SQL. One pass over (path, size) in Python is correct, takes about
-    two seconds for 865,000 rows, and is cached for a minute - which is the right
-    trade for a number that only changes when the index does.
+    `documents.ext` is populated at insert and backfilled once on first open, so
+    this is now a GROUP BY over an index.
     """
     out: dict[str, dict] = {}
-    for path, size in store.conn.execute(
-            "SELECT path, COALESCE(size,0) FROM documents "
-            "WHERE COALESCE(is_dir,0)=0"):
-        dot = path.rfind(".")
-        slash = path.rfind("/")
-        if dot < 0 or dot < slash: # no dot, or a dot inside a directory name
-            continue
-        ext = path[dot:].lower()
-        if len(ext) > 12: # not an extension, part of a long filename
-            continue
-        e = out.setdefault(ext, {"files": 0, "bytes": 0})
-        e["files"] += 1
-        e["bytes"] += size
+    # Plain comparisons, not COALESCE: a function on the column stops SQLite from
+    # using the covering index and costs an extra 1.2 seconds.
+    for ext, n, total in store.conn.execute(
+            "SELECT ext, COUNT(*), SUM(size) FROM documents "
+            "WHERE is_dir = 0 AND ext IS NOT NULL GROUP BY ext"):
+        if ext:
+            out[ext] = {"files": n, "bytes": total}
     return out
-
-
-def total_for(counts: dict, exts: set) -> tuple[int, int]:
-    files = sum(counts.get(e, {}).get("files", 0) for e in exts)
-    nbytes = sum(counts.get(e, {}).get("bytes", 0) for e in exts)
-    return files, nbytes
 
 
 _COUNT_CACHE: dict = {"at": 0.0, "data": {}}
@@ -405,6 +387,11 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
         }
         out.append(entry)
     return out
+
+
+# Fingerprint map used by the staleness check. Module-level so it survives across
+# requests; see the note where it is filled.
+_FINGERPRINT_CACHE: dict = {"at": 0.0, "map": {}}
 
 
 class Engine:
@@ -761,8 +748,25 @@ class Engine:
             # COLUMN INDICES MUST MATCH THE SELECT. This said r[3] for a 3-column query, so it
             # raised IndexError on every call — and the handler below reported the result as
             # "not stale", which is the worst possible presentation of "the check did not run".
-            cur = {r[0]: f"{r[1] or 0:.3f}:{r[2]}" for r in self.store.conn.execute(
-                "SELECT id, mtime, LENGTH(text) FROM documents")}
+            # CACHED, BECAUSE THIS READS EVERY DOCUMENT'S TEXT.
+            #
+            # `LENGTH(text)` over 866,000 documents reads about 6 GB. The interface
+            # polls /api/health every few seconds, so this ran constantly and every
+            # request took 30 seconds - the daemon was permanently busy measuring
+            # how stale it was.
+            #
+            # Staleness does not need to be real-time. A minute-old answer is the
+            # same decision as a fresh one, and the cost of being 60 seconds late is
+            # that a repair starts 60 seconds later.
+            import time as _t
+            now = _t.time()
+            if now - _FINGERPRINT_CACHE["at"] > 300 or not _FINGERPRINT_CACHE["map"]:
+                _FINGERPRINT_CACHE["map"] = {
+                    r[0]: f"{r[1] or 0:.3f}:{r[2]}"
+                    for r in self.store.conn.execute(
+                        "SELECT id, mtime, LENGTH(text) FROM documents")}
+                _FINGERPRINT_CACHE["at"] = now
+            cur = _FINGERPRINT_CACHE["map"]
             # THE POLICY MUST BE PASSED HERE, OR THE API CANNOT SEE A POLICY CHANGE AT ALL.
             # It reported "3 of 23 shards no longer match their documents" while the real answer
             # was "every shard was built by a policy we no longer use" — the two are different
@@ -1147,6 +1151,7 @@ class Handler(BaseHTTPRequestHandler):
                 # index shows its cost: both take minutes and one of them writes
                 # gigabytes, so neither may start without the number being visible.
                 from .config import AUDIO_EXTS, VIDEO_EXTS
+                from .vectors import read_status
                 # NO PER-FILE DURATION LOOKUP HERE.
                 #
                 # The first version opened every video with av to count its frames.

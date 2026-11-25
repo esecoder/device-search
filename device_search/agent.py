@@ -254,6 +254,10 @@ def llm_rerank(query: str, cands: list[Candidate], max_cands: int = 12,
 # =============================================================================
 # 2-4. THE LOOP
 # =============================================================================
+# Vector staleness, cached for five minutes. See the note in search().
+_VECTOR_CHECK: dict = {"at": 0.0, "data": {}}
+
+
 def search(query: str, store, semantic=None, use_llm: bool = False,
            top_k: int = 10, explain: bool = False) -> tuple[list[Candidate], dict]:
     """Classify -> route -> run -> observe -> broaden if empty -> merge -> optionally rerank."""
@@ -716,13 +720,21 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # ones in place. In both cases semantic hits are computed against a DIFFERENT document set —
     # and a user who is not told will read a wrong answer as a right one.
     try:
+        # CACHED. This recomputes a fingerprint over every document and takes about
+        # seven seconds; it ran on every search, so a search could never be faster
+        # than that regardless of how quick retrieval was. Staleness does not change
+        # between two keystrokes.
+        import time as _t
         from .vectors import VectorStore
         from .config import INDEX_DIR
-        vs = VectorStore(INDEX_DIR, dim=384)
-        row = store.conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
-        ).fetchone()
-        trace["vectors"] = vs.check_stale(row[0], row[1], float(row[2] or 0))
+        if _t.time() - _VECTOR_CHECK["at"] > 300 or not _VECTOR_CHECK["data"]:
+            vs = VectorStore(INDEX_DIR, dim=384)
+            row = store.conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
+            ).fetchone()
+            _VECTOR_CHECK["data"] = vs.check_stale(row[0], row[1], float(row[2] or 0))
+            _VECTOR_CHECK["at"] = _t.time()
+        trace["vectors"] = _VECTOR_CHECK["data"]
     except Exception as e:
         trace["vectors"] = {"stale": None, "reason": f"could not check ({type(e).__name__})"}
 

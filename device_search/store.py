@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS documents (
     lang TEXT,
     n_lines INTEGER,
     text TEXT NOT NULL,
-    method TEXT DEFAULT 'utf8' -- utf8 | pdftext | ocr. Shown in results.
+    method TEXT DEFAULT 'utf8', -- utf8 | pdftext | ocr. Shown in results.
+    ext TEXT                    -- lowercase extension, e.g. '.pdf'. Indexed.
 );
 CREATE INDEX IF NOT EXISTS idx_path ON documents(path);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -172,6 +173,7 @@ class Store:
         # THE RULE: A TRIGGER MUST EXIST BEFORE THE FIRST WRITE, AND A TABLE MUST EXIST BEFORE
         # ANYTHING CAN REFERENCE IT. Both are ordering constraints, and neither is checked by
         # anything at runtime.
+        self._ensure_ext_column()
         self._drop_stale_trigram_triggers()
         self._ensure_fts()
         # MIGRATION, AND IT IS NOT OPTIONAL. `CREATE TABLE IF NOT EXISTS` does NOT add a
@@ -225,14 +227,15 @@ class Store:
         """Bulk insert. `INSERT OR REPLACE` keyed on path makes re-indexing incremental:
         a file that has not changed is simply overwritten with identical content."""
         rows = [(d.path, d.mtime, d.size, d.lang, d.n_lines, d.text,
-                 getattr(d, "method", "utf8"), 1 if getattr(d, "is_dir", False) else 0)
+                 getattr(d, "method", "utf8"), 1 if getattr(d, "is_dir", False) else 0,
+                 os.path.splitext(d.path)[1].lower())
                 for d in docs]
         self.conn.executemany(
-            "INSERT INTO documents(path, mtime, size, lang, n_lines, text, method, is_dir) "
-            "VALUES (?,?,?,?,?,?,?,?) "
+            "INSERT INTO documents(path, mtime, size, lang, n_lines, text, method, is_dir, ext) "
+            "VALUES (?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, "
             "lang=excluded.lang, n_lines=excluded.n_lines, text=excluded.text, "
-            "method=excluded.method, is_dir=excluded.is_dir",
+            "method=excluded.method, is_dir=excluded.is_dir, ext=excluded.ext",
             rows)
         self.conn.commit()
 
@@ -686,6 +689,54 @@ class Store:
     # database file may predate this table, so every use is guarded and the Python BM25 remains
     # as the fallback. A search backend that refuses to run because an optional extension is
     # missing turns "slower" into "broken".
+    def _ensure_ext_column(self) -> None:
+        """Add and backfill `ext`, once.
+
+        The counts needed by the settings panel were computed by looping over every
+        path in Python. At 866,000 documents that loop holds the GIL for seconds,
+        and Python threads share it - so every concurrent search stalled behind it.
+        The UI polls those endpoints, so the daemon spent most of its time there.
+
+        A column plus an index turns the same question into GROUP BY, which SQLite
+        answers in milliseconds without holding the interpreter.
+        """
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(documents)")}
+        if "ext" not in cols:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN ext TEXT")
+        # Covering index: (ext, size, is_dir) contains everything the count needs,
+        # so SQLite never touches the table. With a plain (ext) index the same
+        # query took 6.1 seconds because every entry needed a row lookup for its
+        # size; covering it took 52 ms, measured.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ext_cover ON documents(ext, size, is_dir)")
+        self.conn.commit()
+
+        # Idempotent: backfill whatever is still NULL, not only a fresh column.
+        # The first version returned early when the column existed, so a run that
+        # was interrupted after ALTER but before the backfill left every row NULL
+        # and nothing ever filled them.
+        missing = self.conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE ext IS NULL").fetchone()[0]
+        if not missing:
+            return
+        # One backfill, at open. Splitting a path is not expressible in SQLite, so
+        # this is the one place a Python loop is unavoidable - and it runs once.
+        # Batched. One transaction over 866,000 rows took long enough to look like
+        # a hang and never finished; committing every 10,000 is fast enough to
+        # complete and leaves the database usable while it runs.
+        last = 0
+        while True:
+            rows = self.conn.execute(
+                "SELECT id, path FROM documents WHERE id > ? ORDER BY id LIMIT 10000",
+                (last,)).fetchall()
+            if not rows:
+                break
+            self.conn.executemany(
+                "UPDATE documents SET ext = ? WHERE id = ?",
+                ((os.path.splitext(p)[1].lower(), i) for i, p in rows))
+            self.conn.commit()
+            last = rows[-1][0]
+
     def _drop_stale_trigram_triggers(self) -> None:
         """Remove triggers left behind when the trigram moved to its own file.
 
@@ -1097,6 +1148,44 @@ class Store:
         return [(self._doc_ids[i], float(scores[i])) for i in top if scores[i] > 0]
 
     @_serialised
+    def build_path_index(self, force: bool = False) -> int:
+        """A trigram index over PATHS only.
+
+        `path_search` used `LIKE '%term%'` over 866,000 paths - measured at 7
+        seconds, per term, on every query. A leading wildcard cannot use an index,
+        so the only fix is an index that supports substring search: FTS5 with the
+        trigram tokenizer, which is what this is.
+
+        Paths are about 60 characters each, so the whole thing is roughly 100 MB
+        rather than the 11 GB a full-text trigram costs. It is built once and kept
+        in step by the same triggers that maintain the word index.
+        """
+        have = self.get_meta("path_index_built", False)
+        count = self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        if have and not force:
+            return count
+
+        self.conn.execute("DROP TABLE IF EXISTS paths_tri")
+        self.conn.execute(
+            "CREATE VIRTUAL TABLE paths_tri USING fts5(path, content='', tokenize='trigram')")
+        rows = self.conn.execute("SELECT id, path FROM documents").fetchall()
+        # Batched, for the same reason the ext backfill is: one transaction over
+        # 866,000 rows takes long enough to look like a hang.
+        for i in range(0, len(rows), 20000):
+            self.conn.executemany(
+                "INSERT INTO paths_tri(rowid, path) VALUES (?,?)",
+                rows[i:i + 20000])
+            self.conn.commit()
+        self.set_meta("path_index_built", True)
+        self.conn.commit()
+        self._path_index = True
+        return count
+
+    def path_index_ready(self) -> bool:
+        if getattr(self, "_path_index", None) is None:
+            self._path_index = bool(self.get_meta("path_index_built", False))
+        return bool(self._path_index)
+
     def path_search(self, query: str, limit: int = 40) -> list[tuple[int, float]]:
         """Match against the PATH. A separate backend because 'where is my file called X' is
         a completely different question from 'which file contains X', and conflating them makes
@@ -1117,10 +1206,19 @@ class Store:
         seen: dict[int, float] = {}
         for term in terms:
             esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            rows = self.conn.execute(
-                "SELECT id, path, COALESCE(is_dir,0) FROM documents "
-                "WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
-                (f"%{esc}%", limit * 4)).fetchall()
+            # Trigram lookup when the index exists, LIKE otherwise. Three
+            # characters is the tokenizer's floor; shorter terms fall back.
+            if self.path_index_ready() and len(term) >= 3:
+                rows = self.conn.execute(
+                    "SELECT d.id, d.path, COALESCE(d.is_dir,0) FROM paths_tri t "
+                    "JOIN documents d ON d.id = t.rowid "
+                    "WHERE paths_tri MATCH ? LIMIT ?",
+                    ('"' + term.replace('"', '""') + '"', limit * 4)).fetchall()
+            else:
+                rows = self.conn.execute(
+                    "SELECT id, path, COALESCE(is_dir,0) FROM documents "
+                    "WHERE path LIKE ? ESCAPE '\\' LIMIT ?",
+                    (f"%{esc}%", limit * 4)).fetchall()
             for doc_id, path, dflag in rows:
                 base = Path(path).name.lower()
                 t = term.lower()
