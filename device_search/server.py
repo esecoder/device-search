@@ -683,6 +683,10 @@ class Engine:
             # AN EMPTY FILTER RESULT IS AN ANSWER, AND IT HAS TO BE SAID OUT LOUD. Without this
             # the user sees an empty list and cannot tell it from "the search is broken".
             "meta": trace.get("meta", {}),
+            # The interface needs to know when a fragment query was answered
+            # WITHOUT the code index, so it can offer to build it instead of
+            # leaving the user with a slow or thin result and no explanation.
+            "exact_index": trace.get("exact_index"),
             # What the deep pass actually did. "Search deeper" has to be able to
             # show what it changed, or it is indistinguishable from a re-run of the
             # same query that happened to return something this time.

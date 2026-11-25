@@ -36,6 +36,9 @@ let askReason = "";
 // looked healthy: the daemon returned 10 results, the request succeeded, the console showed
 // nothing a user would look at.
 let metaInfo = null;
+// Set when a fragment query ran without the code index, so the offer survives a
+// redraw. Cleared by every search that does not need it.
+let exactIndexOffer = null;
 // HOW MANY ARE DRAWN VS HOW MANY CAME BACK. Everything is RETURNED; this is how much is
 // on screen, and it grows on request. The first version asked the server for 25 and the rest
 // did not exist — the user could not reach them even by scrolling.
@@ -465,6 +468,7 @@ async function run(q) {
   media = r.media || [];
   answer = r.answer || null;
   metaInfo = r.meta || null;
+  exactIndexOffer = r.exact_index && r.exact_index.needed ? r.exact_index : null;
   isQuestion = r.kind === "question";
   // RE-RANKING CANNOT ADD A RESULT, ONLY REORDER ONE. Saying "0 moved" is not a failure — it
   // means the first pass was already right, and a user who clicked and saw the same list
@@ -564,6 +568,52 @@ function renderInner() {
   //
   // One quiet line, not a heading, a paragraph and three bordered buttons. The
   // earlier version competed with the results it was describing.
+  // The offer, when a fragment query ran without the code index.
+  //
+  // Above the results rather than buried in Settings, because this is the moment it
+  // becomes relevant. What it replaces was a silent twenty-second scan.
+  if (exactIndexOffer) {
+    const offer = document.createElement("div");
+    offer.className = "index-offer";
+    const say = document.createElement("span");
+    say.textContent = "Finding exact fragments needs the code index. Search runs "
+                    + "without it, so a query like this is inexact and may miss files.";
+    offer.appendChild(say);
+
+    const go = document.createElement("button");
+    go.className = "index-offer-btn";
+    go.textContent = "See the cost";
+    go.onclick = async () => {
+      go.disabled = true;
+      go.textContent = "Checking\u2026";
+      const c = await api("/api/deep-index");
+      if (!c.ok) { go.disabled = false; go.textContent = "See the cost"; return; }
+      go.remove();
+      const line = document.createElement("span");
+      line.className = "index-offer-cost";
+      line.textContent = c.built
+        ? "Already built."
+        : `${c.documents.toLocaleString()} documents \u00b7 about ${c.estimated_gb} GB \u00b7 `
+          + `about ${c.estimated_minutes} minutes. You have ${c.free_gb} GB free.`;
+      offer.appendChild(line);
+      if (!c.built && c.estimated_gb <= c.free_gb) {
+        const build = document.createElement("button");
+        build.className = "index-offer-btn";
+        build.textContent = "Build it";
+        build.onclick = async () => {
+          build.disabled = true;
+          build.textContent = "Starting\u2026";
+          const b = await api("/api/deep-index", { method: "POST", body: {} });
+          if (!b.ok) { build.disabled = false; build.textContent = "Build it"; return; }
+          offer.textContent = "Building in the background. Search keeps working; "
+                            + "progress appears in the banner.";
+        };
+        offer.appendChild(build);
+      }
+    };
+    offer.appendChild(go);
+    box.appendChild(offer);
+  }
   if (!results.length && !answer && !($("q") && $("q").value.trim())) {
     const hint = document.createElement("div");
     hint.className = "empty-hint";

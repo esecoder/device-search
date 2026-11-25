@@ -237,6 +237,15 @@ class Store:
             "lang=excluded.lang, n_lines=excluded.n_lines, text=excluded.text, "
             "method=excluded.method, is_dir=excluded.is_dir, ext=excluded.ext",
             rows)
+        # Paths are indexed as they arrive when the path index exists. Building it
+        # afterwards would mean a second pass over every document, and a fresh
+        # install would have no path index at all until someone asked for one -
+        # which is exactly what happened: the function existed and nothing called it.
+        if self.path_index_ready():
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO paths_tri(rowid, path) "
+                "SELECT id, path FROM documents WHERE path IN (%s)" % ",".join("?" * len(rows)),
+                [r[0] for r in rows])
         self.conn.commit()
 
         # AND THE SECOND DATABASE HAS TO BE TOLD, BECAUSE TRIGGERS CANNOT CROSS FILES.
@@ -858,23 +867,45 @@ class Store:
     # triggers on `documents`; this one has to be told explicitly from add_many. That is a real
     # trade, made knowingly: a missing sync here would make NEW files invisible to fragment
     # search, which is exactly the bug found in the word index an hour ago.
-    def _tri(self):
-        """The trigram connection, opened lazily. None when it cannot be opened."""
-        if self._tri_conn is not None:
-            return self._tri_conn if self._tri_conn is not False else None
+    def _tri(self, create: bool = False):
+        """The trigram connection. None when there is no usable index.
+
+        THIS DOES NOT CREATE THE TABLE UNLESS ASKED, and that distinction is the
+        whole point. It used to run `CREATE VIRTUAL TABLE IF NOT EXISTS` on every
+        open, so a deleted or never-built index was silently replaced by an empty
+        one - while a flag in the main database still said "built". The result:
+        `trigram_ready()` true, the query returns nothing, the `except` below
+        swallows it, and search falls back to a full scan with no indication.
+
+        Measured: with the index file removed, a fragment search still took 33
+        seconds and reported no problem. Only `build_trigram` passes create=True.
+        """
+        if self._tri_conn is not None and self._tri_conn is not False:
+            return self._tri_conn
+        if self._tri_conn is False:
+            return None
         try:
-            # `idx_path` COMES FROM CONFIG SO THE FILE SITS BESIDE THE INDEX, not inside it.
             path = getattr(self, "tri_path", None) or (Path(str(self.db_path) + ".tri"))
+            if not create and not Path(path).exists():
+                self._tri_conn = False
+                return None
             c = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
-            c.execute("PRAGMA journal_mode=WAL")
             c.execute("PRAGMA busy_timeout=30000")
-            c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs_tri USING fts5("
-                      "text, content='', tokenize='trigram')")
-            c.commit()
+            if create:
+                c.execute("PRAGMA journal_mode=WAL")
+                c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs_tri USING fts5("
+                          "text, content='', tokenize='trigram')")
+                c.commit()
+            else:
+                # A file that exists but holds no table is not an index either.
+                if not c.execute("SELECT 1 FROM sqlite_master WHERE name='docs_tri'").fetchone():
+                    c.close()
+                    self._tri_conn = False
+                    return None
             self._tri_conn = c
         except sqlite3.OperationalError:
-            # NO TRIGRAM TOKENIZER, OR NO ROOM FOR THE FILE. `exact` falls back to the LIKE
-            # scan, which is slower and correct.
+            # NO TRIGRAM TOKENIZER, OR NO ROOM FOR THE FILE. `exact` falls back to
+            # the LIKE scan, which is slower and correct.
             self._tri_conn = False
         return self._tri_conn if self._tri_conn is not False else None
 
@@ -912,7 +943,8 @@ class Store:
 
     def build_trigram(self, resume: bool = True) -> int:
         """Populate the trigram index. Resumable: an interrupted run continues where it stopped."""
-        c = self._tri()
+        self._tri_conn = None          # a previous "absent" answer must not stick
+        c = self._tri(create=True)
         if c is None:
             return 0
         # DROP AND RECREATE. A CONTENTLESS FTS5 TABLE CANNOT BE DELETED FROM.

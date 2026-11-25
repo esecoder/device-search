@@ -322,6 +322,19 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
                     # AN EMPTY LIST, NOT A MISSING KEY. The fusion iterates the backends that
                     # ran; a missing key would make "exact" look like a backend that failed.
                     out[b] = []
+                elif not store.trigram_ready():
+                    # NO INDEX, SO NO SCAN. Without the trigram this is `LIKE '%...%'` over
+                    # the whole corpus - measured at 19 to 27 seconds for a single query.
+                    # Running that silently is the one thing the interface is not allowed to
+                    # do with an expensive operation: it must show the cost and ask.
+                    #
+                    # The other backends still answer, so the search returns something
+                    # useful; the offer travels alongside the results.
+                    out[b] = []
+                    trace.setdefault("exact_index", {
+                        "needed": True,
+                        "reason": "finding exact fragments needs the code index",
+                    })
                 else:
                     out[b] = store.exact_search(query, limit=PER_BACKEND)
             elif b == "path":

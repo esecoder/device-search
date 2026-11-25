@@ -763,3 +763,54 @@ kbd {
   background: rgba(255, 255, 255, .05);
   color: inherit;
 }
+
+/* The code-index offer.
+ *
+ * Sits above the results, quiet enough not to compete with them: a note and a
+ * button, not a panel. It appears only when a fragment query ran without the
+ * index, which is the one case where the results are thinner than they look.
+ */
+.index-offer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 14px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .03);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+.index-offer > span:first-child {
+    flex: 1 1 280px;
+}
+
+.index-offer-cost {
+    color: var(--fg);
+    opacity: .85;
+}
+
+.index-offer-btn {
+    flex: 0 0 auto;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .06);
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.index-offer-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, .11);
+}
+
+.index-offer-btn:disabled {
+    opacity: .5;
+    cursor: default;
+}
