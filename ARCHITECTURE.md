@@ -27,31 +27,31 @@ routes each query to the backends that can answer it.
 
 ```
                     ┌──────────────┐
-   query ──────────▶│  classify    │  what kind of question is this?
+   query ──────────▶│ classify │ what kind of question is this?
                     └──────┬───────┘
                            │ picks backends
         ┌──────────┬───────┴────────┬───────────┐
-        ▼          ▼                ▼           ▼
-     exact      keyword           path       semantic
-   (substring)  (FTS5/BM25)   (filename)   (bge-small)
-        │          │                │           │
+        ▼ ▼ ▼ ▼
+     exact keyword path semantic
+   (substring) (FTS5/BM25) (filename) (bge-small)
+        │ │ │ │
         └──────────┴────────┬───────┴───────────┘
                             ▼
                     ┌──────────────┐
-                    │   image      │  SigLIP2: describe a picture
-                    │   video      │  frames + timestamps
+                    │ image │ SigLIP2: describe a picture
+                    │ video │ frames + timestamps
                     └──────┬───────┘
                            ▼
                  ┌──────────────────┐
-                 │  merge + rank    │  (Reciprocal Rank Fusion)
+                 │ merge + rank │ (Reciprocal Rank Fusion)
                  └────────┬─────────┘
                           ▼
                  ┌──────────────────┐
-                 │  context build   │  token budget, dedupe, 2 per file
+                 │ context build │ token budget, dedupe, 2 per file
                  └────────┬─────────┘
                           ▼
                  ┌──────────────────┐
-                 │  answer + cites  │  page numbers, timestamps
+                 │ answer + cites │ page numbers, timestamps
                  └──────────────────┘
 ```
 
@@ -93,12 +93,12 @@ One SQLite database, one file per concern:
 
 ```
 ~/.device-search/
-├── index.db           documents + the FTS5 word index
-├── index.db.tri       optional trigram index (see §9)
-├── vectors.NNNN.npy   embedding shards, one file per ~200 documents
+├── index.db documents + the FTS5 word index
+├── index.db.tri optional trigram index (see §9)
+├── vectors.NNNN.npy embedding shards, one file per ~200 documents
 ├── vectors.manifest.json
-├── images/            SigLIP vectors for pictures
-└── video/             SigLIP vectors for sampled frames
+├── images/ SigLIP vectors for pictures
+└── video/ SigLIP vectors for sampled frames
 ```
 
 **SQLite holds documents and the word index; the vectors are separate `.npy`
@@ -132,7 +132,7 @@ and keyword. A miss causes one broadening pass over the backends it skipped.
 Reciprocal Rank Fusion merges ranked lists by position:
 
 ```
-score(d) = Σ  1 / (k + rank_i(d))        k = 60
+score(d) = Σ 1 / (k + rank_i(d)) k = 60
 ```
 
 It needs no score normalisation, which matters because BM25 scores are unbounded

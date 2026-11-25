@@ -159,8 +159,8 @@ def cmd_deep_index(args) -> int:
     from .vectors import read_status
     live = read_status(INDEX_DIR)
     if live.get("running"):
-        print(f"  an index is running (pid {live.get('pid')}).")
-        print("  Stop it before building the code index:  kill " + str(live.get("pid")))
+        print(f" an index is running (pid {live.get('pid')}).")
+        print(" Stop it before building the code index: kill " + str(live.get("pid")))
         return 3
 
     store = Store(DB_PATH)

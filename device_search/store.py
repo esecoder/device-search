@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS documents (
     n_lines INTEGER,
     text TEXT NOT NULL,
     method TEXT DEFAULT 'utf8', -- utf8 | pdftext | ocr. Shown in results.
-    ext TEXT                    -- lowercase extension, e.g. '.pdf'. Indexed.
+    ext TEXT -- lowercase extension, e.g. '.pdf'. Indexed.
 );
 CREATE INDEX IF NOT EXISTS idx_path ON documents(path);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -115,6 +115,8 @@ class Store:
         # THE LOCK IS CREATED BEFORE THE CONNECTION, because the connection is the thing
         # that needs guarding and a half-constructed object must not be reachable.
         self._lock = threading.RLock()
+        # Whether the `skipped` table has been confirmed to exist. See _ensure_skipped.
+        self._skipped_ready = False
         # check_same_thread=False IS ONLY SAFE WITH THE LOCK ABOVE. See the module note.
         # WAL AND A LONG BUSY TIMEOUT, BECAUSE AN INDEX RUN HOLDS THE WRITE LOCK FOR MINUTES.
         #
@@ -290,9 +292,23 @@ class Store:
         project keeps rediscovering. Measured on the author's own machine: 150 files over the
         size limit, 22% of all bytes, and NOTHING anywhere said they had been skipped. Searching
         for something inside one returns "no results" and the user concludes it is not on disk."""
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS skipped (
-            path TEXT PRIMARY KEY, size INTEGER, reason TEXT, seen REAL)""")
-        self.conn.commit()
+        # ASK FIRST, CREATE ONLY IF ABSENT.
+        #
+        # `CREATE TABLE IF NOT EXISTS` is not free: it takes a write lock, and on a
+        # 9.5 GB database that measured at six seconds - on the search path, because
+        # a metadata query records what it skipped. Six seconds to confirm a table
+        # that has existed for days.
+        #
+        # A read of sqlite_master costs microseconds and answers the same question.
+        if self._skipped_ready:
+            return
+        if not self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='skipped'"
+        ).fetchone():
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS skipped (
+                path TEXT PRIMARY KEY, size INTEGER, reason TEXT, seen REAL)""")
+            self.conn.commit()
+        self._skipped_ready = True
 
     def record_skipped(self, items: list) -> int:
         self._ensure_skipped()
@@ -333,7 +349,7 @@ class Store:
                 "by_reason": [{"reason": r, "files": c, "bytes": b} for r, c, b in by],
                 "largest": [{"path": p, "size": sz, "reason": r} for p, sz, r in big]}
 
-    def grep_skipped(self, query: str, limit: int = 30, budget_s: float = 6.0) -> list:
+    def grep_skipped(self, query: str, limit: int = 30, budget_s: float = 2.0) -> list:
         """READ THE FILES THAT WERE NEVER INDEXED, ON DEMAND.
 
         This is the ONE case where grep is the right tool and an index is not: the files are
@@ -343,6 +359,11 @@ class Store:
         IT HAS A TIME BUDGET AND REPORTS WHEN IT RUNS OUT. A grep over 1.25 GB takes minutes,
         and a search box that silently takes minutes is worse than one that says "checked 40 of
         150 large files" — the user can decide whether to narrow the query.
+
+        THE BUDGET IS TWO SECONDS, NOT SIX. Measured: 889 skipped files held a search that
+        had already found nothing for six seconds, which reads as a hang rather than as
+        thoroughness. Two seconds still covers a useful number of files and still reports
+        how many were checked, so the honest answer - "I looked at 120 of 889" - survives.
         """
         import re as _re
         self._ensure_skipped()
@@ -628,6 +649,13 @@ class Store:
                     # needs the text, and the text is what we stopped fetching.
                     hits.sort(key=lambda r: r[1])
                     return [(i, 1.0) for i, _ln in hits[:limit]]
+                # THE TRIGRAM ANSWERED, AND THE ANSWER WAS "NOTHING".
+                #
+                # Falling through here sent every zero-result fragment to the LIKE scan -
+                # measured at 27 seconds to confirm what the index had already answered in
+                # 50 milliseconds. The scan is a fallback for a BROKEN index, not for an
+                # index that found no match.
+                return []
             except sqlite3.OperationalError as _e:
                 # SAID OUT LOUD, NOT SWALLOWED. A silent fallback is indistinguishable from a
                 # fallback that is never needed, which is how a built-and-ready index went
@@ -718,6 +746,11 @@ class Store:
         # size; covering it took 52 ms, measured.
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ext_cover ON documents(ext, size, is_dir)")
+        # Metadata queries filter on these two and had no index at all.
+        # Measured: "modified today" scanned all 866,000 documents to find 37 of
+        # them, at 6.26 seconds. The indexes cost about 20 MB each.
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_mtime ON documents(mtime)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_size ON documents(size)")
         self.conn.commit()
 
         # Idempotent: backfill whatever is still NULL, not only a fresh column.
@@ -943,7 +976,7 @@ class Store:
 
     def build_trigram(self, resume: bool = True) -> int:
         """Populate the trigram index. Resumable: an interrupted run continues where it stopped."""
-        self._tri_conn = None          # a previous "absent" answer must not stick
+        self._tri_conn = None # a previous "absent" answer must not stick
         c = self._tri(create=True)
         if c is None:
             return 0
