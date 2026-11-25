@@ -39,6 +39,9 @@ let metaInfo = null;
 // Set when a fragment query ran without the code index, so the offer survives a
 // redraw. Cleared by every search that does not need it.
 let exactIndexOffer = null;
+// Gaps that bear on the current search. Each carries the action that closes it,
+// so the interface can offer a next step instead of an explanation.
+let coverage = [];
 // HOW MANY ARE DRAWN VS HOW MANY CAME BACK. Everything is RETURNED; this is how much is
 // on screen, and it grows on request. The first version asked the server for 25 and the rest
 // did not exist — the user could not reach them even by scrolling.
@@ -330,6 +333,23 @@ function applyIndexState(h) {
       show("warn", reason, null);
       const txt = document.getElementById("banner-text");
       if (txt) {
+        // THE MESSAGE SAID WHAT WAS WRONG AND NOTHING ABOUT WHAT TO DO.
+        //
+        // A coverage gap is presented as a problem, so it has to carry the way out of
+        // it. The button opens Settings on the panel that closes the gap. The
+        // dismissal stays, because a warning that cannot be put away is one the user
+        // learns to ignore, and then a real one is missed.
+        const fix = document.createElement("span");
+        fix.textContent = " Index it";
+        fix.style.cssText = "margin-left:10px; font-weight:600; cursor:pointer;"
+                          + " text-decoration:underline; text-underline-offset:2px;"
+                          + " white-space:nowrap;";
+        fix.onclick = (ev) => {
+          ev.stopPropagation();          // the banner itself dismisses on click
+          Setup.open("ai");
+        };
+        txt.appendChild(fix);
+
         const x = document.createElement("span");
         x.textContent = " Dismiss";
         x.style.cssText = "margin-left:10px; opacity:.65; text-decoration:underline;"
@@ -469,6 +489,19 @@ async function run(q) {
   answer = r.answer || null;
   metaInfo = r.meta || null;
   exactIndexOffer = r.exact_index && r.exact_index.needed ? r.exact_index : null;
+  // Asked separately so a slow coverage check cannot delay the results. It is
+  // replaced when it arrives and the list is redrawn once.
+  coverage = [];
+  (async () => {
+    try {
+      const cov = await api(`/api/coverage?q=${encodeURIComponent(q)}`
+                          + `&kind=${encodeURIComponent(r.kind || "")}`);
+      if (cov.ok && Array.isArray(cov.gaps)) {
+        coverage = cov.gaps;
+        if (coverage.length) render();
+      }
+    } catch (_) { /* coverage is an extra, never a failure */ }
+  })();
   isQuestion = r.kind === "question";
   // RE-RANKING CANNOT ADD A RESULT, ONLY REORDER ONE. Saying "0 moved" is not a failure — it
   // means the first pass was already right, and a user who clicked and saw the same list
@@ -613,6 +646,36 @@ function renderInner() {
     };
     offer.appendChild(go);
     box.appendChild(offer);
+  }
+  // WHAT IS NOT SEARCHABLE, AND WHERE TO FIX IT.
+  //
+  // At most two lines, because a list of four gaps above the results is a lecture.
+  // Each ends in a button that opens Settings on the panel that closes it - the
+  // message says what is missing and the button says what to do about it, so the
+  // user is never left to work out the next step alone.
+  if (coverage.length) {
+    const box2 = document.createElement("div");
+    box2.className = "coverage";
+    for (const gap of coverage.slice(0, 2)) {
+      const line = document.createElement("div");
+      line.className = "coverage-line";
+
+      const text = document.createElement("span");
+      text.className = "coverage-text";
+      text.textContent = gap.detail;
+      if (gap.why) text.title = gap.why;   // the reason, without spending the line on it
+      line.appendChild(text);
+
+      if (gap.action) {
+        const go = document.createElement("button");
+        go.className = "coverage-btn";
+        go.textContent = gap.action.label;
+        go.onclick = () => Setup.open(gap.action.panel);
+        line.appendChild(go);
+      }
+      box2.appendChild(line);
+    }
+    box.appendChild(box2);
   }
   if (!results.length && !answer && !($("q") && $("q").value.trim())) {
     const hint = document.createElement("div");

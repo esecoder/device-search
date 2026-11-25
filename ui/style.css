@@ -814,3 +814,50 @@ kbd {
     opacity: .5;
     cursor: default;
 }
+
+/* What is not searchable, and where to fix it.
+ *
+ * One line per gap, each ending in the action that closes it. Deliberately quieter
+ * than a result row: this explains the list, it is not part of it.
+ */
+.coverage {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0 0 12px;
+    border: 1px solid rgba(255, 255, 255, .07);
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .02);
+}
+
+.coverage-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+}
+
+.coverage-text {
+    flex: 1 1 auto;
+}
+
+.coverage-btn {
+    flex: 0 0 auto;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, .05);
+    color: var(--fg);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.coverage-btn:hover {
+    background: rgba(255, 255, 255, .10);
+}

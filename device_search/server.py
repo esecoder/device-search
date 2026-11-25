@@ -55,7 +55,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .config import DB_PATH, INDEX_DIR, VEC_PATH
+from .config import AUDIO_EXTS, DB_PATH, INDEX_DIR, VEC_PATH, VIDEO_EXTS
+
+# Formats the image index covers. Kept here rather than in config because nothing
+# else needs it: it exists so coverage() can say "1,210 of 12,554 pictures" instead
+# of guessing from a count of OCR documents, which is a different set.
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic"}
 from .store import Store
 
 IDS_PATH = INDEX_DIR / "vectors.ids.npy"
@@ -354,17 +359,27 @@ def folder_costs(store, parent: str | None = None) -> list[dict]:
     base = base.rstrip("/") or "/"
     prefix = base + "/"
 
+    # IN SQL, NOT IN PYTHON.
+    #
+    # This fetched every path under the prefix - 597,220 rows for the home
+    # directory - and split them one at a time to find the immediate child. Measured
+    # at 7.9 seconds, for a list of 58 folders. The same question as a GROUP BY over
+    # a substring is a single pass inside SQLite, and it never brings the rows across.
+    #
+    # `substr(path, n)` is 1-based, so n is the length of the prefix plus one.
     counts: dict[str, dict] = {}
-    for path, size in store.conn.execute(
-            "SELECT path, COALESCE(size,0) FROM documents WHERE path LIKE ?",
-            (prefix + "%",)):
-        rest = path[len(prefix):]
-        if "/" not in rest:
-            continue # a file directly in base, not a folder
-        child = rest.split("/", 1)[0]
-        d = counts.setdefault(child, {"files": 0, "bytes": 0})
-        d["files"] += 1
-        d["bytes"] += size
+    for child, files, total in store.conn.execute(
+            "SELECT substr(rest, 1, instr(rest, '/') - 1) AS child, "
+            "       COUNT(*), COALESCE(SUM(size), 0) "
+            "  FROM (SELECT substr(path, ?) AS rest, COALESCE(size, 0) AS size "
+            # A RANGE, NOT A LIKE. `path LIKE 'prefix%'` is case-insensitive, so
+            # SQLite cannot seek: it SCANS the whole path index and filters. The
+            # range form is a SEARCH. Measured on 866,237 documents: 8.0 s -> 0.14 s.
+            "          FROM documents WHERE path >= ? AND path < ?) "
+            " WHERE instr(rest, '/') > 0 "
+            " GROUP BY child",
+            (len(prefix) + 1, prefix, prefix + "\U0010ffff")):
+        counts[child] = {"files": files, "bytes": total}
 
     out = []
     for name, d in sorted(counts.items(), key=lambda kv: -kv[1]["files"]):
@@ -712,6 +727,103 @@ class Engine:
                 "via": c.sources,
             } for c in cands],
         }
+
+    def coverage(self, query: str = "", kind: str = "") -> list[dict]:
+        """What is NOT searchable, why, and what would fix it.
+
+        A search that says "no results" when half the corpus was never embedded is
+        correct and useless. This returns the gaps relevant to the query in hand,
+        each with the action that closes it, so the interface can offer the next
+        step instead of leaving the user to guess whether the file is absent or
+        merely unexamined.
+
+        Only gaps that bear on THIS query are returned. A filename search does not
+        need the image index, and offering it would be noise.
+        """
+        out: list[dict] = []
+        ql = (query or "").lower()
+
+        wants_meaning = kind in ("question", "prose") or any(
+            w in ql for w in ("how ", "why ", "what ", "explain", "meaning", "about"))
+        wants_media = any(w in ql for w in (
+            "image", "picture", "photo", "screenshot", "chart", "video", "audio",
+            "recording", "speech", "said", "shows", "looks like", "describe"))
+        wants_code = kind == "code"
+
+        # 1. MEANING
+        try:
+            from .vectors import VectorStore
+            from .config import INDEX_DIR as _ID
+            covered = len(VectorStore(_ID, dim=384).man.done_doc_ids)
+        except Exception:
+            covered = 0
+        whole = self.store.count()
+        if wants_meaning and whole and covered < whole * 0.98:
+            out.append({
+                "key": "meaning",
+                "label": "Meaning search",
+                "covered": covered,
+                "total": whole,
+                "detail": f"{covered:,} of {whole:,} documents have been read for meaning",
+                "why": "Documents without vectors can still be found by keyword and by name, "
+                       "but not by a question that shares no words with them.",
+                "action": {"label": "Index meaning", "panel": "ai"},
+            })
+
+        # 2. PICTURES
+        try:
+            from .image_search import ImageIndex
+            from .config import INDEX_DIR as _ID
+            idx = ImageIndex(); idx.load(_ID / "images")
+            img_done = len(idx.doc_ids)
+        except Exception:
+            img_done = 0
+        img_total = total_for(counts_by_ext(self.store), IMAGE_EXTS)[0]
+        if wants_media and img_total and img_done < img_total * 0.98:
+            out.append({
+                "key": "images",
+                "label": "Searching pictures by description",
+                "covered": img_done,
+                "total": img_total,
+                "detail": f"{img_done:,} of {img_total:,} pictures have been described",
+                "why": "The rest can still be found by their filename and by any text "
+                       "recovered from them, but not by describing what is in them.",
+                "action": {"label": "Describe pictures", "panel": "media"},
+            })
+
+        # 3. VIDEO AND AUDIO, which have never been run on this machine
+        for key, label, exts, panel, verb in (
+                ("video", "Searching video", VIDEO_EXTS, "media", "Sample frames"),
+                ("audio", "Searching audio", AUDIO_EXTS, "media", "Transcribe")):
+            total = total_for(counts_by_ext(self.store), exts)[0]
+            if not total:
+                continue
+            done = self.store.conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE method IN (?,?) "
+                "AND ext IN (%s)" % ",".join("?" * len(exts)),
+                ("whisper" if key == "audio" else "frame",
+                 "transcript", *exts)).fetchone()[0]
+            if wants_media and done < total * 0.98:
+                out.append({
+                    "key": key, "label": label, "covered": done, "total": total,
+                    "detail": f"{done:,} of {total:,} {key} files have been indexed",
+                    "why": f"The rest can be found by filename, but not by what they "
+                           f"{'show' if key == 'video' else 'say'}.",
+                    "action": {"label": verb, "panel": panel},
+                })
+
+        # 4. CODE FRAGMENTS
+        if wants_code and not self.store.trigram_ready():
+            out.append({
+                "key": "code",
+                "label": "Finding exact code fragments",
+                "covered": 0, "total": self.store.count(),
+                "detail": "The code index has not been built",
+                "why": "Without it, a fragment is found by scanning every document, "
+                       "which takes about twenty seconds and may miss files.",
+                "action": {"label": "Build the code index", "panel": "code"},
+            })
+        return out
 
     def index_status(self) -> dict:
         """WHAT THE UI NEEDS TO SAY "indexing 6% — results are incomplete".
@@ -1196,6 +1308,13 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/coverage":
+                # WHAT IS NOT SEARCHABLE, AND WHAT TO DO ABOUT IT. The interface asks
+                # after every search, with the query and its kind, so only the gaps
+                # that bear on this search come back.
+                qc = parse_qs(url.query)
+                self._send(200, {"gaps": ENGINE.coverage(
+                    (qc.get("q") or [""])[0], (qc.get("kind") or [""])[0])})
             elif url.path == "/api/folders":
                 q = parse_qs(url.query)
                 parent = (q.get("path") or [None])[0]

@@ -650,7 +650,16 @@ const Setup = (() => {
 
   // THE OVERLAY IS WHAT SHOWS AND HIDES, not the panel inside it. Toggling the inner element
   // would leave the opaque full-window backdrop in place with nothing on it.
-  function open() {
+  // OPEN AT A PANEL, not just at the top.
+  //
+  // A message that says "index the pictures" and then drops the user on a folder
+  // list has told them what to do and made them find it themselves. The panel
+  // argument is what makes the button an answer rather than an instruction.
+  function open(panel) {
+    if (panel && ["folders", "ai", "code", "media"].includes(panel)) {
+      step = panel;
+      render();
+    }
     el("setup-overlay").classList.add("show");
     refresh();
   }

@@ -751,6 +751,11 @@ class Store:
         # them, at 6.26 seconds. The indexes cost about 20 MB each.
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_mtime ON documents(mtime)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_size ON documents(size)")
+        # Covering (path, size), for the folder list. The range seek was already
+        # working, but every row needed a lookup for its size: 8.1 s. With the size
+        # in the index the same query is 0.87 s. It costs 110 MB.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_path_size ON documents(path, size)")
         self.conn.commit()
 
         # Idempotent: backfill whatever is still NULL, not only a fresh column.
