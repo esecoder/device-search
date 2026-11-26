@@ -457,10 +457,29 @@ async function api(path, opts = {}) {
 }
 
 // ---------------------------------------------------------------- search
+// ONE PLACE THAT FORGETS A SEARCH.
+//
+// Clearing the input used to reset `results` alone. Everything else - the answer,
+// the media tier, the metadata note, the coverage lines, the code-index offer -
+// rendered from state that was still there, so emptying the box left a panel full
+// of results for a query that no longer existed.
+//
+// Selection is cleared too: the arrow keys act on the list, and an index pointing
+// into a list that is gone is an error waiting for a keystroke.
+function clearResults() {
+  results = [];
+  media = [];
+  answer = null;
+  metaInfo = null;
+  exactIndexOffer = null;
+  coverage = [];
+  sel = -1;
+}
+
 function onType() {
   clearTimeout(timer);
   const q = $("q").value.trim();
-  if (!q) { results = []; render(); setStatus("", ""); return; }
+  if (!q) { clearResults(); render(); setStatus("", ""); return; }
   // DEBOUNCED, but short. 120ms is below the threshold where typing feels laggy, and the
   // daemon answers in ~60ms so the result arrives while the user is still typing.
   timer = setTimeout(() => run(q), 120);
@@ -1034,7 +1053,7 @@ window.addEventListener("keydown", (e) => {
     // ESCAPE CLEARS FIRST, THEN HIDES. One keystroke that both erases the search and makes
     // the window disappear gives the user no way to edit a query they are halfway through.
     if ($("q").value) {
-      $("q").value = ""; results = []; render(); setBanner("", "");
+      $("q").value = ""; clearResults(); render(); setBanner("", "");
       return;
     }
     hideWindow();
