@@ -99,7 +99,16 @@ async function boot() {
     // 20 and the count was never seconds at all. A number labelled with the wrong unit is
     // worse than no number: it makes the user distrust every other figure on screen.
     const t0 = Date.now();
-    while (!h.ok && Date.now() - t0 < 30000) {
+    // THREE MINUTES, NOT THIRTY SECONDS.
+    //
+    // Measured: with 866,000 documents indexed the daemon takes about 105 seconds to
+    // answer its first request - the database is 9.7 GB. At thirty seconds the
+    // interface declared failure at second 30 and the daemon answered at second 105,
+    // so the user saw "did not start" on a machine where it started perfectly well.
+    //
+    // A timeout shorter than the thing it waits for is not a safety net. It is a
+    // false alarm with a delay.
+    while (!h.ok && Date.now() - t0 < 180000) {
       // SHOW THE REAL REASON WHILE WAITING. The retry loop used to print only a counter and
       // discard h.error — which is the string that says WHY, and it was computed every time and
       // thrown away. Diagnosing this took a macOS ATS investigation that one visible error

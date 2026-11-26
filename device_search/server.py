@@ -877,11 +877,43 @@ class Engine:
             import time as _t
             now = _t.time()
             if now - _FINGERPRINT_CACHE["at"] > 300 or not _FINGERPRINT_CACHE["map"]:
-                _FINGERPRINT_CACHE["map"] = {
-                    r[0]: f"{r[1] or 0:.3f}:{r[2]}"
-                    for r in self.store.conn.execute(
-                        "SELECT id, mtime, LENGTH(text) FROM documents")}
-                _FINGERPRINT_CACHE["at"] = now
+                # PERSISTED, BECAUSE IT COSTS TWENTY SECONDS TO COMPUTE.
+                #
+                # The map is keyed by document id and needs each document's TEXT
+                # LENGTH, which means reading about 6 GB. Measured at 21 seconds, on
+                # the first /api/health call after every start - so the daemon was
+                # answering "are you up?" twenty-six seconds after launch, and the
+                # interface had already given up.
+                #
+                # The key is the document count plus the newest mtime: if either
+                # moved, the index changed and the file is refused. A stale
+                # fingerprint would report an index as current when it is not, which
+                # is the one direction this check must never fail in.
+                import json as _json
+                from .config import INDEX_DIR as _IDIR
+                fp_path = _IDIR / "fingerprint.json"
+                stamp = self.store.conn.execute(
+                    "SELECT COUNT(*), COALESCE(MAX(mtime),0), COALESCE(MAX(id),0) "
+                    "FROM documents").fetchone()
+                if fp_path.exists():
+                    try:
+                        saved = _json.loads(fp_path.read_text())
+                        if saved.get("stamp") == list(stamp):
+                            _FINGERPRINT_CACHE["map"] = saved["map"]
+                            _FINGERPRINT_CACHE["at"] = now
+                    except Exception:
+                        pass
+                if not _FINGERPRINT_CACHE["map"]:
+                    _FINGERPRINT_CACHE["map"] = {
+                        r[0]: f"{r[1] or 0:.3f}:{r[2]}"
+                        for r in self.store.conn.execute(
+                            "SELECT id, mtime, LENGTH(text) FROM documents")}
+                    _FINGERPRINT_CACHE["at"] = now
+                    try:
+                        fp_path.write_text(_json.dumps(
+                            {"stamp": list(stamp), "map": _FINGERPRINT_CACHE["map"]}))
+                    except Exception:
+                        pass   # a cache that cannot be written is not a failure
             cur = _FINGERPRINT_CACHE["map"]
             # THE POLICY MUST BE PASSED HERE, OR THE API CANNOT SEE A POLICY CHANGE AT ALL.
             # It reported "3 of 23 shards no longer match their documents" while the real answer

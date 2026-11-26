@@ -243,10 +243,16 @@ class Store:
         # afterwards would mean a second pass over every document, and a fresh
         # install would have no path index at all until someone asked for one -
         # which is exactly what happened: the function existed and nothing called it.
-        if self.path_index_ready():
-            self.conn.executemany(
+        # `execute`, NOT `executemany`. executemany treats every element of the
+        # second argument as a complete parameter set, so a list of 30 path strings
+        # became 30 attempted bindings against one statement - and indexing died with
+        # "Incorrect number of bindings supplied" on every run, which in turn meant
+        # the daemon never finished starting and the interface reported it unreachable.
+        if rows and self.path_index_ready():
+            self.conn.execute(
                 "INSERT OR REPLACE INTO paths_tri(rowid, path) "
-                "SELECT id, path FROM documents WHERE path IN (%s)" % ",".join("?" * len(rows)),
+                "SELECT id, path FROM documents WHERE path IN (%s)"
+                % ",".join("?" * len(rows)),
                 [r[0] for r in rows])
         self.conn.commit()
 
@@ -555,7 +561,22 @@ class Store:
     # ----------------------------------------------------------------- reads
     @_serialised
     def count(self) -> int:
-        return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        """How many documents are indexed.
+
+        COUNTED THROUGH AN INDEX, NOT THROUGH THE TABLE. A bare `COUNT(*)` over
+        `documents` has to visit every row, and a row here holds the document's text
+        - so on a 9.7 GB index it read the text of 866,000 files to count them.
+        Measured at 4.3 seconds, on the startup path, where it delayed the daemon
+        past the interface's patience.
+
+        Counting through `idx_ext` walks a narrow index instead and never touches a
+        row body. It is the same number.
+        """
+        try:
+            return self.conn.execute(
+                "SELECT COUNT(*) FROM documents INDEXED BY idx_ext_cover").fetchone()[0]
+        except Exception:
+            return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
 
     @_serialised
     def by_id(self, doc_id: int) -> tuple | None:
