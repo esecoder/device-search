@@ -36,6 +36,11 @@ Every message about absent data ends in a button that opens the panel that fixes
   with a spinner and one line of text. It blocks input.
 - **Do not add a second one.** No banners, no status lines, no stage lists in the
   results area. One overlay.
+- **The overlay is a scrim, not a curtain.** Roughly `rgba(28,28,30,.34)` and **no
+  backdrop blur** — a blur averages everything underneath into a flat field and the
+  result is opaque however low the opacity is. The search bar must stay visible
+  through it, because it is what the user is waiting to use.
+- **The spinner sits below the search row**, not centred on the whole window.
 
 ---
 

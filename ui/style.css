@@ -880,14 +880,25 @@ kbd {
     inset: 0;
     z-index: 60;
     display: flex;
+    /* BELOW THE SEARCH ROW, NOT OVER IT.
+     *
+     * #searchrow is the first ~57px of the panel. Centring in the whole window put
+     * the spinner on top of the search bar - the one part of the interface the user
+     * wants to see while waiting, because it is what they are waiting to use. */
     align-items: center;
     justify-content: center;
-    border-radius: 12px;
-    background: rgba(28, 28, 30, .72);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    opacity: 1;
-    transition: opacity .25s ease;
+    padding-top: 58px;
+    border-radius: 14px;
+    /* A SCRIM, NOT A CURTAIN.
+     *
+     * This was rgba(28,28,30,.72) with a 14px backdrop blur, which is opaque in
+     * effect: the blur averages everything underneath into a flat field and the
+     * opacity hides what is left. Nothing was visible through it.
+     *
+     * No blur at all, and a third of the darkness - enough to read the spinner and
+     * to signal that the panel is not accepting input, while the search bar and the
+     * window behind it stay legible. */
+    background: rgba(28, 28, 30, .34);
 }
 
 /* Removed from the flow entirely, so it cannot take a click it no longer needs. */
