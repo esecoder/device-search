@@ -841,6 +841,15 @@ class Engine:
         row = self.store.conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(mtime),0) FROM documents"
         ).fetchone()
+        # A HEALTH ENDPOINT MUST NOT RAISE.
+        #
+        # Observed: `TypeError: NoneType is not subscriptable` from this line while the
+        # daemon was still warming, which turned /api/health into a 500 and made the
+        # interface report the engine as dead during a start that was going fine.
+        # The fingerprint is a nicety; the poll is the app's only liveness signal, so
+        # a missing row degrades the stale check rather than the whole endpoint.
+        if row is None:
+            row = (0, 0, 0)
         # THE PER-SHARD CHECK DECIDES, NOT THE GLOBAL ONE.
         #
         # `check_stale` compares a GLOBAL fingerprint — document count, max id, sum of mtimes —
@@ -904,11 +913,41 @@ class Engine:
                     except Exception:
                         pass
                 if not _FINGERPRINT_CACHE["map"]:
-                    _FINGERPRINT_CACHE["map"] = {
-                        r[0]: f"{r[1] or 0:.3f}:{r[2]}"
-                        for r in self.store.conn.execute(
-                            "SELECT id, mtime, LENGTH(text) FROM documents")}
-                    _FINGERPRINT_CACHE["at"] = now
+                    # NEVER COMPUTE THIS INLINE. It reads about 6 GB and takes 21
+                    # seconds, and /api/health is polled every few hundred
+                    # milliseconds - so each poll that missed the cache queued
+                    # another twenty-one seconds of work and the queue could never
+                    # drain. The daemon stayed alive, held the interpreter, and
+                    # answered nothing.
+                    #
+                    # The first poll gets an empty map and reports the vectors as
+                    # unverified; the background thread fills it and the next poll
+                    # is correct. Staleness is a slow-moving fact and a few seconds
+                    # of "checking" is an honest answer where a stalled server is not.
+                    if not _FINGERPRINT_CACHE.get("building"):
+                        _FINGERPRINT_CACHE["building"] = True
+
+                        def _build(_store=self.store):
+                            try:
+                                m = {r[0]: f"{r[1] or 0:.3f}:{r[2]}"
+                                     for r in _store.conn.execute(
+                                         "SELECT id, mtime, LENGTH(text) FROM documents")}
+                                _FINGERPRINT_CACHE["map"] = m
+                                _FINGERPRINT_CACHE["at"] = time.time()
+                                import json as _j
+                                from .config import INDEX_DIR as _I
+                                try:
+                                    (_I / "fingerprint.json").write_text(
+                                        _j.dumps({"stamp": list(stamp), "map": m}))
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                            finally:
+                                _FINGERPRINT_CACHE["building"] = False
+
+                        import threading as _th
+                        _th.Thread(target=_build, daemon=True).start()
                     try:
                         fp_path.write_text(_json.dumps(
                             {"stamp": list(stamp), "map": _FINGERPRINT_CACHE["map"]}))
@@ -1012,6 +1051,24 @@ class Engine:
         if not self.auto_repair:
             return {"started": False, "reason": "auto-repair is off"}
         from .vectors import read_status
+
+        # A COVERAGE GAP IS NOT CORRUPTION, AND REBUILDING IT SILENTLY IS NOT REPAIR.
+        #
+        # This machine reports "semantic covers 4,488 of 866,249 documents". That is
+        # how much was ever embedded, not damage - and acting on it starts a rebuild
+        # of 861,000 documents, which is hours of CPU holding the database write
+        # lock. Measured: every /api/health then blocked on that lock, so the daemon
+        # looked dead while it was working exactly as instructed.
+        #
+        # Auto-repair now only acts when the vectors are WRONG - shards that no
+        # longer match their documents, or a check that could not run. An incomplete
+        # index is offered to the user through the banner, with a button, because
+        # spending hours of someone's machine is their decision and not a timer's.
+        st = self.index_status()
+        severity = (st.get("stale") or {}).get("severity")
+        if severity == "outdated":
+            return {"started": False,
+                    "reason": "the index is incomplete, not damaged - offered, not rebuilt"}
         live = read_status(INDEX_DIR)
         if live.get("running"):
             return {"started": False, "reason": "a run is already in progress"}
@@ -1086,6 +1143,21 @@ class Engine:
 
 
 ENGINE: Engine | None = None
+
+# WHAT THE DAEMON IS DOING BEFORE IT CAN ANSWER.
+#
+# The socket is bound first and the engine is built afterwards, because the only
+# useful thing a client can be told during a thirty-second start is which stage it
+# is at. Without this the interface could only wait and guess: the port was closed
+# until everything was ready, so "not responding yet" and "broken" were the same
+# observation from outside.
+STARTUP: dict = {
+    "phase": "starting",
+    "detail": "",
+    "ready": False,
+    "error": None,
+    "started": 0.0,
+}
 
 
 # =============================================================================
@@ -1180,7 +1252,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        # BEFORE THE ENGINE EXISTS THERE IS NOTHING TO ASK BUT /api/health.
+        #
+        # Every other route needs it, and calling one would raise AttributeError on
+        # None - a stack trace in the log and an unhelpful 500 in the interface.
+        # A 503 with the phase is accurate, and it is what tells the client to wait
+        # rather than to retry harder.
+        if not STARTUP["ready"] and url.path != "/api/health":
+            self._send(503, {"error": "still starting",
+                             "phase": STARTUP["phase"],
+                             "detail": STARTUP["detail"],
+                             "ready": False})
+            return
         if url.path == "/api/health":
+            if not STARTUP["ready"]:
+                self._send(200, {"ok": False, "starting": True,
+                                 "phase": STARTUP["phase"],
+                                 "detail": STARTUP["detail"],
+                                 "elapsed": round(time.time() - STARTUP["started"], 1),
+                                 "error": STARTUP["error"]})
+                return
             # UNAUTHENTICATED ON PURPOSE: the UI polls this to know the daemon is up, and it
             # reveals nothing about the user's files.
             st = ENGINE.index_status()
@@ -1666,13 +1757,64 @@ def _write_token() -> str:
 
 def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
     global ENGINE
-    ENGINE = Engine()
-    ENGINE.warm()
     token = _write_token()
+
+    # BIND FIRST, INITIALISE AFTER.
+    #
+    # Building the engine opens a 9.7 GB database and computes coverage; measured at
+    # about 29 seconds. Doing that before binding meant the port was closed for the
+    # whole of it, so a client could only observe "connection refused" - the same
+    # thing it sees when the daemon is dead. Now the socket is up immediately and
+    # /api/health reports which stage the start is at.
+    STARTUP.update({"phase": "opening the index", "detail": "", "ready": False,
+                    "error": None, "started": time.time()})
+
+    def _boot():
+        global ENGINE
+        try:
+            STARTUP["phase"] = "opening the index"
+            ENGINE = Engine()
+            count = ENGINE.store.count()
+            STARTUP["detail"] = f"{count:,} documents"
+
+            # READY HERE, NOT AFTER warm().
+            #
+            # warm() loads the embedding model and its vectors, which takes minutes
+            # and holds the GIL — so a request arriving during it cannot be served
+            # even though the socket is open and the port accepts the connection.
+            # Measured: the port was listening for two minutes while every request
+            # hung, which from outside is indistinguishable from a hung daemon.
+            #
+            # Everything that needs the store works at this point. Semantic search is
+            # the only thing that needs warm(), and the retrieval path already
+            # handles `semantic is None` by skipping that backend.
+            STARTUP["ready"] = True
+            STARTUP["phase"] = "ready"
+            print(f" ready after {time.time() - STARTUP['started']:.0f}s ({count:,} documents)")
+
+            STARTUP["phase"] = "loading meaning search"
+            ENGINE.warm()
+            STARTUP["note"] = ENGINE.semantic_note or ""
+            STARTUP["phase"] = "ready"
+            print(f" meaning search ready after {time.time() - STARTUP['started']:.0f}s")
+        except Exception as e:
+            STARTUP["error"] = f"{type(e).__name__}: {e}"
+            STARTUP["phase"] = "failed"
+            print(f" startup failed: {STARTUP['error']}")
+
+    threading.Thread(target=_boot, daemon=True).start()
 
     # THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
     # daemon is idle, and idle is exactly when a repair should happen.
     def _repair_loop():
+        # WAIT FOR THE ENGINE. This loop starts before the boot thread has finished,
+        # and every branch below calls ENGINE methods - which raises AttributeError
+        # on None and would fill the log with failures for the length of the start.
+        while not STARTUP["ready"]:
+            if STARTUP["error"]:
+                return                      # nothing to repair on a failed boot
+            time.sleep(0.5)
+
         # CHECK AT STARTUP, DO NOT SLEEP FIRST.
         #
         # This loop used to sleep REPAIR_CHECK_EVERY (300s) before its first look. So a user
@@ -1707,11 +1849,15 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.token = token
+    # THE BANNER MUST NOT TOUCH THE ENGINE. It is printed the moment the socket is
+    # bound, and the engine is still being built on the boot thread - so reading
+    # ENGINE here raised "NoneType has no attribute store" and killed a daemon that
+    # was starting correctly. The boot thread prints the document count when it has
+    # one; this says where things are.
     print(f" device-search daemon")
     print(f" http://127.0.0.1:{port}")
-    print(f" index : {DB_PATH} ({ENGINE.store.count():,} documents)")
+    print(f" index : {DB_PATH} (opening)")
     print(f" token : {TOKEN_PATH} (0600, regenerated each start)")
-    print(f" semantic: {ENGINE.semantic_note or 'off'}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -1719,6 +1865,21 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
 
 
 def main() -> int:
+    # LINE-BUFFERED, BECAUSE THIS LOG IS THE ONLY WAY TO SEE A STARTUP FAILURE.
+    #
+    # When the daemon is launched by the app, stdout is a FILE, and Python buffers
+    # a file's output until the buffer fills or the process exits. A daemon that
+    # hung during startup therefore wrote nothing at all - the log was empty, and
+    # empty is indistinguishable from "never started" and "started and hung".
+    #
+    # Measured: a frozen binary was reported as dead for two minutes while it was
+    # opening the index, because its own startup line had not been flushed.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     import argparse
     ap = argparse.ArgumentParser(description="device-search local API daemon")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)

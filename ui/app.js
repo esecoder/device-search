@@ -91,8 +91,56 @@ async function boot() {
   //
   // AND THE MESSAGE WAS WRONG TOO. "Not responding" describes a crash. What was actually
   // happening is normal startup, and saying so is the difference between waiting and quitting.
+  // A STARTUP STATE, NOT A COUNTER WITH AN ERROR STRING ATTACHED.
+  //
+  // What this replaced: "starting the search engine... 12s [daemon unreachable
+  // (Failed to fetch)]". It named a network error as though it were the cause,
+  // counted seconds without saying what they were for, and left the input enabled -
+  // so anyone who typed during the wait got no results and no reason.
+  const setStarting = (phase, detail, elapsed) => {
+    const q = $("q");
+    if (q) { q.disabled = true; q.placeholder = "Starting the search engine\u2026"; }
+    const box = $("results");
+    if (!box) return;
+    box.textContent = "";
+    const wrap = document.createElement("div");
+    wrap.className = "starting";
+    const title = document.createElement("div");
+    title.className = "starting-title";
+    title.textContent = phase || "Starting the search engine";
+    wrap.appendChild(title);
+    if (detail) {
+      const d = document.createElement("div");
+      d.className = "starting-detail";
+      d.textContent = detail;
+      wrap.appendChild(d);
+    }
+    const bar = document.createElement("div");
+    bar.className = "starting-bar";
+    const fill = document.createElement("div");
+    fill.className = "starting-fill";
+    bar.appendChild(fill);
+    wrap.appendChild(bar);
+    const note = document.createElement("div");
+    note.className = "starting-note";
+    note.textContent = elapsed
+      ? `${elapsed}s \u00b7 the first start after a reboot is the slow one`
+      : "";
+    wrap.appendChild(note);
+    box.appendChild(wrap);
+  };
+
+  const setReady = () => {
+    const q = $("q");
+    if (q) {
+      q.disabled = false;
+      q.placeholder = "Search or ask a question for anything on this device\u2026";
+    }
+  };
+
   let h = await api("/api/health", { auth: false });
-  if (!h.ok) {
+  if (!h.ok || h.starting) {
+    setStarting("Starting the search engine", "", 0);
     // MEASURE THE ELAPSED TIME, DO NOT USE THE LOOP COUNTER.
     // The old code printed `(${i}s)` where `i` was an ITERATION INDEX — and each iteration is a
     // 500ms sleep PLUS a failed fetch that has to time out, so it counted to 39 while claiming
@@ -108,18 +156,22 @@ async function boot() {
     //
     // A timeout shorter than the thing it waits for is not a safety net. It is a
     // false alarm with a delay.
-    while (!h.ok && Date.now() - t0 < 180000) {
+    while ((!h.ok || h.starting) && Date.now() - t0 < 180000) {
       // SHOW THE REAL REASON WHILE WAITING. The retry loop used to print only a counter and
       // discard h.error — which is the string that says WHY, and it was computed every time and
       // thrown away. Diagnosing this took a macOS ATS investigation that one visible error
       // message would have short-circuited.
-      setStatus("", `starting the search engine… ${((Date.now() - t0) / 1000).toFixed(0)}s` +
-                    (h.error ? ` [${h.error}]` : ""));
-      await new Promise((r) => setTimeout(r, 500));
+      // The daemon reports its own stage. When it cannot be reached there is no
+      // phase to report, and inventing one would be a guess dressed as progress.
+      setStarting(h.phase || "Connecting to the search engine",
+                  h.detail || "",
+                  Math.round((Date.now() - t0) / 1000));
+      await new Promise((r) => setTimeout(r, 700));
       h = await api("/api/health", { auth: false });
     }
   }
   if (h.ok) {
+    setReady();
     $("indexinfo").textContent =
       `${h.documents.toLocaleString()} documents indexed` +
       (h.semantic ? ` · ${h.semantic}` : " · semantic off");

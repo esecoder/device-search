@@ -65,7 +65,21 @@ def main() -> int:
 
     # Only these two are failures. "Style-only id" is normal, and the class check
     # already excludes anything mentioned in a script.
-    problems = bool(missing_css or ghosts or orphan)
+    # UNDEFINED CSS VARIABLES.
+    #
+    # `var(--muted)` where the palette defines `--dim` is not an error: CSS silently
+    # falls back to an inherited colour, so the rule works and looks wrong. Six of
+    # these shipped before anyone noticed, because nothing fails - the text is just
+    # the wrong colour, which reads as a design choice rather than a bug.
+    defined = set(re.findall(r"^\s+(--[a-z0-9-]+)\s*:", css, re.M))
+    used = set(re.findall(r"var\((--[a-z0-9-]+)", css))
+    undefined = sorted(used - defined)
+    if undefined:
+        print()
+        for name in undefined:
+            print(f"  undefined  {name} is used but never declared in :root")
+
+    problems = bool(missing_css or ghosts or orphan or undefined)
     print()
     if problems:
         print(" REVIEW something above needs a reason or a removal")
