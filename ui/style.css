@@ -119,7 +119,15 @@ kbd {
 #status .err { color: #ff453a; }
 
 /* ------------------------------------------------------------------ results */
-#results { flex: 1; overflow-y: auto; padding: 6px 0; }
+#results {
+  flex: 1;
+  /* SETTING overflow-y WITHOUT overflow-x MAKES overflow-x `auto` AS WELL. That is
+     the CSS rule, and it is why the panel still scrolled sideways after the outer
+     containers were locked: the scrolling was happening in here. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0;
+}
 #results::-webkit-scrollbar { width: 8px; }
 #results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
 
@@ -398,8 +406,12 @@ kbd {
    wide as the box: `min-width: 100%` with `width: max-content` is what does both. */
 #results .row {
   box-sizing: border-box;
+  /* `min-width: 100%` IS THE WHOLE REQUIREMENT. `width: max-content` was here so a
+     selected row's highlight spanned the panel, but it also let a long path make the
+     row wider than the panel - and #results then scrolled horizontally to show it.
+     min-width does the first job without doing the second. */
   min-width: 100%;
-  width: max-content;
+  max-width: 100%;
 }
 /* THE SNIPPET IS NOT ALLOWED TO WIDEN THE ROW. Without this a long path stretches the row
    and the highlight runs past the right edge of the visible area instead of stopping at it. */
@@ -968,4 +980,27 @@ kbd {
         border-top-color: rgba(255, 255, 255, .14);
         border-left-color: rgba(255, 255, 255, .75);
     }
+}
+
+/* NOTHING INSIDE THE RESULTS MAY BE WIDER THAN THE RESULTS.
+ *
+ * Belt and braces on top of `overflow-x: hidden`. A single child with
+ * `width: max-content`, a long unbroken path, or a nowrap label is enough to make
+ * the container scrollable, and the scrollbar then cuts off the right-hand end of
+ * every row. This rule makes that impossible regardless of what a future child
+ * declares.
+ */
+#results > * {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Long unbroken strings - paths, hashes, error codes - break rather than push. */
+#results .row .name,
+#results .row .snip,
+.media-row,
+.coverage-line,
+.index-offer {
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }

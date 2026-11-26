@@ -111,6 +111,11 @@ score floor does the work instead - on this corpus SigLIP runs 0.06 (nothing) to
 **No horizontal scrolling.** Paths and snippets wrap. A path has no spaces, so it
 needs `overflow-wrap: anywhere` or it forces the panel wider than the window.
 
+**`overflow-y: auto` silently makes `overflow-x: auto`.** Locking `html`, `body` and
+`#box` was not enough: `#results` scrolled sideways on its own, and `width:
+max-content` on `.row` let a long path push it wide. If a scrollbar appears, look for
+the nearest `overflow-y` and set `overflow-x: hidden` beside it.
+
 **Coverage gaps are reported per query.** A filename search does not need the image
 index and must not be offered it.
 
