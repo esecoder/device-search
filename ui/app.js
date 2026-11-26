@@ -97,50 +97,28 @@ async function boot() {
   // (Failed to fetch)]". It named a network error as though it were the cause,
   // counted seconds without saying what they were for, and left the input enabled -
   // so anyone who typed during the wait got no results and no reason.
-  const setStarting = (phase, detail, elapsed) => {
-    const q = $("q");
-    if (q) { q.disabled = true; q.placeholder = "Starting the search engine\u2026"; }
-    const box = $("results");
-    if (!box) return;
-    box.textContent = "";
-    const wrap = document.createElement("div");
-    wrap.className = "starting";
-    const title = document.createElement("div");
-    title.className = "starting-title";
-    title.textContent = phase || "Starting the search engine";
-    wrap.appendChild(title);
-    if (detail) {
-      const d = document.createElement("div");
-      d.className = "starting-detail";
-      d.textContent = detail;
-      wrap.appendChild(d);
-    }
-    const bar = document.createElement("div");
-    bar.className = "starting-bar";
-    const fill = document.createElement("div");
-    fill.className = "starting-fill";
-    bar.appendChild(fill);
-    wrap.appendChild(bar);
-    const note = document.createElement("div");
-    note.className = "starting-note";
-    note.textContent = elapsed
-      ? `${elapsed}s \u00b7 the first start after a reboot is the slow one`
-      : "";
-    wrap.appendChild(note);
-    box.appendChild(wrap);
+  // THE ONLY PLACE THAT SAYS "NOT READY".
+  //
+  // One overlay with a spinner and one line. It covers the panel and takes the
+  // clicks, so the search box cannot accept a query the engine cannot yet answer.
+  // This replaces a status line, a stage list in the results area and an index
+  // banner that could all be visible at once and disagree with each other.
+  const showBoot = (text, detail) => {
+    const b = $("boot");
+    if (!b) return;
+    b.hidden = false;
+    if ($("boot-text")) $("boot-text").textContent = text || "Starting the search engine";
+    if ($("boot-detail")) $("boot-detail").textContent = detail || "";
   };
 
-  const setReady = () => {
-    const q = $("q");
-    if (q) {
-      q.disabled = false;
-      q.placeholder = "Search or ask a question for anything on this device\u2026";
-    }
+  const hideBoot = () => {
+    const b = $("boot");
+    if (b) b.hidden = true;
   };
 
   let h = await api("/api/health", { auth: false });
   if (!h.ok || h.starting) {
-    setStarting("Starting the search engine", "", 0);
+    showBoot("Starting the search engine", "");
     // MEASURE THE ELAPSED TIME, DO NOT USE THE LOOP COUNTER.
     // The old code printed `(${i}s)` where `i` was an ITERATION INDEX — and each iteration is a
     // 500ms sleep PLUS a failed fetch that has to time out, so it counted to 39 while claiming
@@ -163,15 +141,15 @@ async function boot() {
       // message would have short-circuited.
       // The daemon reports its own stage. When it cannot be reached there is no
       // phase to report, and inventing one would be a guess dressed as progress.
-      setStarting(h.phase || "Connecting to the search engine",
-                  h.detail || "",
-                  Math.round((Date.now() - t0) / 1000));
+      const secs = Math.round((Date.now() - t0) / 1000);
+      showBoot(h.phase || "Connecting to the search engine",
+               h.detail ? `${h.detail} \u00b7 ${secs}s` : `${secs}s`);
       await new Promise((r) => setTimeout(r, 700));
       h = await api("/api/health", { auth: false });
     }
   }
   if (h.ok) {
-    setReady();
+    hideBoot();
     $("indexinfo").textContent =
       `${h.documents.toLocaleString()} documents indexed` +
       (h.semantic ? ` · ${h.semantic}` : " · semantic off");
@@ -193,6 +171,7 @@ async function boot() {
     // the command that produces the real error, because "not responding" alone is unactionable.
     // POINT AT THE LOG, NOT AT A COMMAND. The shell now writes the daemon's own output to
     // ~/.device-search/daemon.log, so the reason is in a file rather than lost to /dev/null.
+    hideBoot();
     setStatus("err", `The search engine did not start. ` +
                      `${h.error ? h.error + ". " : ""}` +
                      `Details are in ~/.device-search/daemon.log`);
@@ -252,6 +231,9 @@ async function boot() {
 // A PLAIN SETTER, separate from applyIndexState, because these are messages the APP wants to
 // show ("could not reach the daemon") rather than states the ENGINE reports.
 function setBanner(cls, msg) {
+  // The banner element no longer exists - everything that said "not ready" is now
+  // the boot overlay. Kept as a no-op so call sites stay harmless.
+  if (!$("banner")) return;
   // WRITES TO #banner-text, NOT #banner. Setting textContent on the container DELETES the
   // progress bar element inside it, so the bar would disappear the first time any message was
   // set — a bug that only appears on the second banner.
@@ -263,6 +245,9 @@ function setBanner(cls, msg) {
 }
 
 function applyIndexState(h) {
+  // Retired with the banner. Index state now reaches the user through the boot
+  // overlay while it blocks a search, and through the coverage lines afterwards.
+  if (!$("banner")) return;
   // WHAT THIS SAYS, AND WHAT IT MUST NEVER SAY.
   //
   // The message it replaces read:

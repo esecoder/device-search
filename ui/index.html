@@ -64,16 +64,6 @@
          If the daemon is down or the index is partial, that has to be on screen. -->
     <!-- ABOVE the results, not below them. A caveat underneath a list reads as a footnote;
          the same sentence above it qualifies what follows. -->
-    <!-- ONE COMPONENT SHOWS STATUS, NOT THREE. banner + status + setup used to stack above
-         the results, and each one that appeared pushed the list further down the window. -->
-    <div id="banner">
-      <div id="banner-text"></div>
-      <!-- A REAL BAR, driven by the daemon's own percentage. A spinner says "something is
-           happening"; a bar says "12% done, 8 minutes left", and only the second tells a user
-           whether to wait or go and do something else. -->
-      <div id="banner-bar"><div id="banner-fill"></div></div>
-    </div>
-
     <!-- THE STATUS LINE IS A ROW, AND THE RE-RANK BUTTON LIVES AT ITS RIGHT-HAND END.
          It belongs beside "routed as ..." because it is an action ON those results — a
          footer link said nothing about what it would act on, and it was visible even with
@@ -127,5 +117,18 @@
 <script src="setup.js"></script>
 <script src="ai.js"></script>
 <script src="app.js"></script>
+  <!-- THE ONLY THING THAT SAYS "NOT READY".
+       One overlay, one spinner, one line of text. It covers the panel and blocks the
+       search box, because a search box that accepts a query it cannot answer is a
+       promise the app cannot keep. Everything it says comes from the daemon, which is
+       the only part that knows what stage the start is at. -->
+  <div id="boot" class="boot">
+    <div class="boot-inner">
+      <div class="boot-spinner" aria-hidden="true"></div>
+      <div id="boot-text" class="boot-text">Starting the search engine</div>
+      <div id="boot-detail" class="boot-detail"></div>
+    </div>
+  </div>
+
 </body>
 </html>
