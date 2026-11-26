@@ -497,6 +497,26 @@ class Engine:
         most searches never touch them. A missing index returns nothing rather than
         an error - there is nothing to search yet, which is a normal first-run state.
         """
+        # ONLY WHEN THE QUERY IS A DESCRIPTION OF SOMETHING VISIBLE.
+        #
+        # SigLIP embeds any string into the image space, so `config.py` produced a
+        # score of 0.157 - higher than `a chart` at 0.127 - and the image tier then
+        # appeared above the filename the user actually typed. A filename is not a
+        # description of a picture, and a text encoder asked to compare the two does
+        # not have the option of saying "this is not a question about images".
+        #
+        # So the app decides first. These are the words that make a query about what
+        # something LOOKS like; without one of them the image index is not consulted
+        # at all, and the first result is the file that matches the query.
+        _VISUAL = ("screenshot", "screen shot", "image", "picture", "photo",
+                   "chart", "graph", "diagram", "drawing", "logo", "icon",
+                   "video", "recording", "clip", "frame", "shows", "showing",
+                   "looks like", "describe", "depict", "illustration", "poster",
+                   "meme", "selfie", "portrait", "landscape", "map", "slide")
+        ql = (query or "").lower()
+        if not any(w in ql for w in _VISUAL):
+            return []
+
         out = []
         if not getattr(self, "_img_index", None):
             try:

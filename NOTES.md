@@ -100,6 +100,13 @@ Measured on 866,000 documents. If a change makes any of these worse, it is wrong
 
 **Media is a separate tier**, never fused with BM25. Scores are not comparable.
 
+**Media only runs when the query describes something visible.** SigLIP embeds any
+string into the image space, so `config.py` scored 0.157 against `a chart` at 0.127.
+No threshold separates a filename from a description; the app has to decide first.
+
+**No horizontal scrolling.** Paths and snippets wrap. A path has no spaces, so it
+needs `overflow-wrap: anywhere` or it forces the panel wider than the window.
+
 **Coverage gaps are reported per query.** A filename search does not need the image
 index and must not be offered it.
 
