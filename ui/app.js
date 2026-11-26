@@ -908,47 +908,6 @@ function renderInner() {
     box.appendChild(d);
   }
 
-  // PICTURES AND VIDEO, AS THEIR OWN SECTION.
-  //
-  // Not merged into the list below: those rows mean "this file contains what you
-  // typed", these mean "this picture looks like what you described". One numbered
-  // list would imply one ranking, and BM25 and cosine are not on the same scale.
-  if (media && media.length) {
-    const mh = document.createElement("div");
-    mh.className = "group-head";
-    mh.textContent = "LOOKS LIKE THIS";
-    box.appendChild(mh);
-
-    for (const m of media) {
-      const row = document.createElement("div");
-      row.className = "media-row";
-
-      const kind = document.createElement("span");
-      kind.className = "media-kind";
-      kind.textContent = m.kind === "video" ? "VIDEO" : "IMAGE";
-
-      const name = document.createElement("span");
-      name.className = "media-name";
-      name.textContent = m.path.split("/").pop();
-
-      row.appendChild(kind);
-      row.appendChild(name);
-
-      // A video hit is a MOMENT, not a file. "2:50" is the difference between a
-      // citation and a scavenger hunt.
-      if (m.at) {
-        const at = document.createElement("span");
-        at.className = "media-at";
-        at.textContent = m.at;
-        row.appendChild(at);
-      }
-
-      row.title = m.at ? `${m.path} (at ${m.at})` : m.path;
-      row.onclick = () => openPath(m.path);
-      box.appendChild(row);
-    }
-  }
-
   // A WAY FORWARD WHEN THERE IS NOTHING, OR ALMOST NOTHING.
   //
   // A miss used to be final: the list was empty and the only thing on screen was
@@ -1054,6 +1013,50 @@ function renderInner() {
     box.appendChild(more);
   }
   }
+
+  // PICTURES AND VIDEO COME LAST, NOT FIRST.
+  //
+  // They used to be drawn before the file list, so `config.py` opened on a wall of
+  // screenshots that happened to resemble the word - the corpus is largely
+  // screenshots of code, so the image index genuinely scores them highly. The
+  // query looked like a filename and the answer was a filename; media is a
+  // secondary observation about a search, never the headline.
+
+  if (media && media.length) {
+    const mh = document.createElement("div");
+    mh.className = "group-head";
+    mh.textContent = "LOOKS LIKE THIS";
+    box.appendChild(mh);
+
+    for (const m of media) {
+      const row = document.createElement("div");
+      row.className = "media-row";
+
+      const kind = document.createElement("span");
+      kind.className = "media-kind";
+      kind.textContent = m.kind === "video" ? "VIDEO" : "IMAGE";
+
+      const name = document.createElement("span");
+      name.className = "media-name";
+      name.textContent = m.path.split("/").pop();
+
+      row.appendChild(kind);
+      row.appendChild(name);
+
+      // A video hit is a MOMENT, not a file. "2:50" is the difference between a
+      // citation and a scavenger hunt.
+      if (m.at) {
+        const at = document.createElement("span");
+        at.className = "media-at";
+        at.textContent = m.at;
+        row.appendChild(at);
+      }
+
+      row.title = m.at ? `${m.path} (at ${m.at})` : m.path;
+      row.onclick = () => openPath(m.path);
+      box.appendChild(row);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- actions
@@ -1062,6 +1065,30 @@ function move(d) {
   sel = Math.max(0, Math.min(results.length - 1, sel + d));
   render();
   document.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+}
+
+// OPENING AN ARBITRARY PATH.
+//
+// This was called from the media rows and from the "open containing folder"
+// action, and it was NEVER DEFINED. Every click threw ReferenceError and nothing
+// happened - no error, no window, no hint. A row that looks clickable and does
+// nothing is worse than one that looks inert.
+//
+// `reveal` distinguishes the two things a user may mean: open the file, or show it
+// in its folder. Media rows open the file; the folder action reveals it.
+async function openPath(path, reveal = false) {
+  if (!path) return;
+  if (!invoke) {
+    setStatus("err", "cannot open files outside the desktop app");
+    return;
+  }
+  try {
+    await invoke("open_path", { path, reveal });
+  } catch (e) {
+    setStatus("err", `cannot open: ${e}`);
+    return;
+  }
+  hideWindow();
 }
 
 async function open(reveal) {

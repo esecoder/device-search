@@ -79,6 +79,44 @@ def main() -> int:
         for name in undefined:
             print(f"  undefined  {name} is used but never declared in :root")
 
+    # FUNCTIONS CALLED BUT NEVER DEFINED.
+    #
+    # `openPath(...)` was called from two places and defined nowhere. Every click
+    # threw ReferenceError, nothing opened, and nothing said why - the row looked
+    # clickable and did nothing. This file already checks ids that do not exist;
+    # it did not check names that do not exist, which is the same mistake one level
+    # up.
+    builtins = {
+        "if", "for", "while", "switch", "catch", "return", "typeof", "function",
+        "console", "JSON", "Object", "Array", "String", "Number", "Boolean", "Math",
+        "Date", "Promise", "Set", "Map", "Error", "RegExp", "parseInt", "parseFloat",
+        "setTimeout", "clearTimeout", "setInterval", "clearInterval", "fetch",
+        "encodeURIComponent", "decodeURIComponent", "requestAnimationFrame",
+        "isNaN", "alert", "confirm", "await", "async", "new", "of", "in", "do",
+        "else", "try", "finally", "throw", "yield", "delete", "void", "instanceof",
+    }
+    # STRIP COMMENTS AND STRING LITERALS FIRST. Prose contains things that look
+    # like calls - "a snippet() is..." in a comment - and every one of those was a
+    # false positive that made the check useless.
+    code = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    code = re.sub(r"//[^\n]*", "", code)
+    code = re.sub(r"`(?:[^`\\]|\\.)*`", '""', code, flags=re.S)
+    code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+    code = re.sub(r"'(?:[^'\\]|\\.)*'", '""', code)
+
+    defined = set(re.findall(r"function\s+([A-Za-z_$][\w$]*)\s*\(", code))
+    defined |= set(re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", code))
+    calls = set(re.findall(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", code))
+    unknown_calls = sorted(c for c in calls
+                           if c not in defined and c not in builtins
+                           and not c[0].isupper())
+    # ADVISORY, NOT A FAILURE. The regex cannot tell a function defined in another
+    # file, a local named binding, or a method shorthand from a genuine missing
+    # function, and a check that cries wolf is one people learn to scroll past.
+    # It exists to make `openPath` visible next time someone looks, not to gate.
+    if unknown_calls:
+        print(f" names called but not defined here : {unknown_calls[:6]}")
+
     problems = bool(missing_css or ghosts or orphan or undefined)
     print()
     if problems:

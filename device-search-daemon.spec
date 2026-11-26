@@ -14,7 +14,7 @@ hiddenimports += collect_submodules('pdftext')
 
 
 a = Analysis(
-    ['/var/folders/4b/l1gvzw19249bk8qgnkwgh1cw0000gn/T/ds_entry.35NmFQxN.py'],
+    ['/var/folders/4b/l1gvzw19249bk8qgnkwgh1cw0000gn/T/ds_entry.5nvRQOLP.py'],
     pathex=['/Users/eseudom/WebstormProjects/device-search'],
     binaries=binaries,
     datas=datas,

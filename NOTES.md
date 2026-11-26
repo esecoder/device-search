@@ -100,9 +100,13 @@ Measured on 866,000 documents. If a change makes any of these worse, it is wrong
 
 **Media is a separate tier**, never fused with BM25. Scores are not comparable.
 
-**Media only runs when the query describes something visible.** SigLIP embeds any
-string into the image space, so `config.py` scored 0.157 against `a chart` at 0.127.
-No threshold separates a filename from a description; the app has to decide first.
+**Media is drawn AFTER the file list, never before.** A filename-shaped query is
+answered by the filename; pictures of that word are a second observation.
+
+**Media always runs.** A keyword gate was tried and removed: it was a regex guessing
+at intent and it missed queries that genuinely appear inside an image. A measured
+score floor does the work instead - on this corpus SigLIP runs 0.06 (nothing) to 0.17
+(a real match), so the floor is 0.145.
 
 **No horizontal scrolling.** Paths and snippets wrap. A path has no spaces, so it
 needs `overflow-wrap: anywhere` or it forces the panel wider than the window.
