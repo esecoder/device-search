@@ -150,9 +150,29 @@ async function boot() {
   }
   if (h.ok) {
     hideBoot();
-    $("indexinfo").textContent =
-      `${h.documents.toLocaleString()} documents indexed` +
-      (h.semantic ? ` · ${h.semantic}` : " · semantic off");
+    // ASKED AGAIN UNTIL IT IS KNOWN.
+    //
+    // The daemon answers health before it has loaded the meaning index, so the
+    // first poll legitimately says "starting". Reading health once and never again
+    // turned that into "semantic off" for the rest of the session - a claim the
+    // daemon never made, about a feature that was loading normally.
+    const paintInfo = (hh) => {
+      const note = hh.semantic || "starting";
+      $("indexinfo").textContent =
+        `${hh.documents.toLocaleString()} documents indexed`
+        + (note === "starting" ? " \u00b7 meaning search starting\u2026" : ` \u00b7 ${note}`);
+      return note !== "starting";
+    };
+    if (!paintInfo(h)) {
+      let tries = 0;
+      const again = async () => {
+        if (++tries > 40) return;                 // about two minutes
+        const h3 = await api("/api/health", { auth: false });
+        if (h3.ok && paintInfo(h3)) return;
+        setTimeout(again, 3000);
+      };
+      setTimeout(again, 3000);
+    }
     setStatus("", "");
     // THE BANNER IS DRIVEN BY THE DAEMON, NOT GUESSED BY THE UI. Only the engine knows which
     // documents are embedded and whether the vectors still describe them. A frontend computing

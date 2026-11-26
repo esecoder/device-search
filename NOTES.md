@@ -41,6 +41,11 @@ Every message about absent data ends in a button that opens the panel that fixes
   result is opaque however low the opacity is. The search bar must stay visible
   through it, because it is what the user is waiting to use.
 - **The spinner sits below the search row**, not centred on the whole window.
+- **A field that is not known yet says "starting", never "off".** The daemon is
+  ready before `warm()` finishes, so `semantic` is briefly unknown. An empty value
+  rendered as "semantic off" — a claim about the feature rather than the loading.
+  The interface also re-polls until it resolves, because one reading of a value
+  that changes is a snapshot presented as a fact.
 
 ---
 

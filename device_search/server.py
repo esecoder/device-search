@@ -416,7 +416,11 @@ class Engine:
     def __init__(self):
         self.store = Store(DB_PATH)
         self.semantic = None
-        self.semantic_note = ""
+        # "starting", NOT "". The daemon is ready before `warm()` finishes - that is
+        # what keeps startup usable - so for a few seconds this is the honest state.
+        # An empty string was rendered as "semantic off", which is a claim about the
+        # feature rather than about the loading.
+        self.semantic_note = "starting"
         self._load_errors = []
         # THE INDEX RUN STATE LIVES ON THE ENGINE, because that is the object the HTTP handler
         # can actually see. Putting it on the server and reading it from the engine was a real
