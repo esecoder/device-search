@@ -97,9 +97,23 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 # identifiers have `_`, `.`, `:` and `(` in them, so the pattern below preserves those runs.
 # This is the tokenizer equivalent of the "code needs its own chunking" argument in the manual.
 TOKEN_RX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+")
-_PATH_STOPWORDS = {"find", "file", "files", "called", "named", "where", "is",
-                   "the", "my", "locate", "show", "get", "open", "search",
-                   "for", "path", "folder", "directory", "in", "of", "to"}
+# WORDS THAT CARRY NO FILENAME SIGNAL.
+#
+# `the and of` returned paths with "and" in the name, because only "the" and "of"
+# were on this list. A query made entirely of function words has nothing to match
+# on, and answering it with files called "rock-and-roll" is the search guessing.
+#
+# THE GUARD BELOW MATTERS MORE THAN THE LIST: stopwords are only removed while a
+# real term remains. A file genuinely called `and.txt` is still findable by
+# searching for it, because when nothing else is left the original terms are used.
+_PATH_STOPWORDS = {
+    "find", "file", "files", "called", "named", "where", "is", "the", "my",
+    "locate", "show", "get", "open", "search", "for", "path", "folder",
+    "directory", "in", "of", "to", "and", "or", "a", "an", "with", "that",
+    "this", "it", "on", "at", "by", "be", "are", "was", "were", "from", "but",
+    "not", "all", "any", "can", "has", "have", "do", "does", "did", "what",
+    "how", "when", "which", "who", "why", "me", "you", "we", "they", "as",
+}
 
 
 def tokenize(text: str) -> list[str]:
@@ -1290,8 +1304,13 @@ class Store:
         #
         # Separate terms rather than the whole string also means a query naming a file AND a
         # directory scores higher for matching both.
-        terms = [t for t in re.findall(r"[A-Za-z0-9_.+\-]{2,}", query)
-                 if t.lower() not in _PATH_STOPWORDS]
+        _all = re.findall(r"[A-Za-z0-9_.+\-]{2,}", query)
+        terms = [t for t in _all if t.lower() not in _PATH_STOPWORDS]
+        if not terms:
+            # NOTHING BUT FUNCTION WORDS. If the query is exactly a stopword the
+            # user may be naming a file - `and`, `find` - so the original term is
+            # kept rather than returning an empty list for a name that exists.
+            terms = _all if len(_all) <= 2 else []
         if not terms:
             return []
         seen: dict[int, float] = {}
