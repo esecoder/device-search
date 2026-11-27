@@ -70,6 +70,26 @@ def classify(query: str) -> dict:
     ql = q.lower()
     reasons: list[str] = []
 
+    # A QUERY WITH NOTHING TO SEARCH FOR IS A COMPLETE ANSWER.
+    #
+    # `the and of` matched ThirdPartyNotices.txt on BM25 - every backend was doing
+    # exactly its job and the result was worthless, because the query asks for
+    # nothing. Running retrieval on it wastes a second and returns a file that
+    # happens to be full of English.
+    _sw = {"the", "and", "of", "a", "an", "to", "in", "is", "it", "or", "for",
+           "on", "at", "by", "with", "this", "that", "from", "as", "be", "are"}
+    _toks = [t for t in re.findall(r"[A-Za-z0-9_.+\-]+", q.lower())]
+    # TWO OR MORE. A single function word may be a file name - `and.txt` exists in
+    # this corpus - and refusing to search for it would make a real file unreachable.
+    # `the and of` has no such reading: three function words are a sentence fragment,
+    # not a name.
+    if len(_toks) >= 2 and all(t in _sw for t in _toks):
+        reasons.append("every word is a function word - there is nothing to match")
+        return {"kind": "empty", "backends": [], "reasons": reasons,
+                "empty_reason": "That is all function words, so there is nothing to "
+                                "search for. Try a word that appears in a file name or "
+                                "its content."}
+
     if len(q) >= 2 and q[0] == q[-1] and q[0] in "\"'":
         reasons.append("wrapped in quotes -> the user means the literal text")
         # THE QUOTES ARE DELIMITERS, NOT CHARACTERS TO SEARCH FOR.
@@ -427,7 +447,7 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # disk the answer is "not on disk" - not eight files containing the word "from",
     # which is what happened: exact found nothing, the router broadened, and the
     # quoted search was answered by an unquoted one.
-    if not any(results.values()) and plan["kind"] != "literal":
+    if not any(results.values()) and plan["kind"] not in ("literal", "empty"):
         extra = [b for b in ("exact", "keyword", "semantic", "path") if b not in plan["backends"]]
         trace["broadened"] = True
         trace["broadened_with"] = extra
@@ -575,6 +595,10 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # The list would otherwise be empty with nothing said, which reads as the app
     # having failed to look. It looked: the exact characters were searched across
     # every indexed document and none contains them.
+    if trace.get("plan", {}).get("kind") == "empty":
+        trace.setdefault("meta", {})["empty_is_the_answer"] = True
+        trace["meta"]["empty_reason"] = trace["plan"].get("empty_reason", "")
+
     if trace.get("plan", {}).get("kind") == "literal" and not any(results.values()):
         _lit = trace["plan"].get("literal") or query.strip("\"'")
         trace.setdefault("meta", {})["empty_is_the_answer"] = True
