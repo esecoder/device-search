@@ -90,6 +90,24 @@ Measured on 866,000 documents. If a change makes any of these worse, it is wrong
 
 ## Retrieval
 
+**A LITERAL FRAGMENT MUST LEAD WITH `exact`.** Two bugs made `InputLayer(shape=(784,))`
+return files named `shape`:
+
+  `_weights["path"] = 4.0` while exact stayed at the default 1.0 — a filename outranked
+  a literal match four to one.
+
+  The primary-backend choice tested `_path_top >= 3.0` BEFORE `_kind == "code"`, and
+  path_search gives 3.0 for a name starting with one token. A folder called `shape`
+  scored 12.0 ("a directory whose name is the query") against a five-token fragment.
+
+The rules now: exact is weighted 4.0, a multi-token fragment leads with exact unless a
+file is named the whole query, and a question leads with semantic (a question sharing
+a word with a directory name is still a question).
+
+**Quoted queries are literals.** The quotes are stripped before searching, they never
+broaden, they never grep unindexed files, and a miss says so in words. Searching for
+the quote characters is why quoted and unquoted returned the same list.
+
 | Backend | For | Cannot |
 |---|---|---|
 | path | `config.py` | content |

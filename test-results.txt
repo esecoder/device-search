@@ -1,17 +1,49 @@
-## A. Filename and path
+## B. Keyword (FTS5 / BM25)
 
-| # | Query | Result Observation |
+| # | Query | Correct result |
 |---|---|---|---|
-| A1 | `config.py` | shows image results first even though the search is not an image description. Doesn't give that smart vibe |
-| A2 | `README.md` | Took unusually long. Forever even, had to move on. Then "daemon unreachable. load failed" error |
-| A3 | `retrievers.py` | forever loading then "daemon unreachable. load failed" error |
-| A4 | `db_acl.php` | forever loading then "daemon unreachable. load failed" error |
-| A5 | `find db_acl.php` | forever loading then "daemon unreachable. load failed" error |
-| A6 | `package.json` | forever loading then "daemon unreachable. load failed" error |
-| A7 | `zzzz_not_a_file_zzzz` | forever loading then "daemon unreachable. load failed" error |
-
-Search seems to fail after that first one so no need to continue to the rest.
+| B3 | `ERROR_CONN_4421` | Did not show any log file instead showed the TEST-PLAN.md file the only file it seems to appear in. 
+So did an identifier survives tokenisation? |
+| B4 | `"exact phrase from a file"` | Did not return only files containing that literal. It instead returned files and folders 
+with "from" in their text and some unrelated screenshot images. So did quotes mean literal, not conceptual? And quoted and unquoted returned the same list |
+| B5 | `the and of` | Returned paths with "and" in their name so... |
 
 
-UI Note: I don't like the horizontal scroll. Everything should wrap nicely. Users should not have to scroll horizontally to 
-read full results
+## C. Exact fragment — the headline feature
+
+This is what a word index cannot do and an embedding cannot do.
+
+| # | Query | Correct result |
+|---|---|---|---|
+| C1 | `InputLayer(shape=(784,))` | Only returned paths with the word "shape" in their names and also did not return 
+even TEST-PLAN.md or where even this piece of code is really in |
+| C2 | `def __init__(self` | Only matched paths with 'def' and "__init__" in their names |
+| C3 | `useEffect(() => {` | Seemed like the only one that returned exact, keyword, exact+keyword, keyword+path and path results.
+Seems to have worked? But why only this one? |
+| C4 | `v2.1.3-build` | Did return config package.json and changelog and readme files from keyword. I wonder if this was an real 
+version used somewhere that is was meant to see but did not? |
+| C5 | `(7)` | Found file with "(7)" in them |
+
+Note Here: If this poor result is because there is not trigram for fragment indexing then the user should be informed right then.
+User should be informed with ability to carry out action whenever results are poor due to a lack of something. That is how you
+build a truely smart search app.
+
+
+## D. Semantic — search by meaning
+
+**These are the tests that currently cannot fully pass.** Only ~4,488 of 866,224
+documents are embedded, so a correct answer may simply not be embedded yet. See Gaps.
+
+| # | Query | Correct result |
+|---|---|---|---|
+| D1 | `how do I configure the embedding dimension` | returned paths with "configure" and "embedding", etc in them and some 
+keyword+path results with more "embedding" too. No meaning. Some screenshot images with "embedding" text in them as well |
+| D2 | `stopping a training run early when it stops improving` | more paths and keyword+path with "training" etc words |
+| D3 | `making the model smaller without losing much accuracy` | more paths with keywords |
+| D4 | `the opposite of overfitting` | Took forever and I had to move on then "daemon unreachable (load failed)" |
+| D5 | `what talks to the database` | path results with keyword in them |
+
+
+UI Note: When new search result appear, list should scroll to top auto.
+
+Logic Note: Most results don't seem to return the TEST-PLAN.md as result since it contains the query. Why?

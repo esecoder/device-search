@@ -72,7 +72,14 @@ def classify(query: str) -> dict:
 
     if len(q) >= 2 and q[0] == q[-1] and q[0] in "\"'":
         reasons.append("wrapped in quotes -> the user means the literal text")
-        return {"kind": "literal", "backends": ["exact"], "reasons": reasons}
+        # THE QUOTES ARE DELIMITERS, NOT CHARACTERS TO SEARCH FOR.
+        #
+        # The classifier detected them and left them in the query, so exact search
+        # looked for a string containing two quote marks - found nothing - and the
+        # broadening step then answered with every file containing "from". Quoted
+        # and unquoted returned the same list because the quoted search never ran.
+        return {"kind": "literal", "backends": ["exact"], "reasons": reasons,
+                "literal": q[1:-1]}
 
     if FILENAME_RX.match(q) and " " not in q:
         reasons.append("looks like a filename (has a known extension)")
@@ -336,7 +343,11 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
                         "reason": "finding exact fragments needs the code index",
                     })
                 else:
-                    out[b] = store.exact_search(query, limit=PER_BACKEND)
+                    # THE QUOTES ARE NOT PART OF THE TEXT. When the query was wrapped
+                    # in them the classifier records the unquoted form; without it the
+                    # literal search includes two quote marks and matches nothing.
+                    out[b] = store.exact_search(plan.get("literal") or query,
+                                                limit=PER_BACKEND)
             elif b == "path":
                 out[b] = store.path_search(query, limit=PER_BACKEND)
             elif b == "keyword":
@@ -409,7 +420,14 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # AND IT ONLY GOES ONE DIRECTION: it broadens, never narrows. A loop that can drop a
     # backend mid-query would make the tool's behaviour depend on its own earlier output in a way
     # that is impossible to reason about — the failure mode that makes agentic systems undebuggable.
-    if not any(results.values()):
+    # A QUOTED PHRASE IS AN INSTRUCTION, NOT A SUGGESTION.
+    #
+    # Broadening exists so a miss is not final. But when the user wrapped the query
+    # in quotes they said, explicitly, "these exact characters". If they are not on
+    # disk the answer is "not on disk" - not eight files containing the word "from",
+    # which is what happened: exact found nothing, the router broadened, and the
+    # quoted search was answered by an unquoted one.
+    if not any(results.values()) and plan["kind"] != "literal":
         extra = [b for b in ("exact", "keyword", "semantic", "path") if b not in plan["backends"]]
         trace["broadened"] = True
         trace["broadened_with"] = extra
@@ -496,6 +514,17 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # guess. So `path` is weighted like the filter is.
     _weights = {"meta": 6.0} if trace.get("meta", {}).get("pure_filter") else {"meta": 2.5}
     _weights["path"] = 4.0
+    # EXACT IS EVIDENCE; KEYWORD AND PATH ARE CANDIDATES.
+    #
+    # `exact` means the characters are IN THE FILE. That is not a similarity score
+    # or a name guess - it is the strongest claim any backend can make, and for the
+    # query this product exists to answer it is the whole answer.
+    #
+    # It was left at the default weight of 1.0 while `path` was 4.0, so a file named
+    # `shape.py` outranked the line `InputLayer(shape=(784,))` by four to one. The
+    # fragment was found - 13 hits, 0.1 seconds - and then buried by files whose
+    # names contained one of its words.
+    _weights["exact"] = 4.0
     fused = rrf(results, weights=_weights)
 
     # AND THEN INTERLEAVE, BECAUSE A WEIGHT THAT PUTS THE RIGHT RESULT FIRST ALSO LETS IT OWN
@@ -541,6 +570,18 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     #
     # WHAT DECIDES PRIMARY IS THE QUERY ITSELF, not a fixed preference: the filters if there
     # are filters, the route if the words look like a name, and the text backends otherwise.
+    # A QUOTED PHRASE THAT IS NOT THERE IS A COMPLETE ANSWER.
+    #
+    # The list would otherwise be empty with nothing said, which reads as the app
+    # having failed to look. It looked: the exact characters were searched across
+    # every indexed document and none contains them.
+    if trace.get("plan", {}).get("kind") == "literal" and not any(results.values()):
+        _lit = trace["plan"].get("literal") or query.strip("\"'")
+        trace.setdefault("meta", {})["empty_is_the_answer"] = True
+        trace["meta"]["empty_reason"] = (
+            f'No indexed file contains the exact text "{_lit}". '
+            f'Quotes mean the literal characters, so nothing was widened or guessed.')
+
     _kind = trace.get("plan", {}).get("kind")
     _meta = trace.get("meta", {})
     # A STRONG NAME MATCH IS THE INTENT, WHATEVER THE ROUTER CALLED THE QUERY.
@@ -556,12 +597,42 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     _path_top = max((sc for _i, sc in results.get("path", [])), default=0.0)
     if _meta.get("pure_filter"):
         _primary = "meta" # "1mb files" - the answer is the set that matched
+    elif _kind == "code":
+        # A LITERAL FRAGMENT LEADS, UNLESS A FILE IS NAMED EXACTLY THAT.
+        #
+        # The name heuristic used to be checked FIRST, and path_search returns 3.0
+        # merely for a filename that STARTS WITH ONE TOKEN. `InputLayer(shape=(784,))`
+        # tokenises to InputLayer / shape / 784, so any `shape*.py` scored 3.0, path
+        # became primary, and the thirteen real fragment matches were pushed below
+        # every file whose name happened to contain one of those words.
+        #
+        # 6.0 is what path_search returns for a file named exactly the query. That
+        # outranks a fragment; a name sharing one word of a five-token query does not.
+        # A MULTI-TOKEN FRAGMENT IS NOT A FILENAME.
+        #
+        # path_search scores a DIRECTORY whose name equals a term at 12.0 - "a
+        # directory whose name is the query is the answer". That is right for
+        # `screenshot`, which is one word. It fired for `shape`, a folder, against
+        # `InputLayer(shape=(784,))` - one term of five - and made path primary, so
+        # the fragment matches were pushed below a folder that merely shared a word.
+        #
+        # `def __init__(self` is the same shape of query: two real tokens and
+        # punctuation, and it was answered by files named `def`.
+        _terms = len([t for t in query.replace("(", " ").replace(")", " ")
+                      .replace("=", " ").replace(",", " ").split() if t])
+        _primary = "path" if (_path_top >= 6.0 and _terms <= 2) else "exact"
+    elif _kind == "question":
+        # A QUESTION IS ABOUT MEANING, NOT FILES NAMES.
+        #
+        # "what talks to the database" made path primary because a folder is called
+        # database - the fourth word of five. A question that shares a word with a
+        # directory name is still a question, and its answer is a document that
+        # discusses the subject. Path still contributes; it just does not lead.
+        _primary = "path" if (_path_top >= 6.0 and len(query.split()) <= 2) else "semantic"
     elif _path_top >= 3.0:
         _primary = "path" # a real name match outranks any route guess
     elif _kind == "filename":
         _primary = "path" # "where is config.py"
-    elif _kind == "code":
-        _primary = "exact" # an identifier: exact symbol beats a fuzzy name
     else:
         _primary = "keyword" # prose: the words are the evidence
     # IF THE PRIMARY FOUND NOTHING, the next-strongest takes the lead rather than leaving
@@ -697,7 +768,11 @@ def search(query: str, store, semantic=None, use_llm: bool = False,
     # by an empty result rather than run on every query, it has a time budget, and it reports how
     # much it actually covered. A grep that silently checks 40 of 249 files is a lie by omission.
     grep_hits, grep_meta = [], {}
-    if not cands and len(query.strip()) >= 4:
+    # NOT FOR A QUOTED PHRASE. The user said "these exact characters"; reading 828
+    # unindexed binaries to find approximately them is not answering the question,
+    # and it took long enough to hang the request for two minutes and hold 944 MB.
+    # The exact answer for a literal miss is the miss itself.
+    if not cands and len(query.strip()) >= 4 and trace.get("plan", {}).get("kind") != "literal":
         try:
             for _item in store.grep_skipped(query, limit=15):
                 if isinstance(_item, tuple) and len(_item) == 3 and isinstance(_item[2], dict):

@@ -648,6 +648,10 @@ async function run(q) {
 function render() {
   const box = $("results");
   box.textContent = "";
+  // A NEW RESULT SET STARTS AT THE TOP. Without this, a search made after scrolling
+  // through a long list opens halfway down the next one, and the best matches sit
+  // above the part of the window the user is looking at.
+  box.scrollTop = 0;
   // THE WHOLE BODY RUNS INSIDE A GUARD, AND THIS IS THE POINT OF THE GUARD.
   //
   // A search returned 10 results from the daemon, the request succeeded, and the user saw an
