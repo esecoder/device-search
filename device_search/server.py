@@ -748,6 +748,180 @@ class Engine:
             } for c in cands],
         }
 
+    def storage(self) -> dict:
+        """Everything on disk, what it buys, and what deleting it costs.
+
+        A user cannot make a decision about 7 GB they did not know existed. This
+        reports each part separately with the trade measured in the terms that
+        matter to them: how long a search takes, and what stops being findable.
+
+        Sizes are read from the filesystem rather than from SQLite, because the
+        question is disk usage and only the filesystem knows that.
+        """
+        import os
+        from pathlib import Path
+
+        def size(*paths) -> int:
+            total = 0
+            for p in paths:
+                try:
+                    total += os.path.getsize(p)
+                except OSError:
+                    pass
+            return total
+
+        def entry(key, label, paths, what, cost, deletable=True, built=None):
+            return {
+                "key": key, "label": label, "bytes": size(*paths),
+                "what": what, "cost": cost, "deletable": deletable,
+                "present": any(Path(p).exists() for p in paths),
+                "built": built,
+            }
+
+        idx = INDEX_DIR
+        items = [
+            entry("documents", "Your files' text and index",
+                  [idx / "index.db"],
+                  "The extracted text, the keyword index, the code graph and the file-name index. "
+                  "This is the search index itself.",
+                  "Nothing remains searchable. The app returns to first-run state and must "
+                  "index again before it can answer anything.",
+                  # NOT DELETABLE HERE. Removing the database while the daemon holds it
+                  # open corrupts it; "Remove everything" below stops the engine first
+                  # and is the honest way to do this. A button that appears and then
+                  # refuses is worse than no button.
+                  deletable=False),
+            entry("code_index", "Code-fragment index",
+                  [idx / "index.db.tri"],
+                  "Every three-character sequence, so a fragment like "
+                  "InputLayer(shape=(784,)) is found in milliseconds instead of a scan.",
+                  "Exact code fragments take about five seconds per query and may miss files "
+                  "until it is rebuilt. Keyword, filename and meaning search are unaffected.",
+                  deletable=True, built=self.store.trigram_ready()),
+            entry("vectors", "Meaning search vectors",
+                  [idx / "vectors.npy"] + sorted(idx.glob("vectors.*.npy")),
+                  "What lets a question find a document that shares none of its words.",
+                  "Search by meaning stops working. Exact, keyword and filename results are "
+                  "unaffected, and the vectors can be rebuilt from the documents.",
+                  deletable=True),
+            entry("images", "Picture descriptions",
+                  [idx / "images"],
+                  "SigLIP vectors, so a photograph can be found by describing it.",
+                  "Pictures stop being findable by description. Text inside them, and their "
+                  "file names, still work.", deletable=True),
+            entry("video", "Video frames",
+                  [idx / "video"],
+                  "Sampled frames, each embedded so a video can be found by what it shows.",
+                  "Videos stop being findable by content. File names still work.",
+                  deletable=True),
+            entry("wal", "Database journal",
+                  [idx / "index.db-wal"],
+                  "SQLite's write-ahead log. Temporary by design: it is folded back into the "
+                  "database and returns to zero on its own.",
+                  "Nothing. This is safe to remove and should usually be empty.",
+                  deletable=True),
+            entry("logs", "Daemon log",
+                  [idx / "daemon.log"],
+                  "The daemon's output. The only place a startup failure explains itself.",
+                  "Past diagnostics are lost. A new log is written on the next start.",
+                  deletable=True),
+        ]
+        total = sum(i["bytes"] for i in items)
+        return {"items": items, "total": total,
+                "directory": str(idx),
+                "free": self._free_bytes()}
+
+    @staticmethod
+    def _free_bytes() -> int:
+        import shutil
+        from pathlib import Path
+        try:
+            return shutil.disk_usage(Path.home()).free
+        except Exception:
+            return 0
+
+    def uninstall_info(self) -> dict:
+        """What uninstalling has to remove, so the app can say it before it happens.
+
+        Dragging the bundle to the Trash removes the program and leaves every byte
+        of the index behind - on this machine that would be 17 GB the user cannot
+        see, in a folder they have no reason to know about.
+        """
+        import os
+        from pathlib import Path
+        idx = INDEX_DIR
+        total = 0
+        try:
+            total = sum(f.stat().st_size for f in Path(idx).rglob("*") if f.is_file())
+        except Exception:
+            pass
+        return {"directory": str(idx), "bytes": total,
+                "bundle_hint": "the app itself, in Applications"}
+
+    def uninstall(self) -> dict:
+        """Remove every file this app created, and nothing else.
+
+        The directory is derived from the same constant everything else uses, so it
+        cannot drift from where the data actually lives. It refuses to run on a path
+        that does not look like this app's own directory.
+        """
+        import shutil
+        from pathlib import Path
+        idx = Path(INDEX_DIR).resolve()
+        if idx.name != ".device-search":
+            return {"removed": False,
+                    "error": f"refusing to delete {idx} - not this app's directory"}
+        try:
+            shutil.rmtree(idx)
+        except Exception as e:
+            return {"removed": False, "error": f"{type(e).__name__}: {e}"}
+        return {"removed": True, "directory": str(idx)}
+
+    def remove_storage(self, key: str) -> dict:
+        """Delete one part, after the interface has said what it costs.
+
+        ONLY THE FILES, AND ONLY THE ONES NAMED. A storage button that runs a broad
+        delete is one that eventually removes something the user did not mean to
+        give up.
+        """
+        import shutil
+        from pathlib import Path
+        idx = INDEX_DIR
+        targets = {
+            "code_index": [idx / "index.db.tri"],
+            "vectors": [idx / "vectors.npy"] + sorted(idx.glob("vectors.*.npy"))
+                       + [idx / "vectors.manifest.json"],
+            "images": [idx / "images"],
+            "video": [idx / "video"],
+            "wal": [idx / "index.db-wal"],
+            "logs": [idx / "daemon.log"],
+        }
+        if key == "documents":
+            return {"removed": False,
+                    "error": "The document index is not deletable from here. "
+                             "Use Reset in Settings, which stops the engine first."}
+        if key not in targets:
+            return {"removed": False, "error": f"unknown part: {key}"}
+        freed = 0
+        for p in targets[key]:
+            try:
+                if p.is_dir():
+                    freed += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+                    shutil.rmtree(p)
+                elif p.exists():
+                    freed += p.stat().st_size
+                    p.unlink()
+            except Exception as e:
+                return {"removed": False, "error": f"{type(e).__name__}: {e}"}
+        if key == "code_index":
+            try:
+                self.store.set_meta("trigram_built", False)
+                self.store.conn.commit()
+                self.store._tri_ready = None
+            except Exception:
+                pass
+        return {"removed": True, "freed": freed}
+
     def coverage(self, query: str = "", kind: str = "") -> list[dict]:
         """What is NOT searchable, why, and what would fix it.
 
@@ -1451,6 +1625,12 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif url.path == "/api/stats":
                 self._send(200, ENGINE.stats())
+            elif url.path == "/api/uninstall-info":
+                self._send(200, ENGINE.uninstall_info())
+            elif url.path == "/api/storage":
+                # WHAT IS ON DISK, AND WHAT EACH PART BUYS. A user cannot decide
+                # about 7 GB they did not know existed.
+                self._send(200, ENGINE.storage())
             elif url.path == "/api/coverage":
                 # WHAT IS NOT SEARCHABLE, AND WHAT TO DO ABOUT IT. The interface asks
                 # after every search, with the query and its kind, so only the gaps
@@ -1585,6 +1765,31 @@ class Handler(BaseHTTPRequestHandler):
 
             threading.Thread(target=_run, daemon=True).start()
             self._send(200, {"started": True, "kind": kind})
+            return
+
+        if path_q.path == "/api/uninstall":
+            # THE LAST THING THIS APP DOES. It removes its own directory and the
+            # daemon exits, because a process whose data has just been deleted has
+            # nothing left to serve.
+            out = ENGINE.uninstall()
+            self._send(200 if out.get("removed") else 400, out)
+            if out.get("removed"):
+                import threading as _th
+                _th.Timer(0.5, lambda: os._exit(0)).start()
+            return
+
+        if path_q.path == "/api/storage/delete":
+            # POST, not GET: a link or a refresh must never delete 7 GB.
+            try:
+                body = json.loads(self._read_body() or "{}")
+            except Exception:
+                body = {}
+            key = str(body.get("key") or "")
+            if not key:
+                self._send(400, {"removed": False, "error": "no key given"})
+                return
+            out = ENGINE.remove_storage(key)
+            self._send(200 if out.get("removed") else 400, out)
             return
 
         if path_q.path == "/api/deep-index":
@@ -1826,6 +2031,29 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
 
     # THE TIMER LIVES WITH THE SERVER, NOT WITH A REQUEST. Nothing else would run while the
     # daemon is idle, and idle is exactly when a repair should happen.
+    def _wal_loop():
+        """Keep the write-ahead log from growing without bound.
+
+        MEASURED: index.db-wal reached 3.66 GB - larger than the documents it was
+        protecting - because a long-lived process holds the database open and
+        SQLite will not checkpoint while a reader is active. The file is temporary
+        by design and should return to zero; nothing reclaimed it.
+
+        A checkpoint every few minutes folds the log back into the database. It is
+        cheap when there is nothing to do and prevents a disk that fills up with a
+        file the user cannot see the purpose of.
+        """
+        while not STARTUP["ready"]:
+            if STARTUP["error"]:
+                return
+            time.sleep(1)
+        while True:
+            time.sleep(300)
+            try:
+                ENGINE.store.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+
     def _repair_loop():
         # WAIT FOR THE ENGINE. This loop starts before the boot thread has finished,
         # and every branch below calls ENGINE methods - which raises AttributeError
@@ -1866,6 +2094,7 @@ def serve(port: int = DEFAULT_PORT, open_ui: bool = True) -> None:
                 # cycle would disable auto-repair for the rest of the session.
                 print(f" auto-repair check failed: {type(e).__name__}: {e}")
     threading.Thread(target=_repair_loop, daemon=True).start()
+    threading.Thread(target=_wal_loop, daemon=True).start()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.token = token

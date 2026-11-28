@@ -49,6 +49,38 @@ Every message about absent data ends in a button that opens the panel that fixes
 
 ---
 
+## Storage
+
+Everything lives in `~/.device-search`. It reached **19 GB** here, of which **only
+5.9 GB was the documents' text** — the rest was index I had built without being
+asked.
+
+**Nothing expensive is built without consent.**
+
+| Part | Size | How it is created |
+|---|---|---|
+| `index.db` | 10.7 GB | `ds index` — the text, keyword index, code graph, `paths_tri` |
+| `index.db.tri` | 7.2 GB | **only** `ds deep-index` (prompts) or the button in Settings |
+| vectors | 6.5 GB if complete | `ds index` |
+| images / video | MB | Media panel, with cost |
+
+**Never build the code index automatically.** It is 7.2 GB for a feature only
+programmers use. `_tri()` must not create it, and `--yes` must not skip the prompt.
+
+**`paths_tri` is built during `ds index`.** It is 1.3 GB and makes every filename
+search 7 s faster, so it belongs to the index the way the keyword index does —
+and it appears in Storage so it is visible and removable.
+
+**The WAL is checkpointed every five minutes.** It reached 3.66 GB because a
+long-lived process held the database open and SQLite will not checkpoint while a
+reader is. It should be near zero.
+
+**Uninstalling must remove everything.** Dragging the app to the Trash leaves all of
+the above behind. The Storage panel has a "Remove everything" action that deletes
+only `~/.device-search`, and refuses if the resolved path does not end in that name.
+
+---
+
 ## Long operations
 
 | Operation | Cost | Consent |

@@ -136,7 +136,8 @@ const Setup = (() => {
     const tabs = document.createElement("div");
     tabs.className = "setup-tabs";
     for (const [id, label] of [["folders", "Folders"], ["ai", "AI (optional)"],
-                               ["code", "Code search"], ["media", "Media"]]) {
+                               ["code", "Code search"], ["media", "Media"],
+                               ["storage", "Storage"]]) {
       const t = document.createElement("button");
       t.className = "setup-tab" + (step === id ? " on" : "");
       t.textContent = label;
@@ -150,6 +151,7 @@ const Setup = (() => {
     h.textContent = step === "ai" ? "Connect a model to ask questions"
                  : step === "code" ? "Faster code-fragment search"
                  : step === "media" ? "Pictures, video and audio"
+                 : step === "storage" ? "What is using disk space"
                                    : "What should be searchable?";
     host.appendChild(h);
 
@@ -164,6 +166,94 @@ const Setup = (() => {
       return;
     }
 
+
+  // ---- storage -------------------------------------------------------------
+  //
+  // Every part of the index, what it costs on disk, what it buys, and a button to
+  // remove it. The consequence is stated on the row BEFORE the button is pressed,
+  // and the confirmation repeats it in a modal - deleting 7 GB must never be one
+  // click away from a misread label.
+  if (step === "storage") {
+    const host2 = document.createElement("div");
+    host2.className = "storage";
+    host2.textContent = "Reading\u2026";
+    host.appendChild(host2);
+
+    const gb = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB`
+                 : n >= 1e6 ? `${(n / 1e6).toFixed(0)} MB`
+                 : `${(n / 1e3).toFixed(0)} KB`;
+
+    (async () => {
+      const r = await api("/api/storage");
+      if (!r.ok) { host2.textContent = r.error || "Could not read disk usage."; return; }
+      host2.textContent = "";
+
+      const total = document.createElement("div");
+      total.className = "storage-total";
+      total.textContent = `${gb(r.total)} in ${r.directory}  \u00b7  ${gb(r.free)} free on this disk`;
+      host2.appendChild(total);
+
+      // UNINSTALL, AT THE BOTTOM WHERE IT CANNOT BE PRESSED BY ACCIDENT.
+      // Dragging the app to the Trash removes the program and leaves all of this
+      // behind. A user who wants their disk back needs a way to say so.
+      (async () => {
+        const info = await api("/api/uninstall-info");
+        if (!info.ok) return;
+        const foot = document.createElement("div");
+        foot.className = "storage-uninstall";
+        const text = document.createElement("div");
+        text.className = "storage-what";
+        text.textContent =
+          `Uninstalling the app does not remove the ${gb(info.bytes)} above. `
+          + "Delete it here if you want the disk space back.";
+        foot.appendChild(text);
+        const btn = document.createElement("button");
+        btn.className = "setup-btn danger";
+        btn.textContent = `Remove everything · frees ${gb(info.bytes)}`;
+        btn.onclick = () => confirmUninstall(info, btn);
+        foot.appendChild(btn);
+        host2.appendChild(foot);
+      })();
+
+      for (const item of (r.items || [])) {
+        if (!item.present && !item.bytes) continue;
+        const row = document.createElement("div");
+        row.className = "storage-row";
+
+        const head = document.createElement("div");
+        head.className = "storage-head";
+        const name = document.createElement("span");
+        name.className = "storage-name";
+        name.textContent = item.label;
+        const size = document.createElement("span");
+        size.className = "storage-size";
+        size.textContent = gb(item.bytes);
+        head.appendChild(name);
+        head.appendChild(size);
+        row.appendChild(head);
+
+        const what = document.createElement("div");
+        what.className = "storage-what";
+        what.textContent = item.what;
+        row.appendChild(what);
+
+        const cost = document.createElement("div");
+        cost.className = "storage-cost";
+        cost.textContent = `Without it: ${item.cost}`;
+        row.appendChild(cost);
+
+        if (item.deletable && item.bytes > 0) {
+          const del = document.createElement("button");
+          del.className = "setup-btn danger";
+          del.textContent = `Delete \u00b7 frees ${gb(item.bytes)}`;
+          del.onclick = () => confirmDelete(item, del, host2);
+          row.appendChild(del);
+        }
+        host2.appendChild(row);
+      }
+    })();
+    return;
+  }
 
   // ---- folder tree with live cost ------------------------------------------
   //
@@ -670,6 +760,122 @@ const Setup = (() => {
     // the next keystroke does nothing at all, which reads as the app having frozen.
     const q = el("q"); if (q) q.focus();
   }
+  // A CONFIRMATION THAT STATES THE COST, NOT "ARE YOU SURE?".
+  //
+  // "Are you sure" asks the user to remember what the previous screen said. This
+  // repeats the consequence and names the size being freed, so the decision is made
+  // with the facts on screen rather than with a memory of them.
+  function confirmDelete(item, button, host) {
+    const gb = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB`
+                 : n >= 1e6 ? `${(n / 1e6).toFixed(0)} MB` : `${(n / 1e3).toFixed(0)} KB`;
+    const back = document.createElement("div");
+    back.className = "confirm-back";
+    const box = document.createElement("div");
+    box.className = "confirm";
+
+    const t = document.createElement("div");
+    t.className = "confirm-title";
+    t.textContent = `Delete ${item.label}?`;
+    box.appendChild(t);
+
+    const size = document.createElement("div");
+    size.className = "confirm-size";
+    size.textContent = `This frees ${gb(item.bytes)}.`;
+    box.appendChild(size);
+
+    const cost = document.createElement("div");
+    cost.className = "confirm-cost";
+    cost.textContent = item.cost;
+    box.appendChild(cost);
+
+    const row = document.createElement("div");
+    row.className = "confirm-actions";
+
+    const cancel = document.createElement("button");
+    cancel.className = "setup-btn";
+    cancel.textContent = "Keep it";
+    cancel.onclick = () => back.remove();
+    row.appendChild(cancel);
+
+    const go = document.createElement("button");
+    go.className = "setup-btn danger";
+    go.textContent = "Delete";
+    go.onclick = async () => {
+      go.disabled = true; cancel.disabled = true;
+      go.textContent = "Deleting\u2026";
+      const r = await api("/api/storage/delete", { method: "POST", body: { key: item.key } });
+      back.remove();
+      if (!r.ok) { note(r.error || "could not delete", "err"); return; }
+      note(`freed ${gb(r.freed || item.bytes)}`, "ok");
+      render();          // redraw with the new sizes
+    };
+    row.appendChild(go);
+    box.appendChild(row);
+
+    back.appendChild(box);
+    back.onclick = (e) => { if (e.target === back) back.remove(); };
+    document.body.appendChild(back);
+  }
+
+  function confirmUninstall(info, button) {
+    const gb = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB`
+                 : n >= 1e6 ? `${(n / 1e6).toFixed(0)} MB` : `${(n / 1e3).toFixed(0)} KB`;
+    const back = document.createElement("div");
+    back.className = "confirm-back";
+    const box = document.createElement("div");
+    box.className = "confirm";
+
+    const t = document.createElement("div");
+    t.className = "confirm-title";
+    t.textContent = "Remove every file this app created?";
+    box.appendChild(t);
+
+    const size = document.createElement("div");
+    size.className = "confirm-size";
+    size.textContent = `This frees ${gb(info.bytes)} and deletes ${info.directory}.`;
+    box.appendChild(size);
+
+    const cost = document.createElement("div");
+    cost.className = "confirm-cost";
+    cost.textContent =
+      "Your files are not touched - only the index this app built from them. "
+      + "Nothing will be searchable until it is set up and indexed again. "
+      + "The app itself stays in Applications; drag it to the Trash afterwards.";
+    box.appendChild(cost);
+
+    const row = document.createElement("div");
+    row.className = "confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "setup-btn";
+    cancel.textContent = "Keep my index";
+    cancel.onclick = () => back.remove();
+    row.appendChild(cancel);
+
+    const go = document.createElement("button");
+    go.className = "setup-btn danger";
+    go.textContent = "Remove everything";
+    go.onclick = async () => {
+      go.disabled = true; cancel.disabled = true;
+      go.textContent = "Removing\u2026";
+      const r = await api("/api/uninstall", { method: "POST", body: {} });
+      if (!r.ok) {
+        back.remove();
+        note(r.error || "could not remove", "err");
+        return;
+      }
+      back.remove();
+      document.body.innerHTML =
+        '<div style="display:flex;height:100%;align-items:center;justify-content:center;'
+        + 'font:13px -apple-system;color:#8e8e93;text-align:center;padding:24px">'
+        + 'Everything has been removed.<br>The app can now be moved to the Trash.</div>';
+    };
+    row.appendChild(go);
+    box.appendChild(row);
+    back.appendChild(box);
+    back.onclick = (e) => { if (e.target === back) back.remove(); };
+    document.body.appendChild(back);
+  }
+
   function isOpen() { return el("setup-overlay")?.classList.contains("show"); }
 
   // CLICKING OUTSIDE CLOSES IT.

@@ -476,6 +476,21 @@ def cmd_index(args) -> int:
         print(f" pruned (gone) : {pruned:,}")
 
     if not args.no_semantic:
+        # THE FILE-NAME INDEX IS PART OF INDEXING, NOT A SEPARATE ASK.
+        #
+        # It is 1.3 GB against 866,000 documents and it makes every filename search
+        # 7 seconds faster. Unlike the code-fragment index - 7 GB and useful only to
+        # programmers - this one serves the query everyone types, so it belongs to
+        # the index the way the keyword index does. It is listed in Storage like
+        # everything else, so it is visible and removable rather than hidden.
+        try:
+            if not store.path_index_ready():
+                t0 = time.time()
+                n = store.build_path_index()
+                print(f" file-name index: {n:,} paths in {time.time()-t0:.0f}s")
+        except Exception as e:
+            print(f" file-name index: unavailable ({type(e).__name__}: {e})")
+
         _build_vectors(store, resume=not getattr(args, "restart", False))
     store.set_meta("indexed_at", time.time())
     print(f"\n index at {DB_PATH} ({store.count():,} documents)")
